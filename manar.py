@@ -7,6 +7,39 @@ def time_to_min(t):
   m = t % 100
   return h * 60 + m
 
+# Su has index 0; Sa has index 6
+days_of_week = ['Su','M','Tu','W','Th','F','Sa']
+
+def unpack_days(days):
+  if days == "Su-Sa":
+    return [0,1,2,3,4,5,6]
+  elif days == "M,Tu,Th,F":
+    return [1,2,4,5]
+  elif days == "Su,Sa":
+    return [0,6]
+  elif days == "Su-Th":
+    return [0,1,2,3,4]
+  elif days == "M-F":
+    return [1,2,3,4,5]
+  elif days == "Su-Tu,Th-Sa":
+    return [0,1,2,4,5,6]
+  elif days == "Su,M,W-F":
+    return [0,1,3,4,5]
+  elif days == "M-Th,Sa":
+    return [0,1,2,3,4,6]
+  elif days == "Su,M,W,Th,Sa":
+    return [0,1,3,4,6]
+  elif days == "M-W,F":
+    return [1,2,3,5]
+  elif days == "Su":
+    return [0]
+  elif days == "M":
+    return [1]
+  elif days == "Tu":
+    return [2]
+  else:
+    return []
+
 class Station(object):
   def __init__(self, id, name, days, start_time, end_time, break_min):
     self.id         = id
@@ -80,73 +113,76 @@ for s in stations:
   station_map[s.id] = s
 
 class Worker(object):
-  def __init__(self, id, last_name, first_name, title, hours_per_week):
+  def __init__(self, id, last_name, first_name, title, hours_per_week, benefit_days, comp_days, overtime_ok):
     self.id             = id       
     self.last_name      = last_name
     self.first_name     = first_name
     self.title          = title
     self.hours_per_week = hours_per_week
+    self.benefit_days   = unpack_days(benefit_days)
+    self.comp_days      = unpack_days(comp_days)
+    self.overtime_ok    = overtime_ok
 
 worker_data = [
-( 1,"Dickinson", "Theron",             "1st Cook",           40),
-( 2,"Kanina", "Ewa",                   "1st Cook",           40),
-( 3,"Sales", "Geraldo",                "1st Cook",           40),
-( 4,"Carballo", "Fabio",               "2nd Cook",           40),
-( 5,"Chludzinska", "Marianna",         "2nd Cook",           40),
-( 6,"Lagrant", "Leroy",                "2nd Cook",           24),
-( 7,"Law", "Philip",                   "2nd Cook",           40),
-( 8,"Lefteri", "Fotaq",                "2nd Cook",           40),
-( 9,"Lejentus", "Rene",                "2nd Cook",           20),
-(10,"Marku", "Zef",                    "2nd Cook",           20),
-(11,"Moreno", "Osvaldo",               "2nd Cook",            8),
-(12,"Ortiz", "Angela",                 "2nd Cook",           40),
-(13,"Sokolowska", "Czeslawa",          "2nd Cook",           40),
-(14,"Vaz", "David",                    "2nd Cook",           16),
-(15,"Velazques", "Hoover",             "2nd Cook",           40),
-(16,"Williams", "Veniesa",             "2nd Cook",           32),
-(17,"Carreiro", "Marcos",              "2nd Cook",           40),
-(18,"Diaz", "Ruben",                   "2nd Cook",           40),
-(19,"El Mouttaki", "Mohamed",          "2nd Cook",           40),
-(20,"Silien", "Jean",                  "2nd Cook",           40),
-(21,"Caddeus", "Winfred",              "1st Cook",           40),
-(22,"Elorch", "Omar",                  "1st Cook",           40),
-(23,"Portillo", "Jorge",               "1st Cook",           40),
-(24,"Almeda", "Jose Marcel",           "Shift Lead",         40),
-(25,"Buckley", "John",                 "Shift Lead",         40),
-(26,"Keefe", "John",                   "Shift Lead",         40),
-(27,"Millard", "Brian",                "Shift Lead",         40),
-(28,"Barros", "Deila",                 "Prod-Aide",          40),
-(29,"Chodkowska", "Marzena",           "Prod-Aide",          40),
-(30,"Kozlowski", "Jadwiga",            "Prod-Aide",           0),
-(31,"Samuel", "Willie James",          "Prod-Aide",          40),
-(32,"McCormack", "David",              "Material",           40),
-(33,"Fofana", "Abu",                   "Receiver",           40),
-(34,"Morano", "Juan",                  "Receiver",           40),
-(35,"Coren", "Gregorey",               "Sr. Material",       40),
-(36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       40),
-(37,"Espinoza", "Alene",               "Temp",               16),
-(38,"Jones", "Dewanda",                "Temp",               40),
-(39,"Virella", "Natalie",              "Temp",               40),
-(40,"Echavarria", "Fernando",          "2nd Cook",           40),
-(41,"Frontin", "Sheldon",              "2nd Cook",           40),
-(42,"Sorino", "Rene",                  "2nd Cook",           40),
-(43,"Cortell", "Glenn",                "2nd Cook",           40),
-(44,"Joseph", "Paul",                  "2nd Cook",           40),
-(45,"Pyskaty", "Maria",                "Prod-Aide",          40),
-(46,"Terron", "Maria",                 "Prod-Aide",          40),
-(47,"Campbell", "Trevon",              "Prod-Aide",          40),
-(48,"Kamel", "(Temp)",                 "2nd Cook",           30),
-(49,"Danial", "Clebert",               "2nd Cook",           40),
-(50,"Guevara", "Henry",                "2nd Cook",           40),
-(51,"Hines", "Michael",                "2nd Cook",           40),
-(52,"Murcia", "Alex",                  "2nd Cook",           40),
-(53,"Way", "Shon",                     "2nd Cook",           40),
-(54,"Joseph", "Nicole",                "1st Cook",           40),
-(55,"Bailey", "James",                 "2nd Cook",            8),
-(56,"Miller", "Edward",                "2nd Cook",           40)
+( 1,"Dickinson", "Theron",             "1st Cook",           40, "Su", "Tu", False),
+( 2,"Kanina", "Ewa",                   "1st Cook",           40, "", "", False),
+( 3,"Sales", "Geraldo",                "1st Cook",           40, "", "", False),
+( 4,"Carballo", "Fabio",               "2nd Cook",           40, "", "", False),
+( 5,"Chludzinska", "Marianna",         "2nd Cook",           40, "", "", False),
+( 6,"Lagrant", "Leroy",                "2nd Cook",           24, "", "", False),
+( 7,"Law", "Philip",                   "2nd Cook",           40, "", "", False),
+( 8,"Lefteri", "Fotaq",                "2nd Cook",           40, "", "", False),
+( 9,"Lejentus", "Rene",                "2nd Cook",           20, "", "", False),
+(10,"Marku", "Zef",                    "2nd Cook",           20, "", "", False),
+(11,"Moreno", "Osvaldo",               "2nd Cook",            8, "", "", False),
+(12,"Ortiz", "Angela",                 "2nd Cook",           40, "", "", False),
+(13,"Sokolowska", "Czeslawa",          "2nd Cook",           40, "", "", False),
+(14,"Vaz", "David",                    "2nd Cook",           16, "", "", False),
+(15,"Velazques", "Hoover",             "2nd Cook",           40, "", "", False),
+(16,"Williams", "Veniesa",             "2nd Cook",           32, "", "", False),
+(17,"Carreiro", "Marcos",              "2nd Cook",           40, "", "", False),
+(18,"Diaz", "Ruben",                   "2nd Cook",           40, "", "", False),
+(19,"El Mouttaki", "Mohamed",          "2nd Cook",           40, "Su,M,W,Th,Sa", "", False),
+(20,"Silien", "Jean",                  "2nd Cook",           40, "", "", False),
+(21,"Caddeus", "Winfred",              "1st Cook",           40, "M", "", False),
+(22,"Elorch", "Omar",                  "1st Cook",           40, "", "", False),
+(23,"Portillo", "Jorge",               "1st Cook",           40, "", "", False),
+(24,"Almeda", "Jose Marcel",           "Shift Lead",         40, "M", "", True),
+(25,"Buckley", "John",                 "Shift Lead",         40, "", "", True),
+(26,"Keefe", "John",                   "Shift Lead",         40, "", "", True),
+(27,"Millard", "Brian",                "Shift Lead",         40, "", "", True),
+(28,"Barros", "Deila",                 "Prod-Aide",          40, "", "", False),
+(29,"Chodkowska", "Marzena",           "Prod-Aide",          40, "", "", False),
+(30,"Kozlowski", "Jadwiga",            "Prod-Aide",           0, "", "", False),
+(31,"Samuel", "Willie James",          "Prod-Aide",          40, "", "", False),
+(32,"McCormack", "David",              "Material",           40, "", "", False),
+(33,"Fofana", "Abu",                   "Receiver",           40, "M", "", False),
+(34,"Morano", "Juan",                  "Receiver",           40, "", "", False),
+(35,"Coren", "Gregorey",               "Sr. Material",       40, "", "", False),
+(36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       40, "", "", False),
+(37,"Espinoza", "Alene",               "Temp",               16, "", "", False),
+(38,"Jones", "Dewanda",                "Temp",               40, "", "", False),
+(39,"Virella", "Natalie",              "Temp",               40, "", "", False),
+(40,"Echavarria", "Fernando",          "2nd Cook",           40, "", "", False),
+(41,"Frontin", "Sheldon",              "2nd Cook",           40, "", "", False),
+(42,"Sorino", "Rene",                  "2nd Cook",           40, "", "", False),
+(43,"Cortell", "Glenn",                "2nd Cook",           40, "M", "", False),
+(44,"Joseph", "Paul",                  "2nd Cook",           40, "M", "", False),
+(45,"Pyskaty", "Maria",                "Prod-Aide",          40, "", "", False),
+(46,"Terron", "Maria",                 "Prod-Aide",          40, "M", "", False),
+(47,"Campbell", "Trevon",              "Prod-Aide",          40, "M", "", False),
+(48,"Kamel", "(Temp)",                 "2nd Cook",           30, "", "", False),
+(49,"Danial", "Clebert",               "2nd Cook",           40, "", "", False),
+(50,"Guevara", "Henry",                "2nd Cook",           40, "", "", False),
+(51,"Hines", "Michael",                "2nd Cook",           40, "M", "", False),
+(52,"Murcia", "Alex",                  "2nd Cook",           40, "M-W,F", "", False),
+(53,"Way", "Shon",                     "2nd Cook",           40, "", "", False),
+(54,"Joseph", "Nicole",                "1st Cook",           40, "", "", False),
+(55,"Bailey", "James",                 "2nd Cook",            8, "", "", False),
+(56,"Miller", "Edward",                "2nd Cook",           40, "", "", False)
 ]
 
-workers = [Worker(int(d[0]), d[1], d[2], d[2], int(d[4])) for d in worker_data]
+workers = [Worker(int(d[0]), d[1], d[2], d[2], int(d[4]), d[5], d[6], d[7]) for d in worker_data]
 worker_map = {}
 for w in workers:
   worker_map[w.id] = w
@@ -289,11 +325,21 @@ def print_solution_by_tuple(sln):
     print "%-10s %-2s %-10s" % (s.name, d, w)
 
 # Assumes dow_stations are sorted by day of week.
-def get_dow_station_display_text(dow_stations):
+def get_dow_station_display_text(w, dow_stations):
   stations_per_week = []
   minutes = 0
   for dow in range(len(days_of_week)):
     stations_per_day = []
+
+    if dow in w.benefit_days:
+      stations_per_week.append("Benefit Time")
+      minutes += 8 * 60
+      continue
+
+    if dow in w.comp_days:
+      stations_per_week.append("WC")
+      minutes += 8 * 60
+      continue
 
     # Get all the stations for this day of the week.
     for x in dow_stations:
@@ -313,7 +359,7 @@ def get_dow_station_display_text(dow_stations):
     if len(stations_per_day) > 0:
       stations_per_week.append("/".join(stations_per_day))
     else:
-      stations_per_week.append("-")
+      stations_per_week.append("OFF")
   t = ", ".join(stations_per_week)
   t += " | " + str(minutes / 60)
   return t
@@ -361,7 +407,7 @@ def print_stations_by_worker(sln):
     # print dow_stations
 
     n = w.last_name + ", " + w.first_name
-    t = get_dow_station_display_text(dow_stations)
+    t = get_dow_station_display_text(w, dow_stations)
     print "%-25s %-s" % (n, t)
 
 # Print the weeks' assignments by station
@@ -376,32 +422,6 @@ def print_workers_by_station(sln):
     n = s.name
     t = get_worker_display_text(dow_workers)
     print "%-20s %-s" % (n, t)
-
-def schedule_cost(s):
-  pass
-
-# Su has index 0; Sa has index 6
-days_of_week = ['Su','M','Tu','W','Th','F','Sa']
-
-def unpack_days(days):
-  if days == "Su-Sa":
-    return [0,1,2,3,4,5,6]
-  elif days == "M,Tu,Th,F":
-    return [1,2,4,5]
-  elif days == "Su,Sa":
-    return [0,6]
-  elif days == "Su-Th":
-    return [0,1,2,3,4]
-  elif days == "M-F":
-    return [1,2,3,4,5]
-  elif days == "Su-Tu,Th-Sa":
-    return [0,1,2,4,5,6]
-  elif days == "Su,M,W-F":
-    return [0,1,3,4,5]
-  elif days == "M-Th,Sa":
-    return [0,1,2,3,4,6]
-  else:
-    return []
 
 
 # Use 0 to indicate an open slot;
@@ -454,6 +474,13 @@ def find_slots_by_worker_id_and_dow(sln, wid, dow):
   return [slot for slot in sln if slot[2] == wid and slot[1] == dow]
 
 def valid_candidate(sln, sid, dow, wid):
+  # If the worker has a benefit day or comp time, consider invalid.
+  w = find_worker_by_id(wid)
+  if dow in w.benefit_days:
+    return False
+  if dow in w.comp_days:
+    return False
+
   # Get all the worker's assignments for the day.
   slots = find_slots_by_worker_id_and_dow(sln, wid, dow)
 #  print "worker's current assignments for dow", wid, dow, slots
@@ -498,19 +525,23 @@ def choose_candidate_randomly_no_overtime(sln, slot, sid, dow, candidates_by_sta
                 if valid_candidate_no_overtime(sln, sid, dow, wid, worker_minutes[wid])]
   return choose_randomly_from_list(candidates)
 
-def get_worker_assignment_stats(sln, wid):
+def get_worker_assignment_stats(sln, dow, wid):
   w = find_worker_by_id(wid)
-  slots = [slot for slot in sln if slot[2] == wid]
+  slots_week  = [slot for slot in sln if slot[2] == wid]
+  slots_today = [slot for slot in sln if slot[2] == wid and slot[1] == dow]
   full_time = w.hours_per_week == 40
-  minutes = get_worker_minutes_in_schedule(slots)[wid]
-  return (wid, slots, full_time, minutes)
+  minutes_week  = get_worker_minutes_in_schedule(slots_week)[wid]
+  minutes_today = get_worker_minutes_in_schedule(slots_today)[wid] + w.hours_per_week * 60
+  return (wid, slots_week, full_time, minutes_week, minutes_today)
 
-def calculate_rank(full_time, minutes, same_assigment):
+def calculate_rank(full_time, minutes_week, minutes_today, same_assigment):
   rank = 0
   if not full_time:
     rank += 1
-  if minutes > 0:
-    rank += 1000 + minutes
+  if minutes_week > 0:
+    rank += 1000 + minutes_week
+  if minutes_today > 8 * 60:
+    rank += 10000 + minutes_today
   if not same_assigment:
     rank += 100
   return rank
@@ -533,29 +564,46 @@ def choose_candidate_ranked(sln, slot, sid, dow, candidates_by_station):
 
       print "worker is valid candidate"
 
-      stats = get_worker_assignment_stats(sln, wid)
+      stats = get_worker_assignment_stats(sln, dow, wid)
 
       print "worker stats"
       print "  wid", stats[0]
       print "  slots", stats[1]
       print "  full_time", stats[2]
-      print "  minutes", stats[3]
+      print "  minutes_week", stats[3]
+      print "  minutes_today", stats[4]
 
       # stats[0] = wid
       #      [1] = slots for wid in sln
       #      [2] = True if w is full time
       #      [3] = assigned minutes for w in sln 
+      #      [4] = assigned minutes for w in sln for dow
       same_assignment = len([slot for slot in stats[1] if slot[0] == sid]) > 0
       full_time = stats[2]
-      minutes = stats[3] + s.get_station_duration()
-      r = calculate_rank(full_time, minutes, same_assignment)
+      minutes_week = stats[3] + s.get_station_duration()
+      minutes_today = stats[4] + s.get_station_duration()
 
-      print "full_time", full_time
-      print "minutes", minutes
-      print "same_assignment", same_assignment
-      print "rank",r
+      # If overtime and worker is not willing to do it, not a candidate.
+      valid = True
+      if minutes_week > 0:
+        w = find_worker_by_id(wid)
+        valid = w.overtime_ok
 
-      candidates.append((r, wid))
+        if valid:
+          print "worker willing to work overtime"
+        else:
+          print "worker not willing to work overtime"
+
+      if valid:
+        r = calculate_rank(full_time, minutes_week, minutes_today, same_assignment)
+  
+        print "full_time", full_time
+        print "minutes_week", minutes_week
+        print "minutes_today", minutes_today
+        print "same_assignment", same_assignment
+        print "rank",r
+  
+        candidates.append((r, wid))
   if len(candidates) == 0:
 
     print "no valid candidates"
@@ -624,7 +672,7 @@ def schedule_cost(sln):
 def get_worker_minutes_in_schedule(sln):
   worker_minutes = {}
   for w in workers:
-    worker_minutes[w.id] = (-1) * w.hours_per_week * 60
+    worker_minutes[w.id] = (-1) * w.hours_per_week * 60 + len(w.benefit_days) * 8 * 60
 
   for slot in sln:
     sid = slot[0]
