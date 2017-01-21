@@ -50,13 +50,31 @@ class Station(object):
     self.break_min  = break_min
 
   def get_station_duration(self):
-    st = self.start_time
-    et = self.end_time
+    st = time_to_min(self.start_time)
+    et = time_to_min(self.end_time)
     if et < st:
-      et += 2400
-    st_min = time_to_min(st)
-    et_min = time_to_min(et)
-    return et_min - st_min - self.break_min
+      et += 24 * 60
+    return et - st - self.break_min
+
+
+# TODO use this to check prev and next days' assignments against a possible new one
+# and compare result with minimum gap (constant: 8 hours?)
+def get_station_gap_minutes(s1, s2):
+  st1 = time_to_min(s1.start_time)
+  et1 = time_to_min(s1.end_time)
+  if et1 < st1:
+    et1 += 24 * 60
+
+  st2 = time_to_min(s2.start_time)
+  et2 = time_to_min(s2.end_time)
+  if et2 < st2:
+    et2 += 24 * 60
+
+  if st1 > st2:
+    st1, et1, st2, et2 = st2, et2, st1, et1
+
+  return st2 - et1
+
 
 station_data = [
 ( 1, "CWN AM",             "Su-Sa",        600,1430,30),
