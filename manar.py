@@ -435,26 +435,6 @@ def find_slot_by_station_id_and_dow(sln, sid, dow):
   print "Didn't find slot for station %d and dow %d" % (sid, dow)
   sys.exit 
 
-# Copy a solution slot by slot to another one, updating
-# the worker assignments by randomly selecting a candidate.
-#
-# This doesn't check for whether a worker is already assigned
-# to a conflicting station.
-def make_initial_solution_randomly(candidates_by_station, sln):
-  new_sln = []
-  for s in stations:
-    for dow in range(len(days_of_week)):
-      slot = find_slot_by_station_id_and_dow(sln, s.id, dow)
-      if slot[2] == 0:
-        candidates = candidates_by_station[s.id]
-        i = random.randint(0, len(candidates) - 1)
-        wid = candidates[i]
-        new_slot = (slot[0], slot[1], wid)
-      else:
-        new_slot = slot
-      new_sln.append(new_slot)
-  return new_sln
-
 def overlapping_times(s1, e1, s2, e2):
   # Sort the intervals so s1,e1 starts earlier in the day than s2,e2.
   if s1 > s2:
@@ -493,115 +473,66 @@ def valid_candidate_no_overtime(sln, sid, dow, wid, worker_min):
   else:
     return False
 
+def choose_randomly_from_list(xs):
+  if len(xs) == 0:
+    return 0
+  else:
+    i = random.randint(0, len(xs) - 1)
+    return xs[i]
+
+# Return wid of candidate. Assumes station is open.
+def choose_candidate_randomly(sln, slot, sid, dow, candidates_by_station):
+  candidates = [wid for wid in candidates_by_station[sid]]
+  return choose_randomly_from_list(candidates)
+
+# Return wid of candidate. Assumes station is open.
+def choose_candidate_randomly_no_conflicts(new_sln, slot, sid, dow, candidates_by_station):
+  candidates = [wid for wid in candidates_by_station[sid]
+                if valid_candidate(new_sln, sid, dow, wid)]
+  return choose_randomly_from_list(candidates)
+
+# Return wid of candidate. Assumes station is open.
+def choose_candidate_randomly_no_overtime(sln, slot, sid, dow, candidates_by_station):
+  worker_minutes = get_worker_minutes_in_schedule(sln)
+  candidates = [wid for wid in candidates_by_station[sid]
+                if valid_candidate_no_overtime(sln, sid, dow, wid, worker_minutes[wid])]
+  return choose_randomly_from_list(candidates)
+
+# Return wid of candidate. Assumes station is open.
+def choose_candidate_ranked(sln, slot, sid, dow, candidates_by_station):
+  worker_minutes = get_worker_minutes_in_schedule(sln)
+  candidates = [wid for wid in candidates_by_station[sid]
+                if valid_candidate_no_overtime(sln, sid, dow, wid, worker_minutes[wid])]
+  return choose_randomly_from_list(candidates)
 
 # Copy a solution slot by slot to another one, updating
-# the worker assignments by randomly selecting a candidate,
-# where the list of candidates are all valid--no conflicting
-# assignments.
+# the worker assignments by selecting a candidate using
+# the supplied function.
+def make_initial_solution(candidates_by_station, sln, choose_candidate):
+  new_sln = [t for t in sln]
+  for s in stations:
+    for dow in range(len(days_of_week)):
+      slot = find_slot_by_station_id_and_dow(new_sln, s.id, dow)
+      if slot[2] == 0:
+        new_slot = slot
+        wid = choose_candidate(new_sln, slot, s.id, dow, candidates_by_station)
+        if wid > 0:
+          new_slot = (slot[0], slot[1], wid)
+          ii = new_sln.index(slot)
+          new_sln[ii] = new_slot
+  return new_sln
+
+def make_initial_solution_randomly(candidates_by_station, sln):
+  return make_initial_solution(candidates_by_station, sln, choose_candidate_randomly)
+
 def make_initial_solution_no_conflicts(candidates_by_station, sln):
-  new_sln = [t for t in sln]
-  for s in stations:
-#    print "STATION", s.id, s.name
+  return make_initial_solution(candidates_by_station, sln, choose_candidate_randomly_no_conflicts)
 
-    for dow in range(len(days_of_week)):
-
-#      print "DOW", dow, days_of_week[dow]
-
-      slot = find_slot_by_station_id_and_dow(new_sln, s.id, dow)
-
-#      print "current slot", slot
-
-      # Assume we can't find a candidate.
-      new_slot = slot
-
-      # If the station is unassigned for that day, try to find a worker.
-      if slot[2] <> 0:
-#         print "slot not available"
-         pass
-      else:
-        candidates = []
-        ccc = candidates_by_station[s.id]
-#        print "candidates_by_station", candidates_by_station
-#        print "ccc", ccc
-        for wid in ccc:
-#          print "considering worker id", wid
-          if valid_candidate(new_sln, s.id, dow, wid):
-#            print "wid is valid for station id", s.id, dow
-            candidates.append(wid)
-          else:
-#            print "wid is invalid for station id", s.id, dow
-             pass
-
-#        print "final list of candidates", candidates
-
-        # If there are workers available for the time slot, pick one.
-        if len(candidates) > 0:
-          i = random.randint(0, len(candidates) - 1)
-#          print "randomly chose candidate index", i, candidates[i]
-          wid = candidates[i]
-          new_slot = (slot[0], slot[1], wid)
-
-#          print "updating slot", new_slot
-          ii = new_sln.index(slot)
-          new_sln[ii] = new_slot
-  return new_sln
-
-# Copy a solution slot by slot to another one, updating
-# the worker assignments by randomly selecting a candidate,
-# where the list of candidates are all valid--no conflicting
-# assignments. Consider a candidate unavailable if scheduling
-# a station would require working overtime.
 def make_initial_solution_no_conflicts_or_overtime(candidates_by_station, sln):
-  new_sln = [t for t in sln]
-  
+  return make_initial_solution(candidates_by_station, sln, choose_candidate_randomly_no_overtime)
 
-  for s in stations:
-#    print "STATION", s.id, s.name
-
-    for dow in range(len(days_of_week)):
-
-      worker_minutes = get_worker_minutes_in_schedule(new_sln)
-
-#      print "DOW", dow, days_of_week[dow]
-
-      slot = find_slot_by_station_id_and_dow(new_sln, s.id, dow)
-
-#      print "current slot", slot
-
-      # Assume we can't find a candidate.
-      new_slot = slot
-
-      # If the station is unassigned for that day, try to find a worker.
-      if slot[2] <> 0:
-#         print "slot not available"
-         pass
-      else:
-        candidates = []
-        ccc = candidates_by_station[s.id]
-#        print "candidates_by_station", candidates_by_station
-#        print "ccc", ccc
-        for wid in ccc:
-#          print "considering worker id", wid
-          if valid_candidate_no_overtime(new_sln, s.id, dow, wid, worker_minutes[wid]):
-#            print "wid is valid for station id", s.id, dow
-            candidates.append(wid)
-          else:
-#            print "wid is invalid for station id", s.id, dow
-             pass
-
-#        print "final list of candidates", candidates
-
-        # If there are workers available for the time slot, pick one.
-        if len(candidates) > 0:
-          i = random.randint(0, len(candidates) - 1)
-#          print "randomly chose candidate index", i, candidates[i]
-          wid = candidates[i]
-          new_slot = (slot[0], slot[1], wid)
-
-#          print "updating slot", new_slot
-          ii = new_sln.index(slot)
-          new_sln[ii] = new_slot
-  return new_sln
+def make_initial_solution_ranked(candidates_by_station, sln):
+  return make_initial_solution(candidates_by_station, sln, choose_candidate_ranked)
 
 # Add the following:
 #   open slots * 100000 
@@ -641,14 +572,15 @@ def print_overtime_workers(sln):
   worker_minutes = get_worker_minutes_in_schedule(sln)
   for w in workers:
     if worker_minutes[w.id] > 0:
-      print "%s, %s  %d" % (w.last_name, w.first_name, worker_minutes[w.id]/60)
+      print "%s, %s  %0.2f" % (w.last_name, w.first_name, worker_minutes[w.id]/60)
 
 # print_solution_by_tuple(empty_solution)
 # print(station_workers_map)
 # initial_solution = make_initial_solution_randomly(station_workers_map, empty_solution)
 # initial_solution = make_initial_solution_no_conflicts(station_workers_map, empty_solution)
+# initial_solution = make_initial_solution_no_conflicts_or_overtime(station_workers_map, empty_solution)
+initial_solution = make_initial_solution_ranked(station_workers_map, empty_solution)
 
-initial_solution = make_initial_solution_no_conflicts_or_overtime(station_workers_map, empty_solution)
 print_stations_by_worker(initial_solution)
 print
 print_workers_by_station(initial_solution)
