@@ -362,7 +362,7 @@ def print_stations_by_worker(sln):
 
     n = w.last_name + ", " + w.first_name
     t = get_dow_station_display_text(dow_stations)
-    print "%-20s %-s" % (n, t)
+    print "%-25s %-s" % (n, t)
 
 # Print the weeks' assignments by station
 def print_workers_by_station(sln):
@@ -498,12 +498,79 @@ def choose_candidate_randomly_no_overtime(sln, slot, sid, dow, candidates_by_sta
                 if valid_candidate_no_overtime(sln, sid, dow, wid, worker_minutes[wid])]
   return choose_randomly_from_list(candidates)
 
+def get_worker_assignment_stats(sln, wid):
+  w = find_worker_by_id(wid)
+  slots = [slot for slot in sln if slot[2] == wid]
+  full_time = w.hours_per_week == 40
+  minutes = get_worker_minutes_in_schedule(slots)[wid]
+  return (wid, slots, full_time, minutes)
+
+def calculate_rank(full_time, minutes, same_assigment):
+  rank = 0
+  if not full_time:
+    rank += 1
+  if minutes > 0:
+    rank += 1000 + minutes
+  if not same_assigment:
+    rank += 100
+  return rank
+
 # Return wid of candidate. Assumes station is open.
 def choose_candidate_ranked(sln, slot, sid, dow, candidates_by_station):
-  worker_minutes = get_worker_minutes_in_schedule(sln)
-  candidates = [wid for wid in candidates_by_station[sid]
-                if valid_candidate_no_overtime(sln, sid, dow, wid, worker_minutes[wid])]
-  return choose_randomly_from_list(candidates)
+  s = find_station_by_id(sid)
+
+  print
+  print "station", sid, s.name
+  print "day of week", dow, days_of_week[dow]
+  print "candidates_by_station[sid]", candidates_by_station[sid]
+
+  candidates = []
+  for wid in candidates_by_station[sid]:
+    
+    print "considering worker", wid
+
+    if valid_candidate(sln, sid, dow, wid):
+
+      print "worker is valid candidate"
+
+      stats = get_worker_assignment_stats(sln, wid)
+
+      print "worker stats"
+      print "  wid", stats[0]
+      print "  slots", stats[1]
+      print "  full_time", stats[2]
+      print "  minutes", stats[3]
+
+      # stats[0] = wid
+      #      [1] = slots for wid in sln
+      #      [2] = True if w is full time
+      #      [3] = assigned minutes for w in sln 
+      same_assignment = len([slot for slot in stats[1] if slot[0] == sid]) > 0
+      full_time = stats[2]
+      minutes = stats[3] + s.get_station_duration()
+      r = calculate_rank(full_time, minutes, same_assignment)
+
+      print "full_time", full_time
+      print "minutes", minutes
+      print "same_assignment", same_assignment
+      print "rank",r
+
+      candidates.append((r, wid))
+  if len(candidates) == 0:
+
+    print "no valid candidates"
+
+    return 0
+  else:
+
+    print "candidates", candidates
+
+    candidates.sort
+    candidates.sort(key=lambda tup: tup[0])
+
+    print "candidates, sorted", candidates
+
+    return candidates[0][1]
 
 # Copy a solution slot by slot to another one, updating
 # the worker assignments by selecting a candidate using
@@ -581,12 +648,12 @@ def print_overtime_workers(sln):
 # initial_solution = make_initial_solution_no_conflicts_or_overtime(station_workers_map, empty_solution)
 initial_solution = make_initial_solution_ranked(station_workers_map, empty_solution)
 
+print
 print_stations_by_worker(initial_solution)
 print
 print_workers_by_station(initial_solution)
 print
 print "cost", schedule_cost(initial_solution)
-
 print
 print_overtime_workers(initial_solution)
 
