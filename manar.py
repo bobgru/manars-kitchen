@@ -2,67 +2,79 @@ import random
 import math
 import optimization
 
+def time_to_min(t):
+  h = t / 100
+  m = t % 100
+  return h * 60 + m
 
 class Station(object):
-  def __init__(self, id, name, days, start_time, end_time):
+  def __init__(self, id, name, days, start_time, end_time, break_min):
     self.id         = id
     self.name       = name
     self.days       = days
     self.start_time = start_time
     self.end_time   = end_time
+    self.break_min  = break_min
 
-
+  def get_station_duration(self):
+    st = self.start_time
+    et = self.end_time
+    if et < st:
+      et += 2400
+    st_min = time_to_min(st)
+    et_min = time_to_min(et)
+    return et_min - st_min - self.break_min
 
 station_data = [
-( 1, "CWN AM",             "Su-Sa",        600,1430),
-( 2, "CWN PM",             "Su-Sa",       1230,2100),
-( 3, "Project PM",         "M,Tu,Th,F",   1200,1600),
-( 4, "L2 AM",              "Su-Sa",        600,1430),
-( 5, "L2 AM 2",            "Su,Sa",        600,1430),
-( 6, "L2 Noon",            "Su-Sa",       1200,2030),
-( 7, "L2 PM",              "Su-Sa",       1630,2030),
-( 8, "L2 PM 2",            "Su-Sa",       1630,2030),
-( 9, "L2 Cafe Grill",      "Su,Sa",       1530,   0),
-(10, "Shapiro AM",         "Su-Sa",        600,1430),
-(11, "Shapiro PM",         "Su-Sa",       1230,2100),
-(12, "Production",         "Su-Sa",        500,1330),
-(13, "Production 1",       "Su-Sa",        530,1400),
-(14, "Production 2",       "M-F",          700,1530),
-(15, "Production Pre",     "Su-Sa",        800,1630),
-(16, "Production PM",      "Su-Sa",       1500,2330),
-(17, "Salad AM",           "Su-Sa",        600,1430),
-(18, "New station 1",      "",             600,1430),
-(19, "New station 2",      "",             600,1430),
-(20, "Salad AM 2",         "Su-Sa",        600,1430),
-(21, "Salad PM 1",         "Su-Sa",       1430,2300),
-(22, "Salad PM 2",         "Su-Th",       1430,2300),
-(23, "Grill AM 1",         "Su-Sa",        500,1330),
-(24, "Grill AM 2",         "M-F",          530,1400),
-(25, "Grill PM 1",         "M-F",         1630,  30),
-(26, "Grill PM 2",         "M-F",         1800,   0),
-(27, "Grill PM WE",        "Su,Sa",       1530,   0),
-(28, "Grill 3",            "M-F",         1030,1900),
-(29, "AM Cafe",            "M-F",          700,1530),
-(30, "AM Cafe WE",         "Su,Sa",        700,1530),
-(31, "S.A",                "M-F",          700,1530),
-(32, "Shift Supe 1",       "Su-Tu,Th-Sa",  500,1330),
-(33, "Receiver I",         "Su-Sa",        530,1400),
-(34, "Receiver II",        "M-F",          600,1430),
-(35, "Receiver III",       "M-F",          630,1500),
-(36, "Receiver IIII",      "M-F",          500,1330),
-(37, "Pizza AM WE",        "Su,Sa",        600,1430),
-(38, "Pizza AM 1",         "M-F",          530,1400),
-(39, "Pizza AM 2",         "M-F",          700,1530),
-(40, "Pizza PM",           "M-F",         1100,1930),
-(41, "Pizza PM WE",        "Su,Sa",       1130,2000),
-(42, "Action 1",           "M-F",          600,1430),
-(43, "Action 2",           "M-F",          700,1530),
-(44, "Deli 1",             "Su,M,W-F",     530,1400),
-(45, "Deli 2",             "M-Th,Sa",      600,1430),
-(46, "Deli 3",             "M-F",         1030,1900)
+( 1, "CWN AM",             "Su-Sa",        600,1430,30),
+( 2, "CWN PM",             "Su-Sa",       1230,2100,30),
+( 3, "Project PM",         "M,Tu,Th,F",   1200,1600,30),
+( 4, "L2 AM",              "Su-Sa",        600,1430,30),
+( 5, "L2 AM 2",            "Su,Sa",        600,1430,30),
+( 6, "L2 Noon",            "Su-Sa",       1200,2030,30),
+( 7, "L2 PM",              "Su-Sa",       1630,2030,30),
+( 8, "L2 PM 2",            "Su-Sa",       1630,2030,30),
+( 9, "L2 Cafe Grill",      "Su,Sa",       1530,   0,30),
+(10, "Shapiro AM",         "Su-Sa",        600,1430,30),
+(11, "Shapiro PM",         "Su-Sa",       1230,2100,30),
+(12, "Production",         "Su-Sa",        500,1330,30),
+(13, "Production 1",       "Su-Sa",        530,1400,30),
+(14, "Production 2",       "M-F",          700,1530,30),
+(15, "Production Pre",     "Su-Sa",        800,1630,30),
+(16, "Production PM",      "Su-Sa",       1500,2330,30),
+(17, "Salad AM",           "Su-Sa",        600,1430,30),
+(18, "New station 1",      "",             600,1430,30),
+(19, "New station 2",      "",             600,1430,30),
+(20, "Salad AM 2",         "Su-Sa",        600,1430,30),
+(21, "Salad PM 1",         "Su-Sa",       1430,2300,30),
+(22, "Salad PM 2",         "Su-Th",       1430,2300,30),
+(23, "Grill AM 1",         "Su-Sa",        500,1330,30),
+(24, "Grill AM 2",         "M-F",          530,1400,30),
+(25, "Grill PM 1",         "M-F",         1630,  30,30),
+(26, "Grill PM 2",         "M-F",         1800,   0,30),
+(27, "Grill PM WE",        "Su,Sa",       1530,   0,30),
+(28, "Grill 3",            "M-F",         1030,1900,30),
+(29, "AM Cafe",            "M-F",          700,1530,30),
+(30, "AM Cafe WE",         "Su,Sa",        700,1530,30),
+(31, "S.A",                "M-F",          700,1530,30),
+(32, "Shift Supe 1",       "Su-Tu,Th-Sa",  500,1330,30),
+(33, "Receiver I",         "Su-Sa",        530,1400,30),
+(34, "Receiver II",        "M-F",          600,1430,30),
+(35, "Receiver III",       "M-F",          630,1500,30),
+(36, "Receiver IIII",      "M-F",          500,1330,30),
+(37, "Pizza AM WE",        "Su,Sa",        600,1430,30),
+(38, "Pizza AM 1",         "M-F",          530,1400,30),
+(39, "Pizza AM 2",         "M-F",          700,1530,30),
+(40, "Pizza PM",           "M-F",         1100,1930,30),
+(41, "Pizza PM WE",        "Su,Sa",       1130,2000,30),
+(42, "Action 1",           "M-F",          600,1430,30),
+(43, "Action 2",           "M-F",          700,1530,30),
+(44, "Deli 1",             "Su,M,W-F",     530,1400,30),
+(45, "Deli 2",             "M-Th,Sa",      600,1430,30),
+(46, "Deli 3",             "M-F",         1030,1900,30)
 ]
 
-stations = [Station(int(d[0]), d[1], d[2], int(d[3]), int(d[4])) for d in station_data]
+stations = [Station(int(d[0]), d[1], d[2], int(d[3]), int(d[4]), int(d[5])) for d in station_data]
 station_map = {}
 for s in stations:
   station_map[s.id] = s
@@ -279,6 +291,7 @@ def print_solution_by_tuple(sln):
 # Assumes dow_stations are sorted by day of week.
 def get_dow_station_display_text(dow_stations):
   stations_per_week = []
+  minutes = 0
   for dow in range(len(days_of_week)):
     stations_per_day = []
 
@@ -294,13 +307,16 @@ def get_dow_station_display_text(dow_stations):
       if x[0] == dow:
         s = find_station_by_id(x[1])
         stations_per_day.append(s.name)
+        minutes += s.get_station_duration()
 
     # We have all the day's stations, so format them.
     if len(stations_per_day) > 0:
       stations_per_week.append("/".join(stations_per_day))
     else:
       stations_per_week.append("-")
-  return ", ".join(stations_per_week)
+  t = ", ".join(stations_per_week)
+  t += " | " + str(minutes / 60)
+  return t
 
 # Assumes dow_workers are sorted by day of week.
 def get_worker_display_text(dow_workers):
@@ -465,9 +481,17 @@ def valid_candidate(sln, sid, dow, wid):
   # If there aren't any, the worker is a valid candidate.
   # If there are assignments, find conflicting ones. The worker is a
   # valid candidate if there are no conflicting assignments.
-  bad_slots = [slot for slot in slots if not are_compatible_stations(slot[0], sid)]
+  bad_slots = [slot for slot in slots if not are_compatible_stations(sid, slot[0])]
 #  print "bad_slots", bad_slots
   return len(bad_slots) == 0
+
+def valid_candidate_no_overtime(sln, sid, dow, wid, worker_min):
+  if valid_candidate(sln, sid, dow, wid):
+    s = find_station_by_id(sid)
+    m = worker_min + s.get_station_duration()
+    return m <= 0
+  else:
+    return False
 
 
 # Copy a solution slot by slot to another one, updating
@@ -522,14 +546,115 @@ def make_initial_solution_no_conflicts(candidates_by_station, sln):
           new_sln[ii] = new_slot
   return new_sln
 
- 
+# Copy a solution slot by slot to another one, updating
+# the worker assignments by randomly selecting a candidate,
+# where the list of candidates are all valid--no conflicting
+# assignments. Consider a candidate unavailable if scheduling
+# a station would require working overtime.
+def make_initial_solution_no_conflicts_or_overtime(candidates_by_station, sln):
+  new_sln = [t for t in sln]
+  
+
+  for s in stations:
+#    print "STATION", s.id, s.name
+
+    for dow in range(len(days_of_week)):
+
+      worker_minutes = get_worker_minutes_in_schedule(new_sln)
+
+#      print "DOW", dow, days_of_week[dow]
+
+      slot = find_slot_by_station_id_and_dow(new_sln, s.id, dow)
+
+#      print "current slot", slot
+
+      # Assume we can't find a candidate.
+      new_slot = slot
+
+      # If the station is unassigned for that day, try to find a worker.
+      if slot[2] <> 0:
+#         print "slot not available"
+         pass
+      else:
+        candidates = []
+        ccc = candidates_by_station[s.id]
+#        print "candidates_by_station", candidates_by_station
+#        print "ccc", ccc
+        for wid in ccc:
+#          print "considering worker id", wid
+          if valid_candidate_no_overtime(new_sln, s.id, dow, wid, worker_minutes[wid]):
+#            print "wid is valid for station id", s.id, dow
+            candidates.append(wid)
+          else:
+#            print "wid is invalid for station id", s.id, dow
+             pass
+
+#        print "final list of candidates", candidates
+
+        # If there are workers available for the time slot, pick one.
+        if len(candidates) > 0:
+          i = random.randint(0, len(candidates) - 1)
+#          print "randomly chose candidate index", i, candidates[i]
+          wid = candidates[i]
+          new_slot = (slot[0], slot[1], wid)
+
+#          print "updating slot", new_slot
+          ii = new_sln.index(slot)
+          new_sln[ii] = new_slot
+  return new_sln
+
+# Add the following:
+#   open slots * 100000 
+#   overtime hours * 10
+def schedule_cost(sln):
+  num_open_slots = sum([1 for slot in sln if slot[2] == 0])
+
+  worker_minutes = get_worker_minutes_in_schedule(sln)
+  overtime_minutes = 0
+  for w in workers:
+    if worker_minutes[w.id] > 0:
+      overtime_minutes += worker_minutes[w.id]
+  
+  num_overtime_hours = overtime_minutes / 60 
+
+  return num_open_slots * 100000 + num_overtime_hours * 10
+
+# Return the total minutes assigned to each worker in the schedule,
+# minus the worker's weekly maximum.  If the resulting value is
+# negative, the worker has spare time; if zero, the worker is
+# fully employed; if positive, the worker is scheduled overtime.
+def get_worker_minutes_in_schedule(sln):
+  worker_minutes = {}
+  for w in workers:
+    worker_minutes[w.id] = (-1) * w.hours_per_week * 60
+
+  for slot in sln:
+    sid = slot[0]
+    wid = slot[2]
+    if wid > 0:
+      s = find_station_by_id(sid)
+      worker_minutes[wid] += s.get_station_duration()
+
+  return worker_minutes
+  
+def print_overtime_workers(sln):
+  worker_minutes = get_worker_minutes_in_schedule(sln)
+  for w in workers:
+    if worker_minutes[w.id] > 0:
+      print "%s, %s  %d" % (w.last_name, w.first_name, worker_minutes[w.id]/60)
+
 # print_solution_by_tuple(empty_solution)
 # print(station_workers_map)
 # initial_solution = make_initial_solution_randomly(station_workers_map, empty_solution)
+# initial_solution = make_initial_solution_no_conflicts(station_workers_map, empty_solution)
 
-initial_solution = make_initial_solution_no_conflicts(station_workers_map, empty_solution)
+initial_solution = make_initial_solution_no_conflicts_or_overtime(station_workers_map, empty_solution)
 print_stations_by_worker(initial_solution)
 print
 print_workers_by_station(initial_solution)
+print
+print "cost", schedule_cost(initial_solution)
 
+print
+print_overtime_workers(initial_solution)
 
