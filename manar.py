@@ -79,53 +79,54 @@ def get_station_gap_minutes(spair):
 
 
 station_data = [
-( 4, "L2 AM",              "Su-Sa",        600,1430,30),
-( 5, "L2 AM 2",            "Su-Sa",        600,1430,30),
-( 6, "L2 Noon",            "Su-Sa",       1200,2030,30),
-( 7, "L2 PM",              "Su-Sa",       1630,2030, 0),
-( 8, "L2 PM 2",            "Su-Sa",       1630,2030, 0),
-( 1, "CWN AM",             "Su-Sa",        600,1430,30),
-( 2, "CWN PM",             "Su-Sa",       1230,2100,30),
-(10, "Shapiro AM",         "Su-Sa",        600,1430,30),
-(11, "Shapiro PM",         "Su-Sa",       1230,2100,30),
-(12, "Production 1",       "Su-Sa",        500,1330,30),
-(13, "Production 2",       "Su-Sa",        530,1400,30),
-(14, "Production 3",       "M-F",          700,1530,30),
-(15, "Production Prep",    "Su-Sa",        800,1630,30),
-( 3, "Production PM 1",    "Su-Sa",       1500,2330,30),
-(16, "Production PM 2",    "Su-Sa",       1500,2330,30),
-(32, "Shift Supervisor",   "Su-Sa",        500,1330,30),
-(31, "Special",            "M-F",          700,1530,30),
-(30, "Utility",            "M-F",          900,1730,30),
-(17, "Salad AM 1",         "Su-Sa",        530,1400,30),
+( 1, "L2 AM",              "Su-Sa",        600,1430,30),
+( 2, "L2 AM 2",            "Su-Sa",        600,1430,30),
+( 3, "L2 Noon",            "Su-Sa",       1200,2030,30),
+( 4, "L2 PM",              "Su-Sa",       1630,2030, 0),
+( 5, "L2 PM 2",            "Su-Sa",       1630,2030, 0),
+( 6, "CWN AM",             "Su-Sa",        600,1430,30),
+( 7, "CWN PM",             "Su-Sa",       1230,2100,30),
+( 8, "Shapiro AM",         "Su-Sa",        600,1430,30),
+( 9, "Shapiro PM",         "Su-Sa",       1230,2100,30),
+(10, "Production 1",       "Su-Sa",        500,1330,30),
+
+(11, "Production 2",       "Su-Sa",        530,1400,30),
+(12, "Production 3",       "M-F",          700,1530,30),
+(13, "Production Prep",    "Su-Sa",        800,1630,30),
+(14, "Production PM 1",    "Su-Sa",       1500,2330,30),
+(15, "Production PM 2",    "Su-Sa",       1500,2330,30),
+(16, "Shift Supervisor",   "Su-Sa",        500,1330,30),
+(17, "Special",            "M-F",          700,1530,30),
+(18, "Utility",            "M-F",          900,1730,30),
+(19, "Salad AM 1",         "Su-Sa",        530,1400,30),
 (20, "Salad AM 2",         "Su-Sa",        530,1400,30),
-(18, "Salad AM 3",         "M-F",          600,1430,30),
-(21, "Salad PM 1",         "Su-Sa",       1430,2300,30),
-(30, "Receiver 1",         "M-F",          500,1330,30),
-(35, "Receiver 2",         "M-F",          630,1500,30),
-(34, "Receiver 3",         "M-F",          600,1430,30),
-(33, "Receiver 4",         "Su-Th",        530,1400,30),
-(36, "Receiver 5",         "Tu-Sa",        530,1400,30),
-(23, "Grill AM 1",         "Su-Sa",        500,1330,30),
-(24, "Grill AM 2",         "M-F",          530,1400,30),
-(28, "Grill AM 3",         "M-F",         1030,1900,30),
-(26, "Grill AM WE",        "Su,Sa",        700,1530,30),
-(25, "Grill PM 1",         "M-F",         1600,  30,30),
-( 9, "Grill PM 2",         "Su-Sa",       1530,   0,30),
-(27, "Grill PM WE",        "Su,Sa",       1530,   0,30),
-(29, "Lead Cook Cafe",     "M-F",          700,1530,30),
-(42, "Action 1",           "M-F",          600,1430,30),
-(43, "Action 2",           "M-F",          700,1530,30),
+
+(21, "Salad AM 3",         "M-F",          600,1430,30),
+(22, "Salad PM 1",         "Su-Sa",       1430,2300,30),
+(23, "Receiver 1",         "M-F",          500,1330,30),
+(24, "Receiver 2",         "M-F",          630,1500,30),
+(25, "Receiver 3",         "M-F",          600,1430,30),
+(26, "Receiver 4",         "Su-Th",        530,1400,30),
+(27, "Receiver 5",         "Tu-Sa",        530,1400,30),
+(28, "Grill AM 1",         "Su-Sa",        500,1330,30),
+(29, "Grill AM 2",         "M-F",          530,1400,30),
+(30, "Grill AM 3",         "M-F",         1030,1900,30),
+
+(31, "Grill AM WE",        "Su,Sa",        700,1530,30),
+(32, "Grill PM 1",         "M-F",         1600,  30,30),
+(33, "Grill PM 2",         "Su-Sa",       1530,   0,30),
+(34, "Grill PM WE",        "Su,Sa",       1530,   0,30),
+(35, "Lead Cook Cafe",     "M-F",          700,1530,30),
+(36, "Action 1",           "M-F",          600,1430,30),
+(37, "Action 2",           "M-F",          700,1530,30),
 (38, "Pizza AM 1",         "M-F",          530,1400,30),
 (39, "Pizza AM 2",         "M-F",          700,1530,30),
-(37, "Pizza AM WE",        "Su,Sa",        600,1430,30),
-(40, "Pizza PM",           "Su-Sa",       1100,1930,30),
-(44, "Deli 1",             "M-F",          530,1400,30),
-(45, "Deli 2",             "M-F",          600,1430,30),
-(46, "Deli 3",             "M-F",         1030,1900,30),
-(22, "New station",        "Su-Th",       1430,2300,30),
-(41, "New station",        "",            1130,2000,30),
-(19, "New station",        "",             600,1430,30)
+(40, "Pizza AM WE",        "Su,Sa",        600,1430,30),
+
+(41, "Pizza PM",           "Su-Sa",       1100,1930,30),
+(42, "Deli 1",             "M-F",          530,1400,30),
+(43, "Deli 2",             "M-F",          600,1430,30),
+(44, "Deli 3",             "M-F",         1030,1900,30)
 ]
 
 stations = [Station(int(d[0]), d[1], d[2], int(d[3]), int(d[4]), int(d[5])) for d in station_data]
@@ -133,6 +134,12 @@ station_map = {}
 for s in stations:
   station_map[s.id] = s
 
+
+# add sorted list of station preferences
+# usual rule: 5 days/wk, every other weekend off
+# review hours
+# regular days off
+# add custom available -- days, hours
 class Worker(object):
   def __init__(self, id, last_name, first_name, title, hours_per_week, benefit_days, comp_days, overtime_ok):
     self.id             = id       
@@ -148,59 +155,59 @@ worker_data = [
 ( 1,"Dickinson", "Theron",             "1st Cook",           40, "Su", "Tu", False),
 ( 2,"Kanina", "Ewa",                   "1st Cook",           40, "", "", False),
 ( 3,"Sales", "Geraldo",                "1st Cook",           40, "", "", False),
+(54,"Joseph", "Nicole",                "1st Cook",           40, "", "", False),
 ( 4,"Carballo", "Fabio",               "2nd Cook",           40, "", "", False),
-( 5,"Chludzinska", "Marianna",         "2nd Cook",           40, "", "", False),
-( 6,"Lagrant", "Leroy",                "2nd Cook",           24, "", "", False),
-( 7,"Law", "Philip",                   "2nd Cook",           40, "", "", False),
+( 5,"Chludzinska", "Marianna",         "2nd Cook",           40, "", "", True),
+( 6,"Lagrant", "Leroy",                "2nd Cook",           40, "", "", True),
+( 7,"Law", "Philip",                   "2nd Cook",           40, "", "", True),
 ( 8,"Lefteri", "Fotaq",                "2nd Cook",           40, "", "", False),
 ( 9,"Lejentus", "Rene",                "2nd Cook",           20, "", "", False),
-(10,"Marku", "Zef",                    "2nd Cook",           20, "", "", False),
-(11,"Moreno", "Osvaldo",               "2nd Cook",            8, "", "", False),
+(10,"Marku", "Zef",                    "2nd Cook",           20, "", "", True),
+(11,"Moreno", "Osvaldo",               "2nd Cook",            0, "", "", True),
 (12,"Ortiz", "Angela",                 "2nd Cook",           40, "", "", False),
-(13,"Sokolowska", "Czeslawa",          "2nd Cook",           40, "", "", False),
-(14,"Vaz", "David",                    "2nd Cook",           16, "", "", False),
-(15,"Velazques", "Hoover",             "2nd Cook",           40, "", "", False),
-(16,"Williams", "Veniesa",             "2nd Cook",           32, "", "", False),
+(13,"Sokolowska", "Czeslawa",          "2nd Cook",           40, "", "", True),
+(14,"Vaz", "David",                    "2nd Cook",           20, "", "", True),
+(15,"Velazques", "Hoover",             "2nd Cook",           40, "", "", True),
+(16,"Williams", "Veniesa",             "2nd Cook",           16, "", "", True),
 (17,"Carreiro", "Marcos",              "2nd Cook",           40, "", "", False),
 (18,"Diaz", "Ruben",                   "2nd Cook",           40, "", "", False),
-(19,"El Mouttaki", "Mohamed",          "2nd Cook",           40, "Su,M,W,Th,Sa", "", False),
-(20,"Silien", "Jean",                  "2nd Cook",           40, "", "", False),
-(21,"Caddeus", "Winfred",              "1st Cook",           40, "M", "", False),
+(19,"El Mouttaki", "Mohamed",          "2nd Cook",           40, "", "", True),
+(21,"Caddeus", "Winfred",              "1st Cook",           40, "", "", True),
 (22,"Elorch", "Omar",                  "1st Cook",           40, "", "", False),
-(23,"Portillo", "Jorge",               "1st Cook",           40, "", "", False),
-(24,"Almeda", "Jose Marcel",           "Shift Lead",         40, "M", "", True),
-(25,"Buckley", "John",                 "Shift Lead",         40, "", "", True),
-(26,"Keefe", "John",                   "Shift Lead",         40, "", "", True),
+(23,"Portillo", "Jorge",               "1st Cook",           40, "", "", True),
+(24,"Almeda", "Jose Marcel",           "Shift Lead",         40, "", "", False),
+(25,"Buckley", "John",                 "Shift Lead",         40, "", "", False),
 (27,"Millard", "Brian",                "Shift Lead",         40, "", "", True),
-(28,"Barros", "Deila",                 "Prod-Aide",          40, "", "", False),
-(29,"Chodkowska", "Marzena",           "Prod-Aide",          40, "", "", False),
-(30,"Kozlowski", "Jadwiga",            "Prod-Aide",           0, "", "", False),
-(31,"Samuel", "Willie James",          "Prod-Aide",          40, "", "", False),
+(59,"Vasconuelos", "Antonio",          "Shift Lead",         32, "", "", True),
+(28,"Barros", "Deila",                 "Prod-Aide",          40, "", "", True),
+(29,"Chodkowska", "Marzena",           "Prod-Aide",          40, "", "", True),
+(30,"Kozlowski", "Jadwiga",            "Prod-Aide",          40, "", "", False),
+(31,"Samuel", "Willie James",          "Prod-Aide",          40, "", "", True),
+(37,"Augustine", "Carline",            "Prod-Aide",          24, "", "", True),
+(39,"Virella", "Natalie",              "Prod-Aide",          32, "", "", True),
+(45,"Pyskaty", "Maria",                "Prod-Aide",          40, "", "", False),
+(46,"Terron", "Maria",                 "Prod-Aide",          40, "M", "", False),
+(47,"Campbell", "Trevon",              "Prod-Aide",          40, "M", "", True),
+(60,"Solomon", "Derek",                "Prod-Aide",          40, "M", "", True),
 (32,"McCormack", "David",              "Material",           40, "", "", False),
-(33,"Fofana", "Abu",                   "Receiver",           40, "M", "", False),
+(33,"Fofana", "Abu",                   "Receiver",           40, "M", "", True),
 (34,"Morano", "Juan",                  "Receiver",           40, "", "", False),
 (35,"Coren", "Gregorey",               "Sr. Material",       40, "", "", False),
 (36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       40, "", "", False),
-(37,"Espinoza", "Alene",               "Temp",               16, "", "", False),
-(38,"Jones", "Dewanda",                "Temp",               40, "", "", False),
-(39,"Virella", "Natalie",              "Temp",               40, "", "", False),
-(40,"Echavarria", "Fernando",          "2nd Cook",           40, "", "", False),
-(41,"Frontin", "Sheldon",              "2nd Cook",           40, "", "", False),
+(40,"Echavarria", "Fernando",          "2nd Cook",           40, "", "", True),
+(41,"Frontin", "Sheldon",              "2nd Cook",           40, "", "", True),
 (42,"Sorino", "Rene",                  "2nd Cook",           40, "", "", False),
-(43,"Cortell", "Glenn",                "2nd Cook",           40, "M", "", False),
+(43,"Cortell", "Glenn",                "2nd Cook",           40, "M", "", True),
 (44,"Joseph", "Paul",                  "2nd Cook",           40, "M", "", False),
-(45,"Pyskaty", "Maria",                "Prod-Aide",          40, "", "", False),
-(46,"Terron", "Maria",                 "Prod-Aide",          40, "M", "", False),
-(47,"Campbell", "Trevon",              "Prod-Aide",          40, "M", "", False),
-(48,"Kamel", "(Temp)",                 "2nd Cook",           30, "", "", False),
 (49,"Danial", "Clebert",               "2nd Cook",           40, "", "", False),
-(50,"Guevara", "Henry",                "2nd Cook",           40, "", "", False),
-(51,"Hines", "Michael",                "2nd Cook",           40, "M", "", False),
+(50,"Guevara", "Henry",                "2nd Cook",           40, "", "", True),
+(51,"Hines", "Michael",                "2nd Cook",           40, "M", "", True),
 (52,"Murcia", "Alex",                  "2nd Cook",           40, "M-W,F", "", False),
 (53,"Way", "Shon",                     "2nd Cook",           40, "", "", False),
-(54,"Joseph", "Nicole",                "1st Cook",           40, "", "", False),
-(55,"Bailey", "James",                 "2nd Cook",            8, "", "", False),
-(56,"Miller", "Edward",                "2nd Cook",           40, "", "", False)
+(55,"Bailey", "James",                 "2nd Cook",            0, "", "", True),
+(56,"Miller", "Edward",                "2nd Cook",            0, "", "", True),
+(57,"Almeida", "Anthony",              "2nd Cook",           40, "", "", False),
+(58,"Alby", "Toufik",                  "2nd Cook",           40, "", "", False)
 ]
 
 workers = [Worker(int(d[0]), d[1], d[2], d[2], int(d[4]), d[5], d[6], d[7]) for d in worker_data]
@@ -215,109 +222,102 @@ class WorkerCapability(object):
 
 worker_capability_data = [
   # Line cooks
-  (1, 1), (1, 2),
-  (2, 3), (2, 4), (2,5), (2, 6), (2, 7), (2, 8),
-  (3, 10), (3, 11),
-  (4, 4), (4,5), (4, 6), (4, 7), (4, 8), 
-  (5, 10), (5, 11),
-  (6, 12), (6, 13), (6, 14), (6, 15), (6, 16),
-  (7, 4), (7,5), (7, 6), (7, 7), (7, 8), (7, 10), (7, 11),
-  (8, 1), (8, 2), (8, 3), (8, 4), (8,5), (8, 6), (8, 7), (8, 8), (8, 10), (8, 11),
-  (9, 4), (9,5), (9, 6), (9, 7), (9, 8), 
-  (10, 1), (10, 2), (10, 4), (10,5), (10, 6), (10, 7), (10, 8), (10, 10), (10, 11),
-  (11, 4), (11,5), (11, 6), (11, 7), (11, 8), 
-  (12, 1), (12, 2), (12, 4), (12,5), (12, 6), (12, 7), (12, 8), (12, 10), (12, 11),
-  (13, 4), (13,5), (13, 6), (13, 7), (13, 8), (13, 10), (13, 11), 
-    (13, 17), (13,18), (13, 19), (13, 20), (13, 21), (13, 22),
-  (14, 4), (14,5), (14, 6), (14, 7), (14, 8), 
-  (15, 4), (15,5), (15, 6), (15, 7), (15, 8),
-    (15, 10), (15,11), (15, 12), (15, 13), (15, 14), (15, 15), (15, 16), 
-  (16, 4), (16,5), (16, 6), (16, 7), (16, 8), 
+  (1, 7),
+  (2, 1), (2, 2), (2, 12), (2, 31), (2, 35),
+  (3, 9),
+  (4, 1), (4, 2), (4, 6), (4, 8), 
+  (5, 1), (5, 2), (5, 6), (5, 8),
+  (6, 3), (6, 4), (6, 5), (6, 12), (6, 13), (6, 14), (6, 15), (6, 35),
+  (7, 3), (7, 7), (7, 9), (7, 14), (7, 15),
+  (8, 1), (8, 2), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), 
+  (9, 4), (9, 5),
+  (10, 4), (10, 5),
+  (11, 4), (11, 5),
+  (12, 1), (12, 2), (12, 6), (12, 8),
+  (13, 1), (13, 2), (13, 6), (13, 8),
+  (14, 4), (14,5), (14, 33),
+  (15, 1), (15, 2), (15, 3), (15, 4), (15, 5), (15, 6), (15, 7), (15, 8), (15, 9), 
+    (15, 14), (15, 15),
+  (16, 1), (16, 2), (16, 3), (16, 4), (16, 5),
  
   # Production cooks
-  (17, 1), (17, 2), (17, 9),
-    (17, 23), (17, 24), (17, 25), (17, 26), (17, 27), (17, 28),
-  (18, 12), (18, 13), (18, 14), (18, 15), (18, 16),
-    (18, 17), (18,18), (18, 19), (18, 20), (18, 21), (18, 22),
-  (19, 12), (19, 13), (19, 14), (19, 15), (19, 16),
-  (20, 12), (20, 13), (20, 14), (20, 15), (20, 16),
-  (21, 12), (21, 13), (21, 14), (21, 15), (21, 16),
-    (21, 23), (21, 24), (21, 25), (21, 26), (21, 27), (21, 28), (21, 29), (21, 30),
-  (22, 12), (22, 13), (22, 14), (22, 15), (22, 16),
-  (23, 12), (23, 13), (23, 14), (23, 15), (23, 16),
+  (17, 1), (17, 2), (17, 6), (17, 8), (17, 10), (17, 11), (17, 19), (17, 20), (17, 21),
+  (18, 1), (18, 2), (18, 10), (18, 19), (18, 20), (18, 21),
+  (19, 15),
+  (21, 11), (21, 12), (21, 13), (21, 35),
+  (22, 14),
+  (23, 11), (23, 12), (23, 13), (23, 35),
     
   # Shift-Leads cooks
-  (24, 31), (24, 32), 
-  (25, 12), (25, 13), (25, 14), (25, 15), (25, 16), (25, 31), (25, 32), 
-  (26, 12), (26, 13), (26, 14), (26, 15), (26, 16), (26, 31), (26, 32), 
-  (27, 12), (27, 13), (27, 14), (27, 15), (27, 16), (27, 31), (27, 32), 
+  (24, 10), (24, 12), (24, 16), (24, 17), 
+  (25, 10), (25, 16),
+  (27, 10), (27, 11), (27, 16), (27, 17),
   
   # Production Aides
-  (28, 17), (28,18), (28, 19), (28, 20), (28, 21), (28, 22),
-  (29, 17), (29,18), (29, 19), (29, 20), (29, 21), (29, 22),
-  (30, 17), (30,18), (30, 19), (30, 20), (30, 21), (30, 22),
-  (31, 17), (31,18), (31, 19), (31, 20), (31, 21), (31, 22),
+  (28, 19), (28,20), (28, 21), (28, 42), (28, 43),
+  (29, 19), (29,20), (29, 21), (29, 42), (29, 43),
+  (30, 19), (30, 20),
+  (31, 19), (31, 20), (31, 21),
 
   # Receiving
-  (32, 33), (32, 34), (32, 35), (32, 36),
-  (33, 33), (33, 34), (33, 35), (33, 36),
-  (34, 33), (34, 34), (34, 35), (34, 36),
-  (35, 33), (35, 34), (35, 35), (35, 36),
-  (36, 33), (36, 34), (36, 35), (36, 36),
+  (32, 23), (32, 24), (32, 25), (32, 26), (32, 27),
+  (33, 26),
+  (34, 25),
+  (35, 23),
+  (36, 24), (36, 27),
 
   # Temps
-  (37, 17), (37,18), (37, 19), (37, 20), (37, 21), (37, 22),
-  (38, 17), (38,18), (38, 19), (38, 20), (38, 21), (38, 22),
-  (39, 17), (39,18), (39, 19), (39, 20), (39, 21), (39, 22),
+  (37, 22),
+  (39, 22),
 
   # Pizza
-  (40, 23), (40, 24), (40, 25), (40, 26), (40, 27), (40, 28),
-    (40, 37), (40, 38), (40, 39), (40, 40), (40, 41),
-  (41, 23), (41, 24), (41, 25), (41, 26), (41, 27), (41, 28),
-    (41, 37), (41, 38), (41, 39), (41, 40), (41, 41),
-  (42, 23), (42, 24), (42, 25), (42, 26), (42, 27), (42, 28),
-    (42, 37), (42, 38), (42, 39), (42, 40), (42, 41),
+  (40, 38), (40, 39),
+  (41, 38), (41, 39),
+  (42, 32), (42, 34), (42, 41),
 
   # Action
-  (43, 42), (43, 43),
-  (44, 42), (44, 43),
+  (43, 36), (43, 37),
+  (44, 37), (44, 38),
   
   # Deli
-  (45, 44), (45, 45), (45, 46),
-  (46, 44), (46, 45), (46, 46),
-  (47, 44), (47, 45), (47, 46),
+  (45, 38), (45, 39),
+  (46, 38), (46, 39),
+  (47, 40),
 
   # Grill
-  (48, 23), (48, 24), (48, 25), (48, 26), (48, 27), (48, 28),
-  (49, 23), (49, 24), (49, 25), (49, 26), (49, 27), (49, 28),
-  (50, 23), (50, 24), (50, 25), (50, 26), (50, 27), (50, 28),
-    (50, 29), (50, 30),
-  (51, 23), (51, 24), (51, 25), (51, 26), (51, 27), (51, 28),
-    (51, 29), (51, 30),
-  (52, 23), (52, 24), (52, 25), (52, 26), (52, 27), (52, 28),
-  (53, 23), (53, 24), (53, 25), (53, 26), (53, 27), (53, 28),
-  (54, 12), (54, 13), (54, 14), (54, 15), (54, 16),
-    (54, 23), (54, 24), (54, 25), (54, 26), (54, 27), (54, 28),
-    (54, 29), (54, 30),
-  (55, 23), (55, 24), (55, 25), (55, 26), (55, 27), (55, 28),
-  (56, 23), (56, 24), (56, 25), (56, 26), (56, 27), (56, 28),
-    (56, 37), (56, 38), (56, 39), (56, 40), (56, 41)
+  (49, 32), (49, 34),
+  (50, 29), (50, 30), (50, 31), (50, 33),
+  (51, 28), (51, 29), (51, 30), (51, 31), (51, 32), (51, 34),
+  (52, 28),
+  (53, 28), (53, 29),
+  (54, 14), (54, 15),
+  (55, 28), (55, 29), (55, 36), (55, 37), (55, 39),
+  (56, 38), (56, 39), (56, 40), (56, 41),
+
+  (57, 32), (57, 34), (57, 38), (57, 39), (57, 40), (57, 41),
+  (58, 38), (58, 39), (58, 40), (58, 41),
+  (59, 10), (59, 13), (59, 14), (59, 15), (59, 16),
+  (60, 18), (60, 19), (60, 20), (60, 21), (60, 24), (60, 25), (60, 26), (60, 27)
  
 ]
 
 worker_capabilities = [WorkerCapability(int(d[0]), int(d[1])) for d in worker_capability_data]
 
 worker_stations_map = {}
+for w in workers:
+  worker_stations_map[w.id] = []
 for wc in worker_capabilities:
-  w = wc.worker_id
-  worker_stations_map.setdefault(w, [])
-  worker_stations_map[w].append(wc.station_id)
+  sid = wc.station_id
+  wid = wc.worker_id
+  worker_stations_map[wid].append(sid)
 
 station_workers_map = {}
+for s in stations:
+  station_workers_map[s.id] = []
 for wc in worker_capabilities:
-  s = wc.station_id
-  station_workers_map.setdefault(s, [])
-  station_workers_map[s].append(wc.worker_id)
+  sid = wc.station_id
+  wid = wc.worker_id
+  station_workers_map[sid].append(wid)
 
 def find_station_by_id(sid):
   return station_map[sid]
