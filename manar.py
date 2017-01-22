@@ -59,7 +59,9 @@ class Station(object):
 
 # TODO use this to check prev and next days' assignments against a possible new one
 # and compare result with minimum gap (constant: 8 hours?)
-def get_station_gap_minutes(s1, s2):
+def get_station_gap_minutes(spair):
+  s1 = spair[0]
+  s2 = spair[1]
   st1 = time_to_min(s1.start_time)
   et1 = time_to_min(s1.end_time)
   if et1 < st1:
@@ -77,52 +79,53 @@ def get_station_gap_minutes(s1, s2):
 
 
 station_data = [
+( 4, "L2 AM",              "Su-Sa",        600,1430,30),
+( 5, "L2 AM 2",            "Su-Sa",        600,1430,30),
+( 6, "L2 Noon",            "Su-Sa",       1200,2030,30),
+( 7, "L2 PM",              "Su-Sa",       1630,2030, 0),
+( 8, "L2 PM 2",            "Su-Sa",       1630,2030, 0),
 ( 1, "CWN AM",             "Su-Sa",        600,1430,30),
 ( 2, "CWN PM",             "Su-Sa",       1230,2100,30),
-( 3, "Project PM",         "M,Tu,Th,F",   1200,1600,30),
-( 4, "L2 AM",              "Su-Sa",        600,1430,30),
-( 5, "L2 AM 2",            "Su,Sa",        600,1430,30),
-( 6, "L2 Noon",            "Su-Sa",       1200,2030,30),
-( 7, "L2 PM",              "Su-Sa",       1630,2030,30),
-( 8, "L2 PM 2",            "Su-Sa",       1630,2030,30),
-( 9, "L2 Cafe Grill",      "Su,Sa",       1530,   0,30),
 (10, "Shapiro AM",         "Su-Sa",        600,1430,30),
 (11, "Shapiro PM",         "Su-Sa",       1230,2100,30),
-(12, "Production",         "Su-Sa",        500,1330,30),
-(13, "Production 1",       "Su-Sa",        530,1400,30),
-(14, "Production 2",       "M-F",          700,1530,30),
-(15, "Production Pre",     "Su-Sa",        800,1630,30),
-(16, "Production PM",      "Su-Sa",       1500,2330,30),
-(17, "Salad AM",           "Su-Sa",        600,1430,30),
-(18, "New station 1",      "",             600,1430,30),
-(19, "New station 2",      "",             600,1430,30),
-(20, "Salad AM 2",         "Su-Sa",        600,1430,30),
+(12, "Production 1",       "Su-Sa",        500,1330,30),
+(13, "Production 2",       "Su-Sa",        530,1400,30),
+(14, "Production 3",       "M-F",          700,1530,30),
+(15, "Production Prep",    "Su-Sa",        800,1630,30),
+( 3, "Production PM 1",    "Su-Sa",       1500,2330,30),
+(16, "Production PM 2",    "Su-Sa",       1500,2330,30),
+(32, "Shift Supervisor",   "Su-Sa",        500,1330,30),
+(31, "Special",            "M-F",          700,1530,30),
+(30, "Utility",            "M-F",          900,1730,30),
+(17, "Salad AM 1",         "Su-Sa",        530,1400,30),
+(20, "Salad AM 2",         "Su-Sa",        530,1400,30),
+(18, "Salad AM 3",         "M-F",          600,1430,30),
 (21, "Salad PM 1",         "Su-Sa",       1430,2300,30),
-(22, "Salad PM 2",         "Su-Th",       1430,2300,30),
+(30, "Receiver 1",         "M-F",          500,1330,30),
+(35, "Receiver 2",         "M-F",          630,1500,30),
+(34, "Receiver 3",         "M-F",          600,1430,30),
+(33, "Receiver 4",         "Su-Th",        530,1400,30),
+(36, "Receiver 5",         "Tu-Sa",        530,1400,30),
 (23, "Grill AM 1",         "Su-Sa",        500,1330,30),
 (24, "Grill AM 2",         "M-F",          530,1400,30),
-(25, "Grill PM 1",         "M-F",         1630,  30,30),
-(26, "Grill PM 2",         "M-F",         1800,   0,30),
+(28, "Grill AM 3",         "M-F",         1030,1900,30),
+(26, "Grill AM WE",        "Su,Sa",        700,1530,30),
+(25, "Grill PM 1",         "M-F",         1600,  30,30),
+( 9, "Grill PM 2",         "Su-Sa",       1530,   0,30),
 (27, "Grill PM WE",        "Su,Sa",       1530,   0,30),
-(28, "Grill 3",            "M-F",         1030,1900,30),
-(29, "AM Cafe",            "M-F",          700,1530,30),
-(30, "AM Cafe WE",         "Su,Sa",        700,1530,30),
-(31, "S.A",                "M-F",          700,1530,30),
-(32, "Shift Supe 1",       "Su-Tu,Th-Sa",  500,1330,30),
-(33, "Receiver I",         "Su-Sa",        530,1400,30),
-(34, "Receiver II",        "M-F",          600,1430,30),
-(35, "Receiver III",       "M-F",          630,1500,30),
-(36, "Receiver IIII",      "M-F",          500,1330,30),
-(37, "Pizza AM WE",        "Su,Sa",        600,1430,30),
-(38, "Pizza AM 1",         "M-F",          530,1400,30),
-(39, "Pizza AM 2",         "M-F",          700,1530,30),
-(40, "Pizza PM",           "M-F",         1100,1930,30),
-(41, "Pizza PM WE",        "Su,Sa",       1130,2000,30),
+(29, "Lead Cook Cafe",     "M-F",          700,1530,30),
 (42, "Action 1",           "M-F",          600,1430,30),
 (43, "Action 2",           "M-F",          700,1530,30),
-(44, "Deli 1",             "Su,M,W-F",     530,1400,30),
-(45, "Deli 2",             "M-Th,Sa",      600,1430,30),
-(46, "Deli 3",             "M-F",         1030,1900,30)
+(38, "Pizza AM 1",         "M-F",          530,1400,30),
+(39, "Pizza AM 2",         "M-F",          700,1530,30),
+(37, "Pizza AM WE",        "Su,Sa",        600,1430,30),
+(40, "Pizza PM",           "Su-Sa",       1100,1930,30),
+(44, "Deli 1",             "M-F",          530,1400,30),
+(45, "Deli 2",             "M-F",          600,1430,30),
+(46, "Deli 3",             "M-F",         1030,1900,30),
+(22, "New station",        "Su-Th",       1430,2300,30),
+(41, "New station",        "",            1130,2000,30),
+(19, "New station",        "",             600,1430,30)
 ]
 
 stations = [Station(int(d[0]), d[1], d[2], int(d[3]), int(d[4]), int(d[5])) for d in station_data]
@@ -543,6 +546,33 @@ def choose_candidate_randomly_no_overtime(sln, slot, sid, dow, candidates_by_sta
                 if valid_candidate_no_overtime(sln, sid, dow, wid, worker_minutes[wid])]
   return choose_randomly_from_list(candidates)
 
+def tail(xs):
+  ys = []
+  for i in range(1, len(xs)):
+    ys.append(xs[i])
+  return ys
+
+def calculate_gaps(sln, wid):
+  # Get the worker's assignments.
+  dow_stations = [(slot[1], slot[0]) for slot in sln if slot[2] == wid]
+
+  # Sort by day of week then start_time.
+  dow_stations.sort(key = lambda tup: tup[0] * 10000 + time_to_min(find_station_by_id(tup[1]).start_time))
+
+  # Pair up successive assignments.
+  pairs = zip(dow_stations, tail(dow_stations))
+
+  # Discard pairs within same day.
+  pairs2 = [p for p in pairs if p[0][0] != p[1][0]]
+
+  # Extract stations from pairs.
+  pairs3 = [(p[0][1], p[1][1]) for p in pairs2]
+
+  # Compute the gaps between station pairs.
+  gaps = map(get_station_gap_minutes, pairs3)
+
+  return gaps
+
 def get_worker_assignment_stats(sln, dow, wid):
   w = find_worker_by_id(wid)
   slots_week  = [slot for slot in sln if slot[2] == wid]
@@ -600,6 +630,8 @@ def choose_candidate_ranked(sln, slot, sid, dow, candidates_by_station):
       full_time = stats[2]
       minutes_week = stats[3] + s.get_station_duration()
       minutes_today = stats[4] + s.get_station_duration()
+#       gaps = calculate_gaps(sln + [(sid, dow, wid)], wid)
+#       small_gaps = [g for g in gaps if g < 8]
 
       # If overtime and worker is not willing to do it, not a candidate.
       valid = True
@@ -611,6 +643,13 @@ def choose_candidate_ranked(sln, slot, sid, dow, candidates_by_station):
           print "worker willing to work overtime"
         else:
           print "worker not willing to work overtime"
+
+#       if valid:
+#         if small_gaps:
+#           print "successive assignments too close together"
+#           valid = False
+#         else:
+#           print "successive assignments OK"
 
       if valid:
         r = calculate_rank(full_time, minutes_week, minutes_today, same_assignment)
