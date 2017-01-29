@@ -10,37 +10,6 @@ def time_to_min(t):
 # Su has index 0; Sa has index 6
 days_of_week = ['Su','M','Tu','W','Th','F','Sa']
 
-# def unpack_days(days):
-#   if days == "Su-Sa":
-#     return [0,1,2,3,4,5,6]
-#   elif days == "M,Tu,Th,F":
-#     return [1,2,4,5]
-#   elif days == "Su,Sa":
-#     return [0,6]
-#   elif days == "Su-Th":
-#     return [0,1,2,3,4]
-#   elif days == "M-F":
-#     return [1,2,3,4,5]
-#   elif days == "Su-Tu,Th-Sa":
-#     return [0,1,2,4,5,6]
-#   elif days == "Su,M,W-F":
-#     return [0,1,3,4,5]
-#   elif days == "M-Th,Sa":
-#     return [0,1,2,3,4,6]
-#   elif days == "Su,M,W,Th,Sa":
-#     return [0,1,3,4,6]
-#   elif days == "M-W,F":
-#     return [1,2,3,5]
-#   elif days == "Su":
-#     return [0]
-#   elif days == "M":
-#     return [1]
-#   elif days == "Tu":
-#     return [2]
-#   else:
-#     return []
-
-
 def day_to_dow(s):
   return days_of_week.index(s)
 
@@ -181,7 +150,7 @@ class Worker(object):
     self.comp_days      = unpack_days(comp_days)
 
 worker_data = [
-( 1,"Dickinson", "Theron",             "1st Cook",           40, False,  7, "Su", "Tu"),
+( 1,"Dickinson", "Theron",             "1st Cook",           40, False,  7, "", ""),
 ( 2,"Kanina", "Ewa",                   "1st Cook",           40, False, 35, "", ""),
 ( 3,"Sales", "Geraldo",                "1st Cook",           40, False,  9, "", ""),
 (54,"Joseph", "Nicole",                "1st Cook",           40, False, 14, "", ""),
@@ -218,11 +187,11 @@ worker_data = [
 (37,"Augustine", "Carline",            "Prod-Aide",          24, True,  22, "", ""),
 (39,"Virella", "Natalie",              "Prod-Aide",          32, True,  22, "", ""),
 (45,"Pyskaty", "Maria",                "Prod-Aide",          40, False, 38, "", ""),
-(46,"Terron", "Maria",                 "Prod-Aide",          40, False, 39, "M", ""),
-(47,"Campbell", "Trevon",              "Prod-Aide",          40, True,  40, "M", ""),
+(46,"Terron", "Maria",                 "Prod-Aide",          40, False, 39, "", ""),
+(47,"Campbell", "Trevon",              "Prod-Aide",          40, True,  40, "", ""),
 (60,"Solomon", "Derek",                "Prod-Aide",          40, True,  18, "", ""),
 (32,"McCormack", "David",              "Material",           40, False, 24, "", ""),
-(33,"Fofana", "Abu",                   "Receiver",           40, True,  26, "M", ""),
+(33,"Fofana", "Abu",                   "Receiver",           40, True,  26, "", ""),
 (34,"Morano", "Juan",                  "Receiver",           40, False, 25, "", ""),
 (35,"Coren", "Gregorey",               "Sr. Material",       40, False, 23, "", ""),
 (36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       40, False, 27, "", ""),
@@ -230,12 +199,12 @@ worker_data = [
 
 (41,"Frontin", "Sheldon",              "2nd Cook",           40, True,  38, "", ""),
 (42,"Sorino", "Rene",                  "2nd Cook",           40, False, 41, "", ""),
-(43,"Cortell", "Glenn",                "2nd Cook",           40, True,  36, "M", ""),
-(44,"Joseph", "Paul",                  "2nd Cook",           40, False, 37, "M", ""),
+(43,"Cortell", "Glenn",                "2nd Cook",           40, True,  36, "", ""),
+(44,"Joseph", "Paul",                  "2nd Cook",           40, False, 37, "", ""),
 (49,"Danial", "Clebert",               "2nd Cook",           40, False,  0, "", ""),
 (50,"Guevara", "Henry",                "2nd Cook",           40, True,  30, "", ""),
-(51,"Hines", "Michael",                "2nd Cook",           40, True,   0, "M", ""),
-(52,"Murcia", "Alex",                  "2nd Cook",           40, False, 28, "M-W,F", ""),
+(51,"Hines", "Michael",                "2nd Cook",           40, True,   0, "", ""),
+(52,"Murcia", "Alex",                  "2nd Cook",           40, False, 28, "", ""),
 (53,"Way", "Shon",                     "2nd Cook",           40, False, 29, "", ""),
 (55,"Bailey", "James",                 "2nd Cook",            0, True,  36, "", ""),
 (56,"Miller", "Edward",                "2nd Cook",            0, True,  41, "", ""),
@@ -834,6 +803,34 @@ def total_station_hours():
   minutes = map(lambda s: s.get_station_duration() * len(unpack_days(s.days)), stations)
   return sum(minutes)/60
 
+def format_slot_for_file(slot):
+  return "%d,%d,%d\n" % slot
+
+def save_solution(sln, f):
+  text_file = open(f, "w")
+  for slot in sln:
+    if slot[2] >= 0:
+      t = format_slot_for_file(slot)
+      text_file.write(t)
+  text_file.close()
+    
+def read_solution(sln, f):
+  new_sln = [slot for slot in sln]
+  for line in file(f):
+    sid, dow, wid = line.strip().split(',')
+    sid = int(sid)
+    dow = int(dow)
+    wid = int(wid)
+    sid_dow_slots = [slot for slot in new_sln if slot[0] == sid and slot[1] == dow]
+    new_slot = (sid, dow, wid)
+    if sid_dow_slots:
+      ii = new_sln.index(sid_dow_slots[0])
+      new_sln[ii] = new_slot
+    else:
+      print "Warning: could not find slot (%d,%d)" % (sid, dow)
+      new_sln.append(new_slot)
+  return new_sln
+
 # print_solution_by_tuple(empty_solution)
 # print(station_workers_map)
 # initial_solution = make_initial_solution_randomly(station_workers_map, empty_solution)
@@ -841,28 +838,36 @@ def total_station_hours():
 # initial_solution = make_initial_solution_no_conflicts_or_overtime(station_workers_map, empty_solution)
 # initial_solution = make_initial_solution_ranked(station_workers_map, empty_solution)
 
-solution_1 = assign_workers_to_only_capability(station_workers_map, empty_solution, choose_candidate_ranked)
-print
-print_stations_by_worker(solution_1)
-print
-print_workers_by_station(solution_1)
+# solution_1 = assign_workers_to_only_capability(station_workers_map, empty_solution, choose_candidate_ranked)
+# print
+# print_stations_by_worker(solution_1)
+# print
+# print_workers_by_station(solution_1)
+# 
+# initial_solution = make_initial_solution_ranked(station_workers_map, solution_1)
+# 
+# 
+# print
+# print_stations_by_worker(initial_solution)
+# print
+# print_workers_by_station(initial_solution)
+# print
+# print "cost", schedule_cost(initial_solution)
+# print
+# print "overtime"
+# print_overtime_workers(initial_solution)
+# print
+# print "undertime"
+# print_undertime_workers(initial_solution)
+# print
+# print "total contracted hours", total_contracted_hours()
+# print
+# print "total station hours", total_station_hours()
 
-initial_solution = make_initial_solution_ranked(station_workers_map, solution_1)
+f = "worker_station_assignments.txt"
+# print "Saving assignments to file", f
+# save_solution(initial_solution, f)
 
+sln = read_solution(empty_solution, f)
+print_stations_by_worker(sln)
 
-print
-print_stations_by_worker(initial_solution)
-print
-print_workers_by_station(initial_solution)
-print
-print "cost", schedule_cost(initial_solution)
-print
-print "overtime"
-print_overtime_workers(initial_solution)
-print
-print "undertime"
-print_undertime_workers(initial_solution)
-print
-print "total contracted hours", total_contracted_hours()
-print
-print "total station hours", total_station_hours()
