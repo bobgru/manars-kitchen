@@ -1,6 +1,8 @@
 import random
 import math
-import optimization
+# import optimization
+import sys
+import os
 
 def time_to_min(t):
   h = t / 100
@@ -864,10 +866,189 @@ def read_solution(sln, f):
 # print
 # print "total station hours", total_station_hours()
 
-f = "worker_station_assignments.txt"
+# f = "worker_station_assignments.txt"
 # print "Saving assignments to file", f
 # save_solution(initial_solution, f)
 
-sln = read_solution(empty_solution, f)
-print_stations_by_worker(sln)
+# sln = read_solution(empty_solution, f)
+# print_stations_by_worker(sln)
+
+menu_actions = {}
+
+solution = make_empty_solution()
+last_assignments_file_saved  = ""
+last_assignments_file_loaded = ""
+last_assignments_file_update = ""
+
+def do_menu_action():
+  choice = raw_input(">> ")
+  exec_menu(choice)
+
+def select_filename(f):
+  # TODO
+  return f
+
+def file_read_assignments():
+  global solution
+  global last_assignments_file_loaded
+
+  if not last_assignments_file_loaded:
+    last_assignments_file_loaded = "assignments.txt"
+  f = select_filename(last_assignments_file_loaded)
+  solution = read_solution(make_empty_solution(), f)
+  print "The solution has been initialized from the file", last_assignments_file_loaded
+  file_menu()
+
+def file_update_assignments():
+  global solution
+  global last_assignments_file_update
+
+  if not last_assignments_file_update:
+    last_assignments_file_update = "assignments.txt"
+  f = select_filename(last_assignments_file_update)
+  solution = read_solution(solution, f)
+  print "The solution has been updated from the file", last_assignments_file_update
+  file_menu()
+
+def file_write_assignments():
+  global last_assignments_file_saved
+
+  if not last_assignments_file_saved:
+    last_assignments_file_saved = "assignments.txt"
+  f = select_filename(last_assignments_file_saved)
+  save_solution(solution, f)
+  print "The solution has been saved to the file", last_assignments_file_saved
+  file_menu()
+
+def edit_clear_solution():
+  global solution
+  solution = make_empty_solution()
+  print "The solution has been cleared of all assignments."
+  edit_menu()
+
+def edit_assign_stations_if_only_capability():
+  global solution
+  solution = assign_workers_to_only_capability(station_workers_map, solution, choose_candidate_ranked)
+  print "Open stations have been assigned to workers with a single qualification."
+  edit_menu()
+
+def edit_assign_stations_by_rank():
+  global solution
+  solution = make_initial_solution_ranked(station_workers_map, solution)
+  print "Open stations have been assigned to the highest ranking candidate."
+  edit_menu()
+
+def report_assignments_by_worker():
+  print "Stations by Worker"
+  print_stations_by_worker(solution)  
+  reports_menu()
+
+def report_assignments_by_station():
+  print "Workers by Station"
+  print_workers_by_station(solution)  
+  reports_menu()
+
+def report_overtime():
+  print "Workers Scheduled Overtime"
+  print_overtime_workers(solution)  
+  reports_menu()
+
+def report_undertime():
+  print "Workers Scheduled Undertime"
+  print_undertime_workers(solution)  
+  reports_menu()
+
+
+def main_menu():
+  print "Enter the number of a command or submenu:"
+  print "1. File menu"
+  print "2. Edit menu"
+  print "3. Options menu"
+  print "4. Reports menu"
+  print "\n0. Quit"
+  do_menu_action()
+  
+def back():
+  menu_actions['main_menu']()
+
+def exec_menu(choice):
+  os.system('clear')
+  ch = choice.lower()
+  if ch == '':
+    back()
+  else:
+    try:
+      menu_actions[ch]()
+    except KeyError:
+      print "Invalid selection, please try again.\n"
+      back()
+  return
+
+def file_menu():
+  print "File Menu"
+  print
+  print "11. Read assignments from file"
+  print "12. Update assignments from file"
+  print "13. Write assignments to file"
+  print "9. Back"
+  print "0. Quit"
+  do_menu_action()
+
+def edit_menu():
+  print "Edit Menu"
+  print
+  print "21. Initialize assignments to empty"
+  print "22. Assign open stations to workers with a single qualification"
+  print "23. Assign open stations to highest-ranked candidate"
+  print "9. Back"
+  print "0. Quit"
+  do_menu_action()
+
+def options_menu():
+  print "Options Menu"
+  print
+  print "9. Back"
+  print "0. Quit"
+  do_menu_action()
+
+def reports_menu():
+  print "Reports Menu"
+  print
+  print "41. All assignments by worker"
+  print "42. All assignments by station"
+  print "43. Overtime"
+  print "44. Undertime"
+  print "9. Back"
+  print "0. Quit"
+  do_menu_action()
+
+def exit():
+  sys.exit()
+ 
+menu_actions = {
+    'main_menu': main_menu
+  , '0': exit
+  , '9': back
+
+  , '1': file_menu
+  , '11': file_read_assignments
+  , '12': file_update_assignments
+  , '13': file_write_assignments
+
+  , '2': edit_menu
+  , '21': edit_clear_solution
+  , '22': edit_assign_stations_if_only_capability
+  , '23': edit_assign_stations_by_rank
+
+  , '3': options_menu
+
+  , '4': reports_menu
+  , '41': report_assignments_by_worker
+  , '42': report_assignments_by_station
+  , '43': report_overtime
+  , '44': report_undertime
+}
+
+if __name__ == "__main__":
+  main_menu()
 
