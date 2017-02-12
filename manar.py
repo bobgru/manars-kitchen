@@ -4,6 +4,27 @@ import math
 import sys
 import os
 
+# Worker menu
+#    edit days off
+#    edit capabilities
+#    edit personal info
+
+# Edit menu
+#    manually add or remove assignment
+
+# Add special supervisor stations for Brian Millard and Fabio Rocha
+
+# Allow editing of files by names?
+
+# Add concept of week 1 vs. week 2
+
+# Add worker sort order -- used in writing out assignments by worker
+# Write out assignments by worker
+#    add comment with worker name and station name(s)
+
+
+
+
 def time_to_min(t):
   h = t / 100
   m = t % 100
@@ -125,7 +146,11 @@ station_data = [
 (41, "Pizza PM",           "Su-Sa",       1100,1930,30),
 (42, "Deli 1",             "M-F",          530,1400,30),
 (43, "Deli 2",             "M-F",          600,1430,30),
-(44, "Deli 3",             "M-F",         1030,1900,30)
+(44, "Deli 3",             "M-F",         1030,1900,30),
+(45, "Project PM",         "M-F",         1200,1600, 0),
+(46, "Support",            "Su-Sa",       1000,1830,30),
+(47, "Sous Chef Brian",    "Su-Th",       1000,1830,30),
+(48, "Sous Chef Fabio",    "Tu-Sa",       1000,1830,30)
 ]
 
 stations = [Station(int(d[0]), d[1], d[2], int(d[3]), int(d[4]), int(d[5])) for d in station_data]
@@ -179,19 +204,17 @@ worker_data = [
 (23,"Portillo", "Jorge",               "1st Cook",           40, True,  11, "", ""),
 (24,"Almeda", "Jose Marcel",           "Shift Lead",         40, False, 16, "", ""),
 (25,"Buckley", "John",                 "Shift Lead",         40, False, 16, "", ""),
-(27,"Millard", "Brian",                "Shift Lead",         40, True,  16, "", ""),
+(27,"Millard", "Brian",                "Sous Chef",          40, True,  16, "", ""),
 (59,"Vasconuelos", "Antonio",          "Shift Lead",         32, True,  10, "", ""),
 (28,"Barros", "Deila",                 "Prod-Aide",          40, True,  19, "", ""),
 (29,"Chodkowska", "Marzena",           "Prod-Aide",          40, True,  20, "", ""),
 (30,"Kozlowski", "Jadwiga",            "Prod-Aide",          40, False,  0, "", ""),
 
 (31,"Samuel", "Willie James",          "Prod-Aide",          40, True,  21, "", ""),
-(37,"Augustine", "Carline",            "Prod-Aide",          24, True,  22, "", ""),
-(39,"Virella", "Natalie",              "Prod-Aide",          32, True,  22, "", ""),
 (45,"Pyskaty", "Maria",                "Prod-Aide",          40, False, 38, "", ""),
 (46,"Terron", "Maria",                 "Prod-Aide",          40, False, 39, "", ""),
 (47,"Campbell", "Trevon",              "Prod-Aide",          40, True,  40, "", ""),
-(60,"Solomon", "Derek",                "Prod-Aide",          40, True,  18, "", ""),
+(60,"Selman", "Deric",                 "Prod-Aide",          40, True,  18, "", ""),
 (32,"McCormack", "David",              "Material",           40, False, 24, "", ""),
 (33,"Fofana", "Abu",                   "Receiver",           40, True,  26, "", ""),
 (34,"Morano", "Juan",                  "Receiver",           40, False, 25, "", ""),
@@ -200,7 +223,7 @@ worker_data = [
 (40,"Echavarria", "Fernando",          "2nd Cook",           40, True,  39, "", ""),
 
 (41,"Frontin", "Sheldon",              "2nd Cook",           40, True,  38, "", ""),
-(42,"Sorino", "Rene",                  "2nd Cook",           40, False, 41, "", ""),
+(42,"Soriano", "Rene",                 "2nd Cook",           40, False, 41, "", ""),
 (43,"Cortell", "Glenn",                "2nd Cook",           40, True,  36, "", ""),
 (44,"Joseph", "Paul",                  "2nd Cook",           40, False, 37, "", ""),
 (49,"Danial", "Clebert",               "2nd Cook",           40, False,  0, "", ""),
@@ -211,7 +234,13 @@ worker_data = [
 (55,"Bailey", "James",                 "2nd Cook",            0, True,  36, "", ""),
 (56,"Miller", "Edward",                "2nd Cook",            0, True,  41, "", ""),
 (57,"Almeida", "Anthony",              "2nd Cook",           40, False, 32, "", ""),
-(58,"Alby", "Toufik",                  "2nd Cook",           40, False, 40, "", "")
+(58,"Alby", "Taoufik",                 "2nd Cook",           40, False, 40, "", ""),
+
+(61,"Rocha", "Fabio",                  "Sous Chef",          40, False, 40, "", ""),
+(62,"Briskaj", "Alketa",               "Prod-Aide",          40, False, 40, "", ""),
+(63,"Mehari", "Meaza",                 "Prod-Aide",          40, False, 40, "", ""),
+(64,"Velasquez", "Jesus",              "Prod-Aide",          40, False, 40, "", ""),
+(65,"Mayorga", "Tezla",                "2nd Cook",           40, False, 40, "", "")
 ]
 
 workers = [Worker(int(d[0]), d[1], d[2], d[2], int(d[4]), d[5], int(d[6]), d[7], d[8]) for d in worker_data]
@@ -225,83 +254,184 @@ class WorkerCapability(object):
     self.station_id = station_id
 
 worker_capability_data = [
-  # Line cooks
+  # Theron
   (1, 7),
-  (2, 1), (2, 2), (2, 12), (2, 31), (2, 35),
+
+  # Nicole
+  (54, 3), (54, 4), (54, 5), (54, 45),
+
+  # Geraldo
   (3, 9),
+
+  # Fabio C.
   (4, 1), (4, 2), (4, 6), (4, 8), 
+
+  # Marcos
+  (17, 1), (17, 2), (17, 6), (17, 8), (17, 10), (17, 11), (17, 19), (17, 20), (17, 21),
+
+  # Marianna
   (5, 1), (5, 2), (5, 6), (5, 8),
+
+  # Leroy
   (6, 3), (6, 4), (6, 5), (6, 12), (6, 13), (6, 14), (6, 15), (6, 35),
+
+  # Philip
   (7, 3), (7, 7), (7, 9), (7, 14), (7, 15),
+
+  # Fotaq
   (8, 1), (8, 2), (8, 3), (8, 4), (8, 5), (8, 6), (8, 7), (8, 8), (8, 9), 
+
+  # Rene L.
   (9, 4), (9, 5),
+
+  # Zef
   (10, 4), (10, 5),
+
+  # Tezla
+
+  # Osvaldo
   (11, 4), (11, 5),
+
+  # Angela
   (12, 1), (12, 2), (12, 6), (12, 8),
+
+  # Czeslawa
   (13, 1), (13, 2), (13, 6), (13, 8),
-  (14, 4), (14,5), (14, 33),
+
+  # David V.
+  (14, 3), (14, 4), (14,5), (14, 33),
+
+  # Hoover
   (15, 1), (15, 2), (15, 3), (15, 4), (15, 5), (15, 6), (15, 7), (15, 8), (15, 9), 
     (15, 14), (15, 15),
+
+  # Vaniesa
   (16, 1), (16, 2), (16, 3), (16, 4), (16, 5),
  
-  # Production cooks
-  (17, 1), (17, 2), (17, 6), (17, 8), (17, 10), (17, 11), (17, 19), (17, 20), (17, 21),
-  (18, 1), (18, 2), (18, 10), (18, 19), (18, 20), (18, 21),
-  (19, 15),
-  (21, 11), (21, 12), (21, 13), (21, 35),
-  (22, 14),
-  (23, 11), (23, 12), (23, 13), (23, 35),
-    
-  # Shift-Leads cooks
-  (24, 10), (24, 12), (24, 16), (24, 17), 
-  (25, 10), (25, 16),
-  (27, 10), (27, 11), (27, 16), (27, 17),
-  
-  # Production Aides
-  (28, 19), (28,20), (28, 21), (28, 42), (28, 43),
-  (29, 19), (29,20), (29, 21), (29, 42), (29, 43),
-  (30, 19), (30, 20),
-  (31, 19), (31, 20), (31, 21),
+  # ???
 
-  # Receiving
+  # Winfred
+  (21, 10), (21, 11), (21, 12), (21, 13), (21, 35),
+
+  # Omar
+  (22, 15),
+
+  # Ruben
+  (18, 1), (18, 2), (18, 10), (18, 11), (18, 19), (18, 20), (18, 21),
+
+  # Mohamed
+  (19, 14), (19, 15), (19, 33),
+
+  # Jose Marcel
+  (24, 10), (24, 11), (24, 12), (24, 16), (24, 17), (24, 35), 
+
+  # John B.
+  (25, 10), (25, 16),
+
+  # Jorge
+  (23, 10), (23, 11), (23, 12), (23, 13), (23, 35),
+    
+  # Antonio
+  (59, 10), (59, 13), (59, 14), (59, 15), (59, 16),
+
+  # Brian
+  (27, 10), (27, 11), (27, 16), (27, 17), (27, 47),
+  
+  # Fabio R.
+  (61, 48),
+
+  # Deila
+  (28, 19), (28,20), (28, 21), (28, 22), (28, 42), (28, 43),
+
+  # Alketa
+  (62, 19), (62,20), (62, 21), (62, 22)
+
+  # Marzena
+  (29, 19), (29,20), (29, 21), (29, 22), (29, 42), (29, 43),
+
+  # Jadwiga
+  (30, 19), (30, 20), (30, 21), (30, 22),
+
+  # Meaza
+  (63, 19), (63, 20), (63, 21), (63, 22),
+
+  # Willie James
+  (31, 19), (31, 20), (31, 21), (31, 22),
+
+  # David Mc.
   (32, 23), (32, 24), (32, 25), (32, 26), (32, 27),
+
+  # Deric
+  (60, 18), (60, 19), (60, 20), (60, 21), (60, 24), (60, 25), (60, 26), (60, 27), (60, 46),
+
+  # Jesus
+  (64, 46),
+
+  # Abu
   (33, 26),
+
+  # Juan
   (34, 25),
+
+  # Gregorey
   (35, 23),
+
+  # Zeke
   (36, 24), (36, 27),
 
-  # Temps
-  (37, 22),
-  (39, 22),
+  # Taoufik
+  (58, 38), (58, 39), (58, 40), (58, 41),
 
-  # Pizza
-  (40, 38), (40, 39),
+  # Fernando
+  (40, 38), (40, 39), (40, 40),
+
+  # Sheldon
   (41, 38), (41, 39),
+
+  # Rene S.
   (42, 32), (42, 34), (42, 41),
 
-  # Action
+  # Glenn
   (43, 36), (43, 37),
-  (44, 37), (44, 38),
+
+  # Paul J.
+  (44, 36), (44, 38),
   
-  # Deli
-  (45, 38), (45, 39),
-  (46, 38), (46, 39),
-  (47, 40),
+  # Maria P.
+  (45, 38), (45, 39), (45, 43),
 
-  # Grill
+  # Maria T.
+  (46, 38), (46, 39), (46, 42),
+
+  # Trevon
+  (47, 40), (47, 44),
+
+  # Ewa
+  (2, 31), (2, 35),
+
+  # Anthony
+  (57, 32), (57, 33), (57, 34), (57, 38), (57, 39), (57, 40), (57, 41),
+
+  # Clebert
   (49, 32), (49, 34),
-  (50, 29), (50, 30), (50, 31), (50, 33),
-  (51, 28), (51, 29), (51, 30), (51, 31), (51, 32), (51, 34),
-  (52, 28),
-  (53, 28), (53, 29),
-  (54, 14), (54, 15),
-  (55, 28), (55, 29), (55, 36), (55, 37), (55, 39),
-  (56, 38), (56, 39), (56, 40), (56, 41),
 
-  (57, 32), (57, 34), (57, 38), (57, 39), (57, 40), (57, 41),
-  (58, 38), (58, 39), (58, 40), (58, 41),
-  (59, 10), (59, 13), (59, 14), (59, 15), (59, 16),
-  (60, 18), (60, 19), (60, 20), (60, 21), (60, 24), (60, 25), (60, 26), (60, 27)
+  # Henry
+  (50, 29), (50, 30), (50, 31), (50, 32), (50, 33),
+
+  # Michael H.
+  (51, 15), (51, 28), (51, 29), (51, 30), (51, 31), (51, 32), (51, 34),
+
+  # Alex
+  (52, 28),
+
+  # Shon
+  (53, 28), (53, 29),
+
+  # James B.
+  (55, 28), (55, 29), (55, 36), (55, 37), (55, 39),
+
+  # Edward M.
+  (56, 38), (56, 39), (56, 40), (56, 41)
  
 ]
 
@@ -805,6 +935,20 @@ def total_station_hours():
   minutes = map(lambda s: s.get_station_duration() * len(unpack_days(s.days)), stations)
   return sum(minutes)/60
 
+def format_slot_comment_for_file(slot):
+  s = find_station_by_id(int(slot[0]))
+  station_name = s.name
+
+  day_name = days_of_week[int(slot[1])]
+
+  wid = int(slot[2])
+  worker_name = "OPEN"
+  if wid > 0:
+    w = find_worker_by_id(int(slot[2]))
+    worker_name = "%s %s" % (w.first_name, w.last_name) 
+ 
+  return "#%s,%s,%s\n" % (station_name, day_name, worker_name)
+
 def format_slot_for_file(slot):
   return "%d,%d,%d\n" % slot
 
@@ -812,6 +956,8 @@ def save_solution(sln, f):
   text_file = open(f, "w")
   for slot in sln:
     if slot[2] >= 0:
+      t = format_slot_comment_for_file(slot)
+      text_file.write(t)
       t = format_slot_for_file(slot)
       text_file.write(t)
   text_file.close()
@@ -819,18 +965,19 @@ def save_solution(sln, f):
 def read_solution(sln, f):
   new_sln = [slot for slot in sln]
   for line in file(f):
-    sid, dow, wid = line.strip().split(',')
-    sid = int(sid)
-    dow = int(dow)
-    wid = int(wid)
-    sid_dow_slots = [slot for slot in new_sln if slot[0] == sid and slot[1] == dow]
-    new_slot = (sid, dow, wid)
-    if sid_dow_slots:
-      ii = new_sln.index(sid_dow_slots[0])
-      new_sln[ii] = new_slot
-    else:
-      print "Warning: could not find slot (%d,%d)" % (sid, dow)
-      new_sln.append(new_slot)
+    if line.split() and not line.startswith("#"):
+      sid, dow, wid = line.strip().split(',')
+      sid = int(sid)
+      dow = int(dow)
+      wid = int(wid)
+      sid_dow_slots = [slot for slot in new_sln if slot[0] == sid and slot[1] == dow]
+      new_slot = (sid, dow, wid)
+      if sid_dow_slots:
+        ii = new_sln.index(sid_dow_slots[0])
+        new_sln[ii] = new_slot
+      else:
+        print "Warning: could not find slot (%d,%d)" % (sid, dow)
+        new_sln.append(new_slot)
   return new_sln
 
 # print_solution_by_tuple(empty_solution)
