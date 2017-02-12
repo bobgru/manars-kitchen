@@ -12,8 +12,6 @@ import os
 # Edit menu
 #    manually add or remove assignment
 
-# Add special supervisor stations for Brian Millard and Fabio Rocha
-
 # Allow editing of files by names?
 
 # Add concept of week 1 vs. week 2
@@ -165,11 +163,12 @@ for s in stations:
 # regular days off
 # add custom available -- days, hours
 class Worker(object):
-  def __init__(self, id, last_name, first_name, title, hours_per_week, overtime_ok, fav_station, benefit_days, comp_days):
+  def __init__(self, id, last_name, first_name, title, sort_order, hours_per_week, overtime_ok, fav_station, benefit_days, comp_days):
     self.id             = id       
     self.last_name      = last_name
     self.first_name     = first_name
     self.title          = title
+    self.sort_order     = sort_order
     self.hours_per_week = hours_per_week
     self.overtime_ok    = overtime_ok
     self.fav_station    = fav_station
@@ -177,73 +176,75 @@ class Worker(object):
     self.comp_days      = unpack_days(comp_days)
 
 worker_data = [
-( 1,"Dickinson", "Theron",             "1st Cook",           40, False,  7, "", ""),
-( 2,"Kanina", "Ewa",                   "1st Cook",           40, False, 35, "", ""),
-( 3,"Sales", "Geraldo",                "1st Cook",           40, False,  9, "", ""),
-(54,"Joseph", "Nicole",                "1st Cook",           40, False, 14, "", ""),
-( 4,"Carballo", "Fabio",               "2nd Cook",           40, False,  1, "", ""),
-( 5,"Chludzinska", "Marianna",         "2nd Cook",           40, True,   8, "", ""),
-( 6,"Lagrant", "Leroy",                "2nd Cook",           40, True,  13, "", ""),
-( 7,"Law", "Philip",                   "2nd Cook",           40, True,   3, "", ""),
-( 8,"Lefteri", "Fotaq",                "2nd Cook",           40, False,  3, "", ""),
-( 9,"Lejentus", "Rene",                "2nd Cook",           20, False,  0, "", ""),
-(10,"Marku", "Zef",                    "2nd Cook",           20, True,   0, "", ""),
+( 1,"Dickinson", "Theron",             "1st Cook",            1, 40, False,  7, "", ""),
+(54,"Joseph", "Nicole",                "1st Cook",            2, 40, False, 14, "", ""),
+( 3,"Sales", "Geraldo",                "1st Cook",            3, 40, False,  9, "", ""),
+( 4,"Carballo", "Fabio",               "2nd Cook",            4, 40, False,  1, "", ""),
+(17,"Carreiro", "Marcos",              "2nd Cook",            5, 40, False,  6, "", ""),
+( 5,"Chludzinska", "Marianna",         "2nd Cook",            6, 40, True,   8, "", ""),
+( 6,"Lagrant", "Leroy",                "2nd Cook",            7, 40, True,  13, "", ""),
+( 7,"Law", "Philip",                   "2nd Cook",            8, 40, True,   3, "", ""),
+( 8,"Lefteri", "Fotaq",                "2nd Cook",            9, 40, False,  3, "", ""),
+( 9,"Lejentus", "Rene",                "2nd Cook",           10, 20, False,  0, "", ""),
 
-(11,"Moreno", "Osvaldo",               "2nd Cook",            0, True,   0, "", ""),
-(12,"Ortiz", "Angela",                 "2nd Cook",           40, False,  6, "", ""),
-(13,"Sokolowska", "Czeslawa",          "2nd Cook",           40, True,   1, "", ""),
-(14,"Vaz", "David",                    "2nd Cook",           20, True,  33, "", ""),
-(15,"Velazques", "Hoover",             "2nd Cook",           40, True,  15, "", ""),
-(16,"Williams", "Veniesa",             "2nd Cook",           16, True,   2, "", ""),
-(17,"Carreiro", "Marcos",              "2nd Cook",           40, False,  6, "", ""),
-(18,"Diaz", "Ruben",                   "2nd Cook",           40, False, 10, "", ""),
-(19,"El Mouttaki", "Mohamed",          "2nd Cook",           40, True,  15, "", ""),
+(10,"Marku", "Zef",                    "2nd Cook",           11, 20, True,   0, "", ""),
+(65,"Mayorga", "Tezla",                "2nd Cook",           12, 40, False, 40, "", ""),
+(11,"Moreno", "Osvaldo",               "2nd Cook",           13,  0, True,   0, "", ""),
+(12,"Ortiz", "Angela",                 "2nd Cook",           14, 40, False,  6, "", ""),
+(13,"Sokolowska", "Czeslawa",          "2nd Cook",           15, 40, True,   1, "", ""),
+(14,"Vaz", "David",                    "2nd Cook",           16, 20, True,  33, "", ""),
+(15,"Velazques", "Hoover",             "2nd Cook",           17, 40, True,  15, "", ""),
+(16,"Williams", "Veniesa",             "2nd Cook",           18, 16, True,   2, "", ""),
+# missing person here
+(21,"Caddeus", "Winfred",              "1st Cook",           20, 40, True,  12, "", ""),
 
-(21,"Caddeus", "Winfred",              "1st Cook",           40, True,  12, "", ""),
-(22,"Elorch", "Omar",                  "1st Cook",           40, False, 14, "", ""),
-(23,"Portillo", "Jorge",               "1st Cook",           40, True,  11, "", ""),
-(24,"Almeda", "Jose Marcel",           "Shift Lead",         40, False, 16, "", ""),
-(25,"Buckley", "John",                 "Shift Lead",         40, False, 16, "", ""),
-(27,"Millard", "Brian",                "Sous Chef",          40, True,  16, "", ""),
-(59,"Vasconuelos", "Antonio",          "Shift Lead",         32, True,  10, "", ""),
-(28,"Barros", "Deila",                 "Prod-Aide",          40, True,  19, "", ""),
-(29,"Chodkowska", "Marzena",           "Prod-Aide",          40, True,  20, "", ""),
-(30,"Kozlowski", "Jadwiga",            "Prod-Aide",          40, False,  0, "", ""),
+(22,"Elorch", "Omar",                  "1st Cook",           21, 40, False, 14, "", ""),
+(18,"Diaz", "Ruben",                   "2nd Cook",           22, 40, False, 10, "", ""),
+(19,"El Mouttaki", "Mohamed",          "2nd Cook",           23, 40, True,  15, "", ""),
+(24,"Almeda", "Jose Marcel",           "Shift Lead",         24, 40, False, 16, "", ""),
+(25,"Buckley", "John",                 "Shift Lead",         25, 40, False, 16, "", ""),
+(23,"Portillo", "Jorge",               "1st Cook",           26, 40, True,  11, "", ""),
+(59,"Vasconuelos", "Antonio",          "Shift Lead",         27, 32, True,  10, "", ""),
+(27,"Millard", "Brian",                "Sous Chef",          28, 40, True,  16, "", ""),
+(61,"Rocha", "Fabio",                  "Sous Chef",          29, 40, False, 40, "", ""),
+(28,"Barros", "Deila",                 "Prod-Aide",          30, 40, True,  19, "", ""),
 
-(31,"Samuel", "Willie James",          "Prod-Aide",          40, True,  21, "", ""),
-(45,"Pyskaty", "Maria",                "Prod-Aide",          40, False, 38, "", ""),
-(46,"Terron", "Maria",                 "Prod-Aide",          40, False, 39, "", ""),
-(47,"Campbell", "Trevon",              "Prod-Aide",          40, True,  40, "", ""),
-(60,"Selman", "Deric",                 "Prod-Aide",          40, True,  18, "", ""),
-(32,"McCormack", "David",              "Material",           40, False, 24, "", ""),
-(33,"Fofana", "Abu",                   "Receiver",           40, True,  26, "", ""),
-(34,"Morano", "Juan",                  "Receiver",           40, False, 25, "", ""),
-(35,"Coren", "Gregorey",               "Sr. Material",       40, False, 23, "", ""),
-(36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       40, False, 27, "", ""),
-(40,"Echavarria", "Fernando",          "2nd Cook",           40, True,  39, "", ""),
+(62,"Briskaj", "Alketa",               "Prod-Aide",          31, 40, False, 40, "", ""),
+(29,"Chodkowska", "Marzena",           "Prod-Aide",          32, 40, True,  20, "", ""),
+(30,"Kozlowski", "Jadwiga",            "Prod-Aide",          33, 40, False,  0, "", ""),
+(63,"Mehari", "Meaza",                 "Prod-Aide",          34, 40, False, 40, "", ""),
+(31,"Samuel", "Willie James",          "Prod-Aide",          35, 40, True,  21, "", ""),
+(32,"McCormack", "David",              "Material",           36, 40, False, 24, "", ""),
+(60,"Selman", "Deric",                 "Prod-Aide",          37, 40, True,  18, "", ""),
+(64,"Velasquez", "Jesus",              "Prod-Aide",          38, 40, False, 40, "", ""),
+(33,"Fofana", "Abu",                   "Receiver",           39, 40, True,  26, "", ""),
+(34,"Morano", "Juan",                  "Receiver",           40, 40, False, 25, "", ""),
 
-(41,"Frontin", "Sheldon",              "2nd Cook",           40, True,  38, "", ""),
-(42,"Soriano", "Rene",                 "2nd Cook",           40, False, 41, "", ""),
-(43,"Cortell", "Glenn",                "2nd Cook",           40, True,  36, "", ""),
-(44,"Joseph", "Paul",                  "2nd Cook",           40, False, 37, "", ""),
-(49,"Danial", "Clebert",               "2nd Cook",           40, False,  0, "", ""),
-(50,"Guevara", "Henry",                "2nd Cook",           40, True,  30, "", ""),
-(51,"Hines", "Michael",                "2nd Cook",           40, True,   0, "", ""),
-(52,"Murcia", "Alex",                  "2nd Cook",           40, False, 28, "", ""),
-(53,"Way", "Shon",                     "2nd Cook",           40, False, 29, "", ""),
-(55,"Bailey", "James",                 "2nd Cook",            0, True,  36, "", ""),
-(56,"Miller", "Edward",                "2nd Cook",            0, True,  41, "", ""),
-(57,"Almeida", "Anthony",              "2nd Cook",           40, False, 32, "", ""),
-(58,"Alby", "Taoufik",                 "2nd Cook",           40, False, 40, "", ""),
+(35,"Coren", "Gregorey",               "Sr. Material",       41, 40, False, 23, "", ""),
+(36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       42, 40, False, 27, "", ""),
+(58,"Alby", "Taoufik",                 "2nd Cook",           43, 40, False, 40, "", ""),
+(40,"Echavarria", "Fernando",          "2nd Cook",           44, 40, True,  39, "", ""),
+(41,"Frontin", "Sheldon",              "2nd Cook",           45, 40, True,  38, "", ""),
+(42,"Soriano", "Rene",                 "2nd Cook",           46, 40, False, 41, "", ""),
+(43,"Cortell", "Glenn",                "2nd Cook",           47, 40, True,  36, "", ""),
+(44,"Joseph", "Paul",                  "2nd Cook",           48, 40, False, 37, "", ""),
+(45,"Pyskaty", "Maria",                "Prod-Aide",          49, 40, False, 38, "", ""),
+(46,"Terron", "Maria",                 "Prod-Aide",          50, 40, False, 39, "", ""),
 
-(61,"Rocha", "Fabio",                  "Sous Chef",          40, False, 40, "", ""),
-(62,"Briskaj", "Alketa",               "Prod-Aide",          40, False, 40, "", ""),
-(63,"Mehari", "Meaza",                 "Prod-Aide",          40, False, 40, "", ""),
-(64,"Velasquez", "Jesus",              "Prod-Aide",          40, False, 40, "", ""),
-(65,"Mayorga", "Tezla",                "2nd Cook",           40, False, 40, "", "")
+(47,"Campbell", "Trevon",              "Prod-Aide",          51, 40, True,  40, "", ""),
+( 2,"Kanina", "Ewa",                   "1st Cook",           52, 40, False, 35, "", ""),
+(57,"Almeida", "Anthony",              "2nd Cook",           53, 40, False, 32, "", ""),
+(49,"Danial", "Clebert",               "2nd Cook",           54, 40, False,  0, "", ""),
+(50,"Guevara", "Henry",                "2nd Cook",           55, 40, True,  30, "", ""),
+(51,"Hines", "Michael",                "2nd Cook",           56, 40, True,   0, "", ""),
+(52,"Murcia", "Alex",                  "2nd Cook",           57, 40, False, 28, "", ""),
+(53,"Way", "Shon",                     "2nd Cook",           58, 40, False, 29, "", ""),
+(55,"Bailey", "James",                 "2nd Cook",           59,  0, True,  36, "", ""),
+(56,"Miller", "Edward",                "2nd Cook",           60,  0, True,  41, "", "")
+
 ]
 
-workers = [Worker(int(d[0]), d[1], d[2], d[2], int(d[4]), d[5], int(d[6]), d[7], d[8]) for d in worker_data]
+workers = [Worker(int(d[0]), d[1], d[2], d[2], int(d[4]), int(d[5]), d[6], int(d[7]), d[8], d[9]) for d in worker_data]
 worker_map = {}
 for w in workers:
   worker_map[w.id] = w
@@ -961,7 +962,21 @@ def save_solution(sln, f):
       t = format_slot_for_file(slot)
       text_file.write(t)
   text_file.close()
+
+def save_solution_sorted(sln, f):
+  text_file = open(f, "w")
+
+  sorted_assignments = [(x[0], x[1], x[2]) for x in sln if x[2] > 0]
+  sorted_assignments.sort(key=lambda tup: find_worker_by_id(tup[2]).sort_order * 100 + tup[1])
     
+  for slot in sorted_assignments:
+    t = format_slot_comment_for_file(slot)
+    text_file.write(t)
+    t = format_slot_for_file(slot)
+    text_file.write(t)
+  text_file.close()
+
+
 def read_solution(sln, f):
   new_sln = [slot for slot in sln]
   for line in file(f):
@@ -1063,7 +1078,7 @@ def file_write_assignments():
   if not last_assignments_file_saved:
     last_assignments_file_saved = "assignments.txt"
   f = select_filename(last_assignments_file_saved)
-  save_solution(solution, f)
+  save_solution_sorted(solution, f)
   print "The solution has been saved to the file", last_assignments_file_saved
   file_menu()
 
