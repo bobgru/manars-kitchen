@@ -950,6 +950,27 @@ def format_slot_comment_for_file(slot):
  
   return "#%s,%s,%s\n" % (station_name, day_name, worker_name)
 
+
+def rmdups(xs):
+  seen = {}
+  new_list = [seen.setdefault(x, x) for x in xs if x not in seen]
+  return new_list
+
+def format_worker_comment_for_file(wid, worker_assignments):
+  # Prepare station data for comment
+  sids = rmdups([int(slot[0]) for slot in worker_assignments])
+  sids.sort()
+  ss = []
+  for sid in sids:
+    s = find_station_by_id(sid)
+    station_name = s.name
+    ss.append("%1d=%s" % (sid, s.name))
+  stations_comment = ", ".join(ss)
+  w = find_worker_by_id(wid)
+  worker_name = "%s %s" % (w.first_name, w.last_name) 
+  return "# %s\n# %s\n" % (worker_name, stations_comment)
+
+
 def format_slot_for_file(slot):
   return "%d,%d,%d\n" % slot
 
@@ -963,7 +984,7 @@ def save_solution(sln, f):
       text_file.write(t)
   text_file.close()
 
-def save_solution_sorted(sln, f):
+def save_solution_sorted_old(sln, f):
   text_file = open(f, "w")
 
   sorted_assignments = [(x[0], x[1], x[2]) for x in sln if x[2] > 0]
@@ -974,6 +995,32 @@ def save_solution_sorted(sln, f):
     text_file.write(t)
     t = format_slot_for_file(slot)
     text_file.write(t)
+  text_file.close()
+
+
+def save_solution_sorted(sln, f):
+  worker_assignment_map = {}
+  for w in workers:
+    sorted_assignments = [(x[0], x[1], x[2]) for x in sln if x[2] == w.id]
+    sorted_assignments.sort(key=lambda tup: find_worker_by_id(tup[2]).sort_order * 100 + tup[1])
+    worker_assignment_map[w.id] = sorted_assignments
+    
+  sorted_workers = [(w.id, w.sort_order) for w in workers]
+  sorted_workers.sort(key=lambda tup: tup[1])
+
+  text_file = open(f, "w")
+
+  for wtup in sorted_workers:
+    wid = wtup[0]
+    was = worker_assignment_map[wid]
+    t = format_worker_comment_for_file(wid, was)
+    text_file.write(t)
+
+    for slot in was:
+      t = format_slot_for_file(slot)
+      text_file.write(t)
+    text_file.write("\n")
+
   text_file.close()
 
 
