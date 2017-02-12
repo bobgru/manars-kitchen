@@ -12,15 +12,7 @@ import os
 # Edit menu
 #    manually add or remove assignment
 
-# Allow editing of files by names?
-
 # Add concept of week 1 vs. week 2
-
-# Add worker sort order -- used in writing out assignments by worker
-# Write out assignments by worker
-#    add comment with worker name and station name(s)
-
-
 
 
 def time_to_min(t):
@@ -1094,8 +1086,12 @@ def do_menu_action():
   exec_menu(choice)
 
 def select_filename(f):
-  # TODO
-  return f
+  prompt = "File (%s): " % f
+  choice = raw_input(prompt)
+  if not choice:
+    return f
+  else:
+    return choice
 
 def file_read_assignments():
   global solution
