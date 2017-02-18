@@ -169,70 +169,70 @@ class Worker(object):
 
 worker_data = [
 ( 1,"Dickinson", "Theron",             "1st Cook",            1, 40, False,  7, "", ""),
-(54,"Joseph", "Nicole",                "1st Cook",            2, 40, False, 14, "", ""),
+(54,"Joseph", "Nicole",                "1st Cook",            2, 40, False,  4, "", ""),
 ( 3,"Sales", "Geraldo",                "1st Cook",            3, 40, False,  9, "", ""),
 ( 4,"Carballo", "Fabio",               "2nd Cook",            4, 40, False,  1, "", ""),
 (17,"Carreiro", "Marcos",              "2nd Cook",            5, 40, False,  6, "", ""),
 ( 5,"Chludzinska", "Marianna",         "2nd Cook",            6, 40, True,   8, "", ""),
-( 6,"Lagrant", "Leroy",                "2nd Cook",            7, 40, True,  13, "", ""),
-( 7,"Law", "Philip",                   "2nd Cook",            8, 40, True,   3, "", ""),
+( 6,"Lagrant", "Leroy",                "2nd Cook",            7, 40, True,   0, "", ""),
+( 7,"Law", "Philip",                   "2nd Cook",            8, 40, True,   0, "", ""),
 ( 8,"Lefteri", "Fotaq",                "2nd Cook",            9, 40, False,  3, "", ""),
-( 9,"Lejentus", "Rene",                "2nd Cook",           10, 20, False,  0, "", ""),
+( 9,"Lejentus", "Rene",                "2nd Cook",           10, 20, False,  4, "", ""),
 
-(10,"Marku", "Zef",                    "2nd Cook",           11, 20, True,   0, "", ""),
-(65,"Mayorga", "Tezla",                "2nd Cook",           12, 40, False, 40, "", ""),
+(10,"Marku", "Zef",                    "2nd Cook",           11, 20, True,   5, "", ""),
+(65,"Mayorga", "Tezla",                "2nd Cook",           12, 40, False,  0, "", ""),
 (11,"Moreno", "Osvaldo",               "2nd Cook",           13,  0, True,   0, "", ""),
 (12,"Ortiz", "Angela",                 "2nd Cook",           14, 40, False,  6, "", ""),
 (13,"Sokolowska", "Czeslawa",          "2nd Cook",           15, 40, True,   1, "", ""),
-(14,"Vaz", "David",                    "2nd Cook",           16, 20, True,  33, "", ""),
-(15,"Velazques", "Hoover",             "2nd Cook",           17, 40, True,  15, "", ""),
+(14,"Vaz", "David",                    "2nd Cook",           16, 20, True,  14, "", ""),
+(15,"Velazques", "Hoover",             "2nd Cook",           17, 40, True,  14, "", ""),
 (16,"Williams", "Veniesa",             "2nd Cook",           18, 16, True,   2, "", ""),
 # missing person here
 (21,"Caddeus", "Winfred",              "1st Cook",           20, 40, True,  12, "", ""),
 
-(22,"Elorch", "Omar",                  "1st Cook",           21, 40, False, 14, "", ""),
-(18,"Diaz", "Ruben",                   "2nd Cook",           22, 40, False, 10, "", ""),
+(22,"Elorch", "Omar",                  "1st Cook",           21, 40, False, 15, "", ""),
+(18,"Diaz", "Ruben",                   "2nd Cook",           22, 40, False, 11, "", ""),
 (19,"El Mouttaki", "Mohamed",          "2nd Cook",           23, 40, True,  15, "", ""),
 (24,"Almeda", "Jose Marcel",           "Shift Lead",         24, 40, False, 16, "", ""),
 (25,"Buckley", "John",                 "Shift Lead",         25, 40, False, 16, "", ""),
-(23,"Portillo", "Jorge",               "1st Cook",           26, 40, True,  11, "", ""),
-(59,"Vasconuelos", "Antonio",          "Shift Lead",         27, 32, True,  10, "", ""),
-(27,"Millard", "Brian",                "Sous Chef",          28, 40, True,  16, "", ""),
-(61,"Rocha", "Fabio",                  "Sous Chef",          29, 40, False, 40, "", ""),
+(23,"Portillo", "Jorge",               "1st Cook",           26, 40, True,  10, "", ""),
+(59,"Vasconuelos", "Antonio",          "Shift Lead",         27, 32, True,  13, "", ""),
+(27,"Millard", "Brian",                "Sous Chef",          28, 40, True,  47, "", ""),
+(61,"Rocha", "Fabio",                  "Sous Chef",          29, 40, False, 48, "", ""),
 (28,"Barros", "Deila",                 "Prod-Aide",          30, 40, True,  19, "", ""),
 
-(62,"Briskaj", "Alketa",               "Prod-Aide",          31, 40, False, 40, "", ""),
+(62,"Briskaj", "Alketa",               "Prod-Aide",          31, 40, False, 22, "", ""),
 (29,"Chodkowska", "Marzena",           "Prod-Aide",          32, 40, True,  20, "", ""),
-(30,"Kozlowski", "Jadwiga",            "Prod-Aide",          33, 40, False,  0, "", ""),
-(63,"Mehari", "Meaza",                 "Prod-Aide",          34, 40, False, 40, "", ""),
+(30,"Kozlowski", "Jadwiga",            "Prod-Aide",          33, 40, False, 20, "", ""),
+(63,"Mehari", "Meaza",                 "Prod-Aide",          34, 40, False, 22, "", ""),
 (31,"Samuel", "Willie James",          "Prod-Aide",          35, 40, True,  21, "", ""),
 (32,"McCormack", "David",              "Material",           36, 40, False, 24, "", ""),
-(60,"Selman", "Deric",                 "Prod-Aide",          37, 40, True,  18, "", ""),
-(64,"Velasquez", "Jesus",              "Prod-Aide",          38, 40, False, 40, "", ""),
+(60,"Selman", "Deric",                 "Prod-Aide",          37, 40, True,  46, "", ""),
+(64,"Velasquez", "Jesus",              "Prod-Aide",          38, 40, False, 46, "", ""),
 (33,"Fofana", "Abu",                   "Receiver",           39, 40, True,  26, "", ""),
 (34,"Morano", "Juan",                  "Receiver",           40, 40, False, 25, "", ""),
 
 (35,"Coren", "Gregorey",               "Sr. Material",       41, 40, False, 23, "", ""),
 (36,"Cuthbert Jr", "Ezekiel",          "Supply Clerk",       42, 40, False, 27, "", ""),
-(58,"Alby", "Taoufik",                 "2nd Cook",           43, 40, False, 40, "", ""),
+(58,"Alby", "Taoufik",                 "2nd Cook",           43, 40, False, 39, "", ""),
 (40,"Echavarria", "Fernando",          "2nd Cook",           44, 40, True,  39, "", ""),
 (41,"Frontin", "Sheldon",              "2nd Cook",           45, 40, True,  38, "", ""),
 (42,"Soriano", "Rene",                 "2nd Cook",           46, 40, False, 41, "", ""),
-(43,"Cortell", "Glenn",                "2nd Cook",           47, 40, True,  36, "", ""),
-(44,"Joseph", "Paul",                  "2nd Cook",           48, 40, False, 37, "", ""),
-(45,"Pyskaty", "Maria",                "Prod-Aide",          49, 40, False, 38, "", ""),
-(46,"Terron", "Maria",                 "Prod-Aide",          50, 40, False, 39, "", ""),
+(43,"Cortell", "Glenn",                "2nd Cook",           47, 40, True,  37, "", ""),
+(44,"Joseph", "Paul",                  "2nd Cook",           48, 40, False, 36, "", ""),
+(45,"Pyskaty", "Maria",                "Prod-Aide",          49, 40, False, 43, "", ""),
+(46,"Terron", "Maria",                 "Prod-Aide",          50, 40, False, 42, "", ""),
 
-(47,"Campbell", "Trevon",              "Prod-Aide",          51, 40, True,  40, "", ""),
+(47,"Campbell", "Trevon",              "Prod-Aide",          51, 40, True,  44, "", ""),
 ( 2,"Kanina", "Ewa",                   "1st Cook",           52, 40, False, 35, "", ""),
-(57,"Almeida", "Anthony",              "2nd Cook",           53, 40, False, 32, "", ""),
-(49,"Danial", "Clebert",               "2nd Cook",           54, 40, False,  0, "", ""),
+(57,"Almeida", "Anthony",              "2nd Cook",           53, 40, False, 33, "", ""),
+(49,"Danial", "Clebert",               "2nd Cook",           54, 40, False, 32, "", ""),
 (50,"Guevara", "Henry",                "2nd Cook",           55, 40, True,  30, "", ""),
-(51,"Hines", "Michael",                "2nd Cook",           56, 40, True,   0, "", ""),
+(51,"Hines", "Michael",                "2nd Cook",           56, 40, True,  29, "", ""),
 (52,"Murcia", "Alex",                  "2nd Cook",           57, 40, False, 28, "", ""),
 (53,"Way", "Shon",                     "2nd Cook",           58, 40, False, 29, "", ""),
-(55,"Bailey", "James",                 "2nd Cook",           59,  0, True,  36, "", ""),
-(56,"Miller", "Edward",                "2nd Cook",           60,  0, True,  41, "", "")
+(55,"Bailey", "James",                 "2nd Cook",           59,  0, True,   0, "", ""),
+(56,"Miller", "Edward",                "2nd Cook",           60,  0, True,   0, "", "")
 
 ]
 
@@ -1163,6 +1163,17 @@ def report_undertime():
   print_undertime_workers(solution)  
   reports_menu()
 
+def worker_get_info():
+  pass
+
+def worker_get_assignments():
+  pass
+
+def worker_add_assignment():
+  pass
+
+def worker_remove_assignment():
+  pass
 
 def main_menu():
   print "Enter the number of a command or submenu:"
@@ -1170,6 +1181,7 @@ def main_menu():
   print "2. Edit menu"
   print "3. Options menu"
   print "4. Reports menu"
+  print "5. Worker menu"
   print "\n0. Quit"
   do_menu_action()
   
@@ -1227,6 +1239,19 @@ def reports_menu():
   print "0. Quit"
   do_menu_action()
 
+
+def worker_menu():
+  print "Worker Menu"
+  print
+  print "51. Get personal information"
+  print "52. Get assignments"
+  print "53. Add assignment"
+  print "54. Remove assignment"
+  print "9. Back"
+  print "0. Quit"
+  do_menu_action()
+
+
 def exit():
   sys.exit()
  
@@ -1252,6 +1277,12 @@ menu_actions = {
   , '42': report_assignments_by_station
   , '43': report_overtime
   , '44': report_undertime
+
+  , '5': worker_menu
+  , '51': worker_get_info
+  , '52': worker_get_assignments
+  , '53': worker_add_assignment
+  , '54': worker_remove_assignment
 }
 
 if __name__ == "__main__":
