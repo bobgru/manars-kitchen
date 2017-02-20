@@ -20,6 +20,30 @@ import worker_capability
 # Add concept of week 1 vs. week 2
 
 
+class Assignment(object):
+  def __init__(self, sid, dow, wid):
+    self.sid = sid
+    self.dow = dow
+    self.wid = wid
+
+  def to_tuple(self):
+    return (self.sid, self.dow, self.wid)
+
+
+class WeeklySchedule(object):
+  def __init__(self, start_date, end_date, filename_zero, filename):
+    self.start_date    = start_date
+    self.end_date      = end_date
+    self.filename_zero = filename_zero
+    self.filename      = filename
+
+    self._assignments  = []
+    
+class AppConfig(object):
+  def __init__(self):
+    self.current_week = WeeklySchedule("2017-03-05", "2017-03-11", "assignments-zero.txt", "assignments.txt")
+
+
 def print_solution_by_tuple(sln):
   for x  in sln:
     sid = x[0]
