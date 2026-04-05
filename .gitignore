@@ -1,4 +1,8 @@
-*.pyc
-*.swp
-
-
+.stack-work
+.claude
+stack.yaml.lock
+run-db/
+demo-db/
+export.json
+--help*
+dist-newstyle/

@@ -1,0 +1,229 @@
+# === Shifts ===
+shift create morning 6 10
+shift create midday 10 14
+shift create lunch-rush 11 15
+shift create afternoon 14 18
+shift create evening 17 20
+
+# === Skills ===
+skill create 1 grill
+skill create 2 pizza
+skill create 3 sandwich
+skill create 4 beverage
+skill create 5 receiving
+skill create 6 register
+skill create 7 busboy
+skill create 8 master-chef
+
+# master-chef implies all food prep skills
+skill implication 8 1
+skill implication 8 2
+skill implication 8 3
+skill implication 8 4
+
+# cooking skills imply busboy
+skill implication 1 7
+skill implication 2 7
+skill implication 3 7
+skill implication 4 7
+
+# pizza, grill, sandwich imply beverage
+skill implication 1 4
+skill implication 2 4
+skill implication 3 4
+
+# pizza, sandwich, beverage imply register
+skill implication 2 6
+skill implication 3 6
+skill implication 4 6
+
+# === Stations ===
+station add 1 grill
+station add 2 pizza
+station add 3 sandwich
+station add 4 beverage
+station add 5 receiving
+station add 6 register
+station add 7 busboy
+
+station require-skill 1 1
+station require-skill 2 2
+station require-skill 3 3
+station require-skill 4 4
+station require-skill 5 5
+station require-skill 6 6
+station require-skill 7 7
+
+# Station operating hours
+station set-hours 1 10 17
+station set-hours 2 11 16
+station set-hours 3 10 17
+station set-hours 4 7 17
+station set-hours 5 6 11
+station set-hours 6 7 17
+station set-hours 7 10 18
+
+# Multi-station hours (non-peak: workers can cover 2 stations)
+# Early morning (7-10) and late afternoon (15-18) are non-peak
+station set-multi-hours 1 10 12
+station set-multi-hours 2 11 13
+station set-multi-hours 3 10 12
+station set-multi-hours 4 7 10
+station set-multi-hours 6 7 10
+station set-multi-hours 7 10 12
+station set-multi-hours 1 15 17
+station set-multi-hours 2 15 16
+station set-multi-hours 3 15 17
+station set-multi-hours 4 15 17
+station set-multi-hours 6 15 17
+station set-multi-hours 7 15 18
+
+# Receiving closed on weekends
+station close-day 5 saturday
+station close-day 5 sunday
+
+# Sunday: light crew (grill, beverage, register only)
+station close-day 2 sunday
+station close-day 3 sunday
+station close-day 7 sunday
+
+# === Workers (11 + admin) ===
+user create marco changeme normal
+user create lucia changeme normal
+user create tony changeme normal
+user create maria changeme normal
+user create sam changeme normal
+user create rosa changeme normal
+user create jake changeme normal
+user create nina changeme normal
+user create carlos changeme normal
+user create pat changeme normal
+user create alex changeme normal
+
+# === Worker Skills ===
+# Admin (W1): master chef, available as last resort
+worker grant-skill 1 8
+# Marco (W2): master chef
+worker grant-skill 2 8
+# Lucia (W3): master chef, per-diem
+worker grant-skill 3 8
+# Tony (W4): grill + sandwich
+worker grant-skill 4 1
+worker grant-skill 4 3
+# Maria (W5): pizza + beverage
+worker grant-skill 5 2
+worker grant-skill 5 4
+# Sam (W6): receiving + sandwich
+worker grant-skill 6 5
+worker grant-skill 6 3
+# Rosa (W7): receiving + busboy + sandwich + beverage + pizza
+worker grant-skill 7 5
+worker grant-skill 7 7
+worker grant-skill 7 3
+worker grant-skill 7 4
+worker grant-skill 7 2
+# Jake (W8): register + busboy + sandwich + pizza
+worker grant-skill 8 6
+worker grant-skill 8 7
+worker grant-skill 8 3
+worker grant-skill 8 2
+# Nina (W9): beverage + register + sandwich
+worker grant-skill 9 4
+worker grant-skill 9 6
+worker grant-skill 9 3
+# Carlos (W10): sandwich + busboy + grill
+worker grant-skill 10 3
+worker grant-skill 10 7
+worker grant-skill 10 1
+# Pat (W11): pizza + busboy + sandwich + grill
+worker grant-skill 11 2
+worker grant-skill 11 7
+worker grant-skill 11 3
+worker grant-skill 11 1
+# Alex (W12): experienced cook (master-chef)
+worker grant-skill 12 8
+
+# === Worker Hours ===
+worker set-hours 1 0
+worker set-hours 2 40
+worker set-hours 3 4
+worker set-hours 4 40
+worker set-hours 5 40
+worker set-hours 6 40
+worker set-hours 7 40
+worker set-hours 8 40
+worker set-hours 9 40
+worker set-hours 10 40
+worker set-hours 11 40
+worker set-hours 12 40
+
+# No overtime opt-in — we want a schedule with zero planned overtime
+# Admin is last resort only
+worker set-overtime 1 on
+
+# === Preferences ===
+# Workers with cooking skills prefer their stations over busboy/register
+# Marco (W2): master chef — prefers grill, pizza, sandwich, beverage
+worker set-prefs 2 1 2 3 4
+# Lucia (W3): master chef — prefers grill, pizza, sandwich, beverage
+worker set-prefs 3 1 2 3 4
+# Tony (W4): grill + sandwich — prefers grill, sandwich
+worker set-prefs 4 1 3
+# Maria (W5): pizza + beverage — prefers pizza, beverage
+worker set-prefs 5 2 4
+# Nina (W9): beverage + register — prefers beverage
+worker set-prefs 9 4
+# Carlos (W10): sandwich + busboy — prefers sandwich
+worker set-prefs 10 3
+# Pat (W11): pizza + busboy — prefers pizza
+worker set-prefs 11 2
+# Jake (W8): register + busboy — prefers register
+worker set-prefs 8 6
+# Alex (W12): master chef — prefers grill, pizza, sandwich, beverage
+worker set-prefs 12 1 2 3 4
+
+# === Shift Preferences ===
+# Marco (W2): prefers morning
+worker set-shift-pref 2 morning midday
+# Lucia (W3): prefers morning (per-diem, 4h)
+worker set-shift-pref 3 morning
+# Tony (W4): prefers afternoon and evening
+worker set-shift-pref 4 afternoon evening
+# Maria (W5): prefers morning
+worker set-shift-pref 5 morning midday
+# Sam (W6): prefers morning
+worker set-shift-pref 6 morning
+# Rosa (W7): no preference (flexible)
+# Jake (W8): prefers evening, weekend
+worker set-shift-pref 8 evening weekend
+# Nina (W9): prefers midday and afternoon
+worker set-shift-pref 9 midday afternoon
+# Carlos (W10): prefers morning and midday
+worker set-shift-pref 10 morning midday
+# Pat (W11): prefers afternoon
+worker set-shift-pref 11 afternoon
+# Alex (W12): prefers midday and afternoon
+worker set-shift-pref 12 midday afternoon
+
+# === Absences ===
+# Nina (W9) has approved absence on Friday Apr 10
+absence-type create 1 vacation on
+absence set-allowance 9 1 10
+absence request 1 9 2026-04-10 2026-04-10
+absence approve 1
+
+# === Scheduler Config ===
+config show
+
+# === Seniority ===
+# Marco (W2) and Alex (W12) are experienced: seniority level 2
+worker set-seniority 2 2
+worker set-seniority 12 2
+
+# === Generate Schedule ===
+schedule create week1 2026-04-06
+
+# === Review ===
+schedule view week1
+schedule hours week1
+schedule diagnose week1
