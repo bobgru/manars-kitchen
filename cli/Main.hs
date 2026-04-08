@@ -11,7 +11,7 @@ import Domain.Types (WorkerId(..))
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..))
 import Service.Auth (register, login)
-import CLI.App (AppState(..), runRepl, runDemo)
+import CLI.App (mkAppState, runRepl, runDemo)
 
 main :: IO ()
 main = do
@@ -30,7 +30,8 @@ main = do
             (_conn, repo) <- mkSQLiteRepo dbPath
             ensureAdminExists repo
             user <- loginLoop repo
-            runRepl (AppState repo user)
+            st <- mkAppState repo user
+            runRepl st
 
 -- | Parse all flags from args in any order.
 -- Returns (delay in microseconds, remaining positional/flag args).

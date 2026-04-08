@@ -4,5 +4,6 @@ stack.yaml.lock
 run-db/
 demo-db/
 export.json
+demo-export.json
 --help*
 dist-newstyle/

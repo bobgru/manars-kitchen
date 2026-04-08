@@ -69,6 +69,9 @@ mkSQLiteRepo path = do
         , repoLogCommand     = sqlLogCommand conn
         , repoGetAuditLog    = sqlGetAuditLog conn
         , repoWipeAll        = sqlWipeAll conn
+        , repoSavepoint      = sqlSavepoint conn
+        , repoRelease        = sqlRelease conn
+        , repoRollbackTo     = sqlRollbackTo conn
         })
 
 -- =====================================================================
@@ -736,6 +739,26 @@ showDow Thursday  = "thursday"
 showDow Friday    = "friday"
 showDow Saturday  = "saturday"
 showDow Sunday    = "sunday"
+
+-- =====================================================================
+-- Checkpoint (SQLite savepoints)
+-- =====================================================================
+
+sqlSavepoint :: Connection -> String -> IO ()
+sqlSavepoint conn name =
+    execute_ conn (Query (fromString ("SAVEPOINT \"" ++ sanitize name ++ "\"")))
+
+sqlRelease :: Connection -> String -> IO ()
+sqlRelease conn name =
+    execute_ conn (Query (fromString ("RELEASE SAVEPOINT \"" ++ sanitize name ++ "\"")))
+
+sqlRollbackTo :: Connection -> String -> IO ()
+sqlRollbackTo conn name =
+    execute_ conn (Query (fromString ("ROLLBACK TO SAVEPOINT \"" ++ sanitize name ++ "\"")))
+
+-- | Basic sanitization: remove quotes to prevent SQL injection.
+sanitize :: String -> String
+sanitize = filter (/= '"')
 
 parseDow :: String -> DayOfWeek
 parseDow "monday"    = Monday

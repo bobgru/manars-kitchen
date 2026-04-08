@@ -1,11 +1,14 @@
 module CLI.App
     ( AppState(..)
+    , mkAppState
     , runRepl
     , runDemo
     ) where
 
 import System.IO (hFlush, stdout, hSetEcho, stdin)
 import Control.Concurrent (threadDelay)
+import Data.Char (toLower)
+import Data.IORef
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.ByteString.Lazy as BL
@@ -35,11 +38,24 @@ import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
 import CLI.Commands (Command(..), parseCommand)
 import CLI.Display
+import CLI.Resolve
+    ( EntityKind(..), EntityRef(..), SessionContext
+    , emptyContext, resolveInput, lookupByName, entityKindName
+    )
 
 data AppState = AppState
-    { asRepo :: !Repository
-    , asUser :: !User
+    { asRepo       :: !Repository
+    , asUser       :: !User
+    , asContext    :: !(IORef SessionContext)
+    , asCheckpoints :: !(IORef [String])
     }
+
+-- | Create an AppState with initialized IORefs.
+mkAppState :: Repository -> User -> IO AppState
+mkAppState repo user = do
+    ctxRef <- newIORef emptyContext
+    cpRef  <- newIORef []
+    return (AppState repo user ctxRef cpRef)
 
 runRepl :: AppState -> IO ()
 runRepl st = do
@@ -48,20 +64,37 @@ runRepl st = do
     putStr (uname ++ " [" ++ role ++ "]> ")
     hFlush stdout
     line <- getLine
+    -- Quick-parse for commands that don't need resolution
     case parseCommand line of
         Quit -> putStrLn "Goodbye."
-        Help -> printHelp (userRole (asUser st)) >> runRepl st
-        cmd  -> do
-            when (isMutating cmd) $
-                repoLogCommand (asRepo st) uname line
-            handleCommand st cmd
-            runRepl st
+        Help -> printHelpSummary (userRole (asUser st)) >> runRepl st
+        HelpGroup g -> printHelpGroup (userRole (asUser st)) g >> runRepl st
+        CmdUse typ ref -> handleUse st typ ref >> runRepl st
+        ContextView -> handleContextView st >> runRepl st
+        ContextClear -> handleContextClear st >> runRepl st
+        ContextClearType typ -> handleContextClearType st typ >> runRepl st
+        CheckpointCreate mName -> handleCheckpointCreate st mName >> runRepl st
+        CheckpointCommit -> handleCheckpointCommit st >> runRepl st
+        CheckpointRollback mName -> handleCheckpointRollback st mName >> runRepl st
+        CheckpointList -> handleCheckpointList st >> runRepl st
+        _ -> do
+            -- Resolve entity names and dot substitution
+            resolved <- resolveInput (asRepo st) (asContext st) line
+            case resolved of
+                Left err -> putStrLn err >> runRepl st
+                Right resolvedLine -> do
+                    let cmd = parseCommand resolvedLine
+                    when (isMutating cmd) $
+                        repoLogCommand (asRepo st) uname line  -- log original input
+                    handleCommand st cmd
+                    runRepl st
 
 -- | Commands that modify state and should be logged.
 isMutating :: Command -> Bool
 isMutating cmd = case cmd of
     ScheduleList        -> False
     ScheduleView _      -> False
+    ScheduleViewCompact _ -> False
     ScheduleViewByWorker _  -> False
     ScheduleViewByStation _ -> False
     ScheduleHours _     -> False
@@ -77,6 +110,15 @@ isMutating cmd = case cmd of
     VacationRemaining _ -> False
     UserList            -> False
     Help                -> False
+    HelpGroup _         -> False
+    CmdUse _ _          -> False
+    ContextView         -> False
+    ContextClear        -> False
+    ContextClearType _  -> False
+    CheckpointCreate _  -> False
+    CheckpointCommit    -> False
+    CheckpointRollback _ -> False
+    CheckpointList      -> False
     Quit                -> False
     Unknown _           -> False
     ConfigShow            -> False
@@ -114,6 +156,23 @@ handleCommand st cmd = case cmd of
                         [ (StationId sid, sname)
                         | (StationId sid, sname) <- stations ]
                 putStr (displayScheduleTable workerNames stationNames
+                           Calendar.defaultHours (scStationHours skillCtx) s)
+
+    ScheduleViewCompact name -> do
+        ms <- repoLoadSchedule (asRepo st) name
+        case ms of
+            Nothing -> putStrLn "Schedule not found."
+            Just s  -> do
+                users <- repoListUsers (asRepo st)
+                stations <- SW.listStations (asRepo st)
+                skillCtx <- repoLoadSkillCtx (asRepo st)
+                let workerNames = Map.fromList
+                        [ (userWorkerId u, uname)
+                        | u <- users, let Username uname = userName u ]
+                    stationNames = Map.fromList
+                        [ (StationId sid, sname)
+                        | (StationId sid, sname) <- stations ]
+                putStr (displayScheduleCompact workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
     ScheduleViewByWorker name -> do
@@ -715,8 +774,6 @@ parseDayOfWeek s = case map toLower s of
     "sa"        -> Just Saturday
     "su"        -> Just Sunday
     _           -> Nothing
-  where
-    toLower c = if c >= 'A' && c <= 'Z' then toEnum (fromEnum c + 32) else c
 
 -- | Replay options.
 data ReplayOpts = ReplayOpts
@@ -771,94 +828,287 @@ runDemo repo delayUs cmdLines = do
     case mUser of
         Nothing -> putStrLn "ERROR: admin user not found after creation"
         Just adminUser -> do
-            let st = AppState repo adminUser
-                entries = [("", "", c) | c <- cmdLines]
-            let opts = ReplayOpts delayUs (delayUs > 0)
+            st <- mkAppState repo adminUser
+            let entries = [("", "", c) | c <- cmdLines]
+                opts = ReplayOpts delayUs (delayUs > 0)
             replayCommands opts st entries
+            -- Auto-export demo data
+            dat <- Export.gatherExport repo Nothing
+            let exportPath = "demo-export.json"
+            BL.writeFile exportPath (Export.encodeExport dat)
+            let nSk = length (Export.expSkills dat)
+                nSt = length (Export.expStations dat)
+                nWk = length (Export.expWorkers dat)
+            putStrLn ("\nExported demo data to " ++ exportPath
+                     ++ " (" ++ show nSk ++ " skills, "
+                     ++ show nSt ++ " stations, "
+                     ++ show nWk ++ " workers)")
 
-printHelp :: Role -> IO ()
-printHelp role = do
-    putStrLn "Available commands:"
+-- -----------------------------------------------------------------
+-- Session context commands
+-- -----------------------------------------------------------------
+
+parseEntityKind :: String -> Maybe EntityKind
+parseEntityKind s = case map toLower s of
+    "worker"       -> Just EWorker
+    "skill"        -> Just ESkill
+    "station"      -> Just EStation
+    "absence-type" -> Just EAbsenceType
+    _              -> Nothing
+
+handleUse :: AppState -> String -> String -> IO ()
+handleUse st typ ref =
+    case parseEntityKind typ of
+        Nothing -> putStrLn ("Unknown entity type: " ++ typ
+                            ++ ". Valid types: worker, skill, station, absence-type")
+        Just kind -> do
+            result <- lookupByName (asRepo st) kind ref
+            case result of
+                Left err -> putStrLn err
+                Right idStr -> do
+                    let eid = read idStr :: Int
+                    modifyIORef' (asContext st) (Map.insert kind (EntityRef eid ref))
+                    putStrLn ("Context set: " ++ entityKindName kind
+                             ++ " = " ++ ref ++ " (ID " ++ show eid ++ ")")
+
+handleContextView :: AppState -> IO ()
+handleContextView st = do
+    ctx <- readIORef (asContext st)
+    if Map.null ctx
+        then putStrLn "No context set."
+        else do
+            putStrLn "Current context:"
+            mapM_ (\(kind, EntityRef eid name) ->
+                putStrLn ("  " ++ entityKindName kind
+                         ++ ": " ++ name ++ " (ID " ++ show eid ++ ")")
+                ) (Map.toList ctx)
+
+handleContextClear :: AppState -> IO ()
+handleContextClear st = do
+    writeIORef (asContext st) emptyContext
+    putStrLn "Context cleared."
+
+handleContextClearType :: AppState -> String -> IO ()
+handleContextClearType st typ =
+    case parseEntityKind typ of
+        Nothing -> putStrLn ("Unknown entity type: " ++ typ
+                            ++ ". Valid types: worker, skill, station, absence-type")
+        Just kind -> do
+            modifyIORef' (asContext st) (Map.delete kind)
+            putStrLn ("Cleared " ++ entityKindName kind ++ " context.")
+
+-- -----------------------------------------------------------------
+-- Checkpoint commands
+-- -----------------------------------------------------------------
+
+handleCheckpointCreate :: AppState -> Maybe String -> IO ()
+handleCheckpointCreate st mName = do
+    stack <- readIORef (asCheckpoints st)
+    let name = case mName of
+            Just n  -> n
+            Nothing -> "checkpoint-" ++ show (length stack + 1)
+    repoSavepoint (asRepo st) name
+    writeIORef (asCheckpoints st) (name : stack)
+    putStrLn ("Checkpoint created: " ++ name)
+
+handleCheckpointCommit :: AppState -> IO ()
+handleCheckpointCommit st = do
+    stack <- readIORef (asCheckpoints st)
+    case stack of
+        [] -> putStrLn "No active checkpoint."
+        (name : rest) -> do
+            repoRelease (asRepo st) name
+            writeIORef (asCheckpoints st) rest
+            putStrLn ("Checkpoint committed: " ++ name)
+
+handleCheckpointRollback :: AppState -> Maybe String -> IO ()
+handleCheckpointRollback st mName = do
+    stack <- readIORef (asCheckpoints st)
+    case stack of
+        [] -> putStrLn "No active checkpoint."
+        (top : _) -> case mName of
+            Nothing -> do
+                repoRollbackTo (asRepo st) top
+                putStrLn ("Rolled back to: " ++ top)
+            Just target ->
+                if target `elem` stack
+                then do
+                    -- Rollback to the named checkpoint, discard newer ones
+                    repoRollbackTo (asRepo st) target
+                    let trimmed = dropWhile (/= target) stack
+                    writeIORef (asCheckpoints st) trimmed
+                    putStrLn ("Rolled back to: " ++ target)
+                else putStrLn ("Unknown checkpoint: " ++ target
+                              ++ ". Active: " ++ unwords (reverse stack))
+
+handleCheckpointList :: AppState -> IO ()
+handleCheckpointList st = do
+    stack <- readIORef (asCheckpoints st)
+    case stack of
+        [] -> putStrLn "No active checkpoints."
+        _  -> do
+            putStrLn "Active checkpoints:"
+            mapM_ (\(i, name) ->
+                putStrLn ("  " ++ show i ++ ". " ++ name)
+                ) (zip [(1::Int)..] (reverse stack))
+
+-- -----------------------------------------------------------------
+-- Help registry
+-- -----------------------------------------------------------------
+
+-- | (group, isAdminOnly, syntax, description)
+type HelpEntry = (String, Bool, String, String)
+
+helpRegistry :: [HelpEntry]
+helpRegistry =
+    -- Schedule (user)
+    [ ("schedule", False, "schedule list",                   "List saved schedules")
+    , ("schedule", False, "schedule view <name>",            "View a schedule (table)")
+    , ("schedule", False, "schedule view-by-worker <name>",  "View schedule grouped by worker")
+    , ("schedule", False, "schedule view-by-station <name>", "View schedule grouped by station")
+    , ("schedule", False, "schedule hours <name>",           "Worker hours summary")
+    , ("schedule", False, "schedule view-compact <name>",     "View schedule (compact, 100-col)")
+    , ("schedule", False, "schedule diagnose <name>",        "Diagnose unfilled positions")
+    -- Schedule (admin)
+    , ("schedule", True,  "schedule create <name> <date>",   "Create schedule (week of date)")
+    , ("schedule", True,  "schedule delete <name>",          "Delete a schedule")
+    , ("schedule", True,  "schedule clear <name>",           "Clear all assignments")
+    , ("schedule", True,  "assign <sched> <wid> <sid> <date> <hour>", "Assign worker to station/slot")
+    , ("schedule", True,  "unassign <sched> <wid> <sid> <date> <hour>", "Remove assignment")
+    -- Skill
+    , ("skill",    True,  "skill create <id> <name>",        "Create a skill")
+    , ("skill",    False, "skill list",                      "List all skills")
+    , ("skill",    True,  "skill implication <a> <b>",       "Skill A implies skill B")
+    , ("skill",    False, "skill info",                      "Show skill context")
+    -- Station
+    , ("station",  True,  "station add <id> <name>",         "Add a station")
+    , ("station",  False, "station list",                    "List stations")
+    , ("station",  True,  "station remove <id>",             "Remove a station")
+    , ("station",  True,  "station set-hours <id> <start> <end>", "Set station operating hours")
+    , ("station",  True,  "station close-day <id> <day>",    "Close station on day of week")
+    , ("station",  True,  "station set-multi-hours <id> <start> <end>", "Set multi-station hours")
+    , ("station",  True,  "station require-skill <sid> <skid>", "Require skill for station")
+    -- Worker
+    , ("worker",   True,  "worker grant-skill <wid> <sid>",  "Grant skill to worker")
+    , ("worker",   True,  "worker revoke-skill <wid> <sid>", "Revoke skill from worker")
+    , ("worker",   True,  "worker set-hours <wid> <hours>",  "Set max weekly hours")
+    , ("worker",   True,  "worker set-overtime <wid> <on|off>", "Toggle overtime opt-in")
+    , ("worker",   True,  "worker set-prefs <wid> <sid...>", "Set station preferences")
+    , ("worker",   True,  "worker set-shift-pref <wid> <shift...>", "Set shift preferences")
+    , ("worker",   True,  "worker set-weekend-only <wid> <on|off>", "Mark worker as weekend-only")
+    , ("worker",   True,  "worker set-variety <wid> <on|off>", "Toggle variety preference")
+    , ("worker",   True,  "worker set-seniority <wid> <level>", "Set seniority level")
+    , ("worker",   True,  "worker set-cross-training <wid> <sid>", "Add cross-training goal")
+    , ("worker",   True,  "worker clear-cross-training <wid> <sid>", "Remove cross-training goal")
+    , ("worker",   True,  "worker avoid-pairing <w1> <w2>",  "Prevent concurrent scheduling")
+    , ("worker",   True,  "worker clear-avoid-pairing <w1> <w2>", "Clear avoid-pairing")
+    , ("worker",   True,  "worker prefer-pairing <w1> <w2>", "Prefer concurrent scheduling")
+    , ("worker",   True,  "worker clear-prefer-pairing <w1> <w2>", "Clear prefer-pairing")
+    , ("worker",   False, "worker info",                     "Show worker context")
+    -- Shift
+    , ("shift",    True,  "shift create <name> <start> <end>", "Create a shift (hours)")
+    , ("shift",    False, "shift list",                      "List configured shifts")
+    , ("shift",    True,  "shift delete <name>",             "Delete a shift")
+    -- Absence
+    , ("absence",  False, "absence request <tid> <wid> <start> <end>", "Request an absence")
+    , ("absence",  False, "absence list",                    "List your absences")
+    , ("absence",  False, "vacation remaining <tid>",        "Check remaining vacation days")
+    , ("absence",  True,  "absence-type create <id> <name> <on|off>", "Create absence type")
+    , ("absence",  True,  "absence-type list",               "List absence types")
+    , ("absence",  True,  "absence set-allowance <wid> <tid> <days>", "Set worker allowance")
+    , ("absence",  True,  "absence approve <id>",            "Approve absence request")
+    , ("absence",  True,  "absence reject <id>",             "Reject absence request")
+    , ("absence",  True,  "absence list-pending",            "List pending requests")
+    -- Config
+    , ("config",   True,  "config show",                     "Show scheduler config")
+    , ("config",   True,  "config set <key> <value>",        "Set a config parameter")
+    , ("config",   True,  "config preset <name>",            "Apply a named preset")
+    , ("config",   True,  "config preset-list",              "List available presets")
+    , ("config",   True,  "config reset",                    "Reset config to defaults")
+    -- Pin
+    , ("pin",      True,  "pin <wid> <sid> <day> <hour|shift>", "Pin worker to station/slot")
+    , ("pin",      True,  "unpin <wid> <sid> <day> <hour|shift>", "Remove pin")
+    , ("pin",      True,  "pin list",                        "List pinned assignments")
+    -- Export
+    , ("export",   True,  "export <file>",                   "Export all data to JSON")
+    , ("export",   True,  "export <schedule> <file>",        "Export one schedule to JSON")
+    , ("export",   True,  "import <file>",                   "Import data from JSON")
+    -- Audit
+    , ("audit",    True,  "audit",                           "Show audit trail")
+    , ("audit",    True,  "replay",                          "Replay audit log")
+    , ("audit",    True,  "replay <file>",                   "Replay commands from file")
+    , ("audit",    True,  "demo",                            "Wipe DB and replay audit log")
+    -- User
+    , ("user",     True,  "user create <name> <pass> <role>", "Create a user")
+    , ("user",     True,  "user list",                       "List all users")
+    , ("user",     True,  "user delete <id>",                "Delete a user")
+    -- Context
+    , ("context",  False, "use <type> <name|id>",            "Set session context (worker/skill/station/absence-type)")
+    , ("context",  False, "context view",                    "Show current context")
+    , ("context",  False, "context clear",                   "Clear all context")
+    , ("context",  False, "context clear <type>",            "Clear context for one type")
+    -- Checkpoint
+    , ("checkpoint", False, "checkpoint create [name]",      "Create a checkpoint (savepoint)")
+    , ("checkpoint", False, "checkpoint commit",             "Commit most recent checkpoint")
+    , ("checkpoint", False, "checkpoint rollback [name]",    "Rollback to checkpoint")
+    , ("checkpoint", False, "checkpoint list",               "List active checkpoints")
+    -- General
+    , ("general",  False, "password change",                 "Change your password")
+    , ("general",  False, "help",                            "Show command groups")
+    , ("general",  False, "help <group>",                    "Show commands in a group")
+    , ("general",  False, "quit",                            "Exit")
+    ]
+
+-- | (group, description)
+helpGroups :: [(String, String)]
+helpGroups =
+    [ ("schedule", "Schedule creation, viewing, and management")
+    , ("worker",   "Worker skills, hours, preferences, and pairings")
+    , ("skill",    "Skill definitions and implications")
+    , ("station",  "Station setup, hours, and requirements")
+    , ("shift",    "Shift definitions")
+    , ("absence",  "Absence types, requests, and approvals")
+    , ("config",   "Scheduler configuration and presets")
+    , ("pin",      "Pinned assignments")
+    , ("context",  "Session context (use, view, clear)")
+    , ("checkpoint", "Checkpoint, commit, and rollback")
+    , ("export",   "JSON import and export")
+    , ("audit",    "Audit trail and replay")
+    , ("user",     "User account management")
+    , ("general",  "Help, password, and exit")
+    ]
+
+printHelpSummary :: Role -> IO ()
+printHelpSummary role = do
+    putStrLn "Command groups (type 'help <group>' for details):"
     putStrLn ""
-    putStrLn "  schedule list                     List saved schedules"
-    putStrLn "  schedule view <name>              View a schedule (table)"
-    putStrLn "  schedule view-by-worker <name>    View schedule grouped by worker"
-    putStrLn "  schedule view-by-station <name>   View schedule grouped by station"
-    putStrLn "  schedule hours <name>              Worker hours summary"
-    putStrLn "  schedule diagnose <name>          Diagnose unfilled positions"
-    putStrLn ""
-    putStrLn "  absence request <type-id> <worker-id> <start> <end>"
-    putStrLn "                                    Request an absence (dates: YYYY-MM-DD)"
-    putStrLn "  absence list                      List your absences"
-    putStrLn "  vacation remaining <type-id>      Check remaining vacation days"
-    putStrLn ""
-    putStrLn "  password change                   Change your password"
-    putStrLn "  help                              Show this help"
-    putStrLn "  quit                              Exit"
-    when (role == Admin) $ do
-        putStrLn ""
-        putStrLn "Admin commands:"
-        putStrLn "  skill create <id> <name>           Create a skill"
-        putStrLn "  skill list                         List all skills"
-        putStrLn "  skill implication <a> <b>         Skill A implies skill B"
-        putStrLn "  skill info                        Show skill context"
-        putStrLn "  station add <id> <name>             Add a station"
-        putStrLn "  station list                      List stations"
-        putStrLn "  station remove <id>               Remove a station"
-        putStrLn "  station set-hours <id> <start> <end>   Set station operating hours"
-        putStrLn "  station close-day <id> <day>         Close station on day of week"
-        putStrLn "  station set-multi-hours <id> <start> <end>  Set multi-station hours"
-        putStrLn "  station require-skill <station-id> <skill-id>"
-        putStrLn "  shift create <name> <start> <end>   Create a shift (hours)"
-        putStrLn "  shift list                          List configured shifts"
-        putStrLn "  shift delete <name>                 Delete a shift"
-        putStrLn "  worker grant-skill <wid> <sid>    Grant skill to worker"
-        putStrLn "  worker revoke-skill <wid> <sid>   Revoke skill from worker"
-        putStrLn "  worker set-hours <wid> <hours>    Set max weekly hours"
-        putStrLn "  worker set-overtime <wid> <on|off>"
-        putStrLn "  worker set-prefs <wid> <sid...>   Set station preferences"
-        putStrLn "  worker set-shift-pref <wid> <shift...>  Set shift prefs (morning/afternoon/evening)"
-        putStrLn "  worker set-weekend-only <wid> <on|off>  Mark worker as weekend-only"
-        putStrLn "  worker set-variety <wid> <on|off>"
-        putStrLn "  worker set-seniority <wid> <level>  Set seniority level"
-        putStrLn "  worker set-cross-training <wid> <sid>  Add cross-training goal"
-        putStrLn "  worker clear-cross-training <wid> <sid>  Remove cross-training goal"
-        putStrLn "  worker avoid-pairing <wid1> <wid2>  Prevent concurrent scheduling"
-        putStrLn "  worker clear-avoid-pairing <wid1> <wid2>"
-        putStrLn "  worker prefer-pairing <wid1> <wid2> Prefer concurrent scheduling"
-        putStrLn "  worker clear-prefer-pairing <wid1> <wid2>"
-        putStrLn "  worker info                       Show worker context"
-        putStrLn "  pin <wid> <sid> <day> <hour|shift>  Pin worker to station/slot"
-        putStrLn "  unpin <wid> <sid> <day> <hour|shift>  Remove pin"
-        putStrLn "  pin list                          List pinned assignments"
-        putStrLn "  config show                       Show scheduler config"
-        putStrLn "  config set <key> <value>          Set a config parameter"
-        putStrLn "  config preset <name>              Apply a named preset"
-        putStrLn "  config preset-list                List available presets"
-        putStrLn "  config reset                      Reset config to defaults"
-        putStrLn "  absence-type create <id> <name> <yearly-limit:on|off>"
-        putStrLn "  absence-type list                 List absence types"
-        putStrLn "  absence set-allowance <wid> <tid> <days>"
-        putStrLn "  absence approve <id>              Approve absence request"
-        putStrLn "  absence reject <id>               Reject absence request"
-        putStrLn "  absence list-pending              List pending requests"
-        putStrLn "  schedule create <name> <date>     Create schedule (week of date)"
-        putStrLn "  schedule delete <name>            Delete a schedule"
-        putStrLn "  schedule clear <name>             Clear all assignments"
-        putStrLn "  assign <sched> <wid> <sid> <date> <hour>"
-        putStrLn "                                    Assign worker to station/slot"
-        putStrLn "  unassign <sched> <wid> <sid> <date> <hour>"
-        putStrLn "                                    Remove assignment"
-        putStrLn "  user create <name> <pass> <role>  Create a user"
-        putStrLn "  user list                         List all users"
-        putStrLn "  user delete <id>                  Delete a user"
-        putStrLn "  export <file>                     Export all data to JSON"
-        putStrLn "  export <schedule> <file>          Export one schedule to JSON"
-        putStrLn "  import <file>                     Import data from JSON"
-        putStrLn "  audit                             Show audit trail"
-        putStrLn "  replay                            Replay audit log"
-        putStrLn "  replay <file>                     Replay commands from file"
-        putStrLn "  demo                              Wipe DB and replay audit log"
+    let groups = if role == Admin then helpGroups
+                 else filter (\(g, _) -> hasUserCommands g) helpGroups
+        nameW = maximum (0 : [length g | (g, _) <- groups]) + 2
+    mapM_ (\(g, desc) ->
+        putStrLn ("  " ++ padRight nameW g ++ desc)
+        ) groups
+  where
+    hasUserCommands g = any (\(g', adm, _, _) -> g' == g && not adm) helpRegistry
+
+printHelpGroup :: Role -> String -> IO ()
+printHelpGroup role group =
+    let g = map toLower group
+        matching = [ (syn, desc)
+                   | (g', adm, syn, desc) <- helpRegistry
+                   , g' == g
+                   , not adm || role == Admin
+                   ]
+        validGroups = map fst helpGroups
+    in case matching of
+        [] | g `elem` validGroups -> putStrLn ("  (no commands available in '" ++ group ++ "' for your role)")
+           | otherwise -> putStrLn ("Unknown group: " ++ group
+                                    ++ ". Available: " ++ unwords validGroups)
+        cmds -> do
+            let synW = maximum (0 : [length syn | (syn, _) <- cmds]) + 2
+            mapM_ (\(syn, desc) ->
+                putStrLn ("  " ++ padRight synW syn ++ desc)
+                ) cmds
 
 when :: Bool -> IO () -> IO ()
 when True  action = action

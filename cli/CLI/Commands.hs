@@ -10,6 +10,7 @@ data Command
     | ScheduleView String             -- ^ name (tabular view)
     | ScheduleViewByWorker String
     | ScheduleViewByStation String
+    | ScheduleViewCompact String     -- ^ name (compact tabular view)
     | ScheduleList
     | ScheduleDelete String
     | ScheduleHours String             -- ^ worker hours summary
@@ -90,7 +91,18 @@ data Command
     | CmdDemo                       -- ^ wipe DB, replay audit log from scratch
     -- Self
     | PasswordChange
+    -- Checkpoint
+    | CheckpointCreate (Maybe String) -- ^ optional name
+    | CheckpointCommit
+    | CheckpointRollback (Maybe String) -- ^ optional name
+    | CheckpointList
+    -- Context
+    | CmdUse String String          -- ^ entity-type name-or-id
+    | ContextView
+    | ContextClear
+    | ContextClearType String       -- ^ entity-type
     | Help
+    | HelpGroup String
     | Quit
     | Unknown String
     deriving (Show)
@@ -100,6 +112,7 @@ parseCommand input = case words input of
     ["schedule", "create", name, date] -> ScheduleCreate name date
     ["schedule", "create", name]       -> ScheduleCreate name "2026-04-06"
     ["schedule", "view", name]         -> ScheduleView name
+    ["schedule", "view-compact", name]    -> ScheduleViewCompact name
     ["schedule", "view-by-worker", name]  -> ScheduleViewByWorker name
     ["schedule", "view-by-station", name] -> ScheduleViewByStation name
     ["schedule", "view"]              -> Unknown "schedule view <name> — name required"
@@ -216,8 +229,21 @@ parseCommand input = case words input of
     ["replay", file]                 -> CmdReplayFile file
     ["demo"]                         -> CmdDemo
 
+    ["checkpoint", "create"]        -> CheckpointCreate Nothing
+    ["checkpoint", "create", name]  -> CheckpointCreate (Just name)
+    ["checkpoint", "commit"]        -> CheckpointCommit
+    ["checkpoint", "rollback"]      -> CheckpointRollback Nothing
+    ["checkpoint", "rollback", name] -> CheckpointRollback (Just name)
+    ["checkpoint", "list"]          -> CheckpointList
+
+    ["use", typ, ref]              -> CmdUse typ ref
+    ["context", "view"]            -> ContextView
+    ["context", "clear"]           -> ContextClear
+    ["context", "clear", typ]      -> ContextClearType typ
+
     ["password", "change"]         -> PasswordChange
     ["help"]                       -> Help
+    ["help", group]                -> HelpGroup group
     ["quit"]                       -> Quit
     ["exit"]                       -> Quit
     _                              -> Unknown input

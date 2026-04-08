@@ -79,6 +79,7 @@ executable manars-cli
   other-modules:       CLI.App
                      , CLI.Commands
                      , CLI.Display
+                     , CLI.Resolve
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen

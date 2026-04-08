@@ -99,4 +99,14 @@ data Repository = Repository
       -- ^ returns (timestamp, username, command)
     , repoWipeAll        :: IO ()
       -- ^ delete all data from all tables (for demo/replay)
+
+      -- ---------------------------------------------------------------
+      -- Checkpoint (SQLite savepoints)
+      -- ---------------------------------------------------------------
+    , repoSavepoint      :: String -> IO ()
+      -- ^ Create a savepoint with the given name
+    , repoRelease        :: String -> IO ()
+      -- ^ Release (commit) a savepoint
+    , repoRollbackTo     :: String -> IO ()
+      -- ^ Rollback to a savepoint (savepoint remains active)
     }

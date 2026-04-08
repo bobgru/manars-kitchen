@@ -1,5 +1,6 @@
 module CLI.Display
     ( displayScheduleTable
+    , displayScheduleCompact
     , displaySchedule
     , displayScheduleByWorker
     , displayScheduleByStation
@@ -13,6 +14,7 @@ module CLI.Display
     , displayWorkerCtx
     , displayAbsenceTypes
     , displayConfig
+    , padRight
     ) where
 
 import Data.List (sortBy, intercalate, nub, sort)
@@ -105,6 +107,103 @@ displayScheduleTable workerNames stationNames restaurantHours stationHoursMap (S
                             && slotDate (assignSlot a) == day) asList
                  ]
             ) days
+
+-- -----------------------------------------------------------------
+-- Compact tabular schedule view (fits within 100 columns)
+-- -----------------------------------------------------------------
+
+-- | Display a schedule as a compact table fitting within 100 columns.
+-- Same structure as displayScheduleTable but with abbreviated names and narrower columns.
+displayScheduleCompact :: Map.Map WorkerId String   -- ^ worker id -> name
+                       -> Map.Map StationId String  -- ^ station id -> name
+                       -> (DayOfWeek -> [Int])      -- ^ restaurant hours per day
+                       -> Map.Map StationId (Map.Map DayOfWeek [Int]) -- ^ per-station hours
+                       -> Schedule -> String
+displayScheduleCompact workerNames stationNames restaurantHours stationHoursMap (Schedule as)
+    | Set.null as = "  (empty schedule)"
+    | otherwise   =
+        let asList = Set.toList as
+            days = sort $ nub [slotDate (assignSlot a) | a <- asList]
+            stations = sort $ nub [assignStation a | a <- asList]
+            hours = sort $ nub [getHour (slotStart (assignSlot a)) | a <- asList]
+            -- Build abbreviation maps
+            allWorkerIds = nub [assignWorker a | a <- asList]
+            workerAbbrevs = uniqueAbbrevs
+                [ (wid, Map.findWithDefault ("W" ++ show w) wid workerNames)
+                | wid@(WorkerId w) <- allWorkerIds ]
+            stationAbbrevs = uniqueAbbrevs
+                [ (sid, Map.findWithDefault ("S" ++ show s) sid stationNames)
+                | sid@(StationId s) <- stations ]
+            lookupAbbrev m key = Map.findWithDefault "?" key m
+            -- Column widths: target 100 chars total
+            -- Layout: "  " + station label + hour columns
+            stW = max 4 (maximum (0 : [length (lookupAbbrev stationAbbrevs sid) | sid <- stations])) + 1
+            maxCellW = maximum (1 : [length (cellContent workerAbbrevs asList sid day h)
+                                    | sid <- stations, day <- days, h <- hours])
+            colW = max 4 (min 6 (maxCellW + 1))
+            -- Header: abbreviated hours (just the number)
+            stLabel = padRight (stW + 2) ""
+            header = stLabel ++ concatMap (\h -> padRight colW (show h)) hours
+        in unlines $ header : concatMap (\day ->
+            let dayLabel = formatDay day
+            in dayLabel
+               : [ "  " ++ padRight stW (lookupAbbrev stationAbbrevs sid)
+                   ++ concatMap (\h ->
+                       let restaurantClosed = h `notElem` restaurantHours (dayOfWeek day)
+                           stationClosed = case Map.lookup sid stationHoursMap
+                                                >>= Map.lookup (dayOfWeek day) of
+                               Nothing -> False
+                               Just hs -> h `notElem` hs
+                           closed = restaurantClosed || stationClosed
+                           cell = if closed
+                                  then ""
+                                  else cellContent workerAbbrevs asList sid day h
+                       in padRight colW cell
+                       ) hours
+                 | sid <- stations
+                 , any (\a -> assignStation a == sid
+                            && slotDate (assignSlot a) == day) asList]
+            ) days
+  where
+    cellContent abbrevs asList sid day h =
+        let workers = [assignWorker a
+                      | a <- asList
+                      , assignStation a == sid
+                      , slotDate (assignSlot a) == day
+                      , getHour (slotStart (assignSlot a)) == h]
+        in case workers of
+            []    -> "."
+            [w]   -> Map.findWithDefault "?" w abbrevs
+            ws    -> intercalate "," (map (\w -> Map.findWithDefault "?" w abbrevs) ws)
+
+-- | Generate unique abbreviations for a list of (key, name) pairs.
+-- Starts with 3-char prefixes and extends where needed to disambiguate.
+uniqueAbbrevs :: (Ord k) => [(k, String)] -> Map.Map k String
+uniqueAbbrevs pairs =
+    let minLen = 3
+        initial = [(k, take minLen name, name) | (k, name) <- pairs]
+    in Map.fromList (resolve initial)
+  where
+    resolve :: (Ord k) => [(k, String, String)] -> [(k, String)]
+    resolve items =
+        let grouped = Map.fromListWith (++) [(abbr, [(k, full)]) | (k, abbr, full) <- items]
+        in concatMap (\(abbr, ks) ->
+            if length ks <= 1
+            then [(k, abbr) | (k, _) <- ks]
+            else
+                let extended = [(k, if length full > length abbr
+                                    then take (length abbr + 1) full
+                                    else full, full)
+                               | (k, full) <- ks]
+                    extAbbrs = [a | (_, a, _) <- extended]
+                in if nub extAbbrs == extAbbrs
+                   then [(k, a) | (k, a, _) <- extended]
+                   else
+                        let maxLen = maximum [length f | (_, f) <- ks]
+                        in if length abbr >= maxLen
+                           then [(k, full) | (k, full) <- ks]
+                           else resolve extended
+            ) (Map.toList grouped)
 
 getHour :: TimeOfDay -> Int
 getHour (TimeOfDay h _ _) = h
