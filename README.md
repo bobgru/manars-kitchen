@@ -23,20 +23,113 @@ make clean          # remove databases and build artifacts
 
 The demo replays `demo/restaurant-setup.txt`, which configures a
 restaurant with 7 stations, 8 skills, 12 workers, and 5 shift blocks,
-then generates and reviews a one-week schedule. Databases are stored in
-`demo-db/` (demos) and `run-db/` (interactive sessions).
+then generates and reviews a one-week schedule. On completion, the demo
+automatically exports `demo-export.json` which can be imported into an
+interactive session via `import demo-export.json`. Databases are stored
+in `demo-db/` (demos) and `run-db/` (interactive sessions).
 
 ### Interactive session
 
 ```
 $ make run
-manars> help
+manars> help                  # show command groups
+manars> help schedule         # show commands in a group
 ```
 
 Log in as `admin/admin` (created automatically). From there you can
 define shifts, skills, stations, and workers, then generate and review
 schedules. Every admin command is recorded in the audit log and can be
 replayed.
+
+
+## CLI Features
+
+### Two-level help
+
+The `help` command shows a summary of command groups. Use
+`help <group>` to see the commands in a group:
+
+```
+manars> help
+Command groups (type 'help <group>' for details):
+
+  schedule    Schedule creation, viewing, and management
+  worker      Worker skills, hours, preferences, and pairings
+  skill       Skill definitions and implications
+  station     Station setup, hours, and requirements
+  ...
+
+manars> help schedule
+  schedule list                   List saved schedules
+  schedule view <name>            View a schedule (table)
+  schedule view-by-worker <name>  View schedule grouped by worker
+  schedule view-compact <name>    View schedule (compact, 100-col)
+  schedule diagnose <name>        Diagnose unfilled positions
+  ...
+```
+
+### Name-based entity references
+
+Commands that take worker, skill, station, or absence-type IDs also
+accept entity names. Names are matched case-insensitively:
+
+```
+worker grant-skill marco grill    # same as: worker grant-skill 2 1
+station set-hours grill 10 17     # same as: station set-hours 1 10 17
+```
+
+If the input is numeric it is used as-is; otherwise the CLI looks up
+the name and substitutes the ID before dispatching.
+
+### Session context
+
+Use `use <type> <name>` to set a default entity. Once set, type `.`
+in place of an ID to refer to it:
+
+```
+manars> use worker marco
+Context set: worker = marco (#2)
+
+manars> worker set-hours . 40       # same as: worker set-hours 2 40
+manars> worker set-overtime . on    # same as: worker set-overtime 2 on
+
+manars> context view
+  worker  marco (#2)
+
+manars> context clear
+```
+
+### Compact schedule display
+
+`schedule view-compact` shows the same data as `schedule view` in a
+narrower format (fits in 100 columns) using abbreviated worker names:
+
+```
+schedule view-compact week1
+```
+
+### Checkpoints
+
+Checkpoints let you try changes and undo them if needed. They use
+SQLite savepoints, so they are lightweight and instant:
+
+```
+manars> checkpoint create before-overtime
+Checkpoint created: before-overtime
+
+manars> worker set-overtime 2 on
+manars> schedule create week1-v2 2026-04-06
+
+manars> checkpoint rollback before-overtime
+Rolled back to: before-overtime
+
+manars> checkpoint list
+  (no active checkpoints)
+```
+
+`checkpoint commit` releases the most recent checkpoint, making its
+changes permanent. `checkpoint rollback` without a name rolls back
+the most recent checkpoint.
 
 
 ## Workflow
@@ -159,6 +252,7 @@ fills around them.
 export week1 schedule.json    # export one schedule
 export all-data.json          # export everything
 import backup.json            # merge into current database
+import demo-export.json       # import data from a demo run
 ```
 
 
@@ -352,6 +446,7 @@ cli/
   CLI/App.hs                 Command dispatch, authentication
   CLI/Commands.hs            Command parser
   CLI/Display.hs             Formatted output (tables, hours, diagnosis)
+  CLI/Resolve.hs             Entity name resolution, session context
 
 src/
   Domain/
