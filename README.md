@@ -14,7 +14,7 @@ LTS 24.35).
 
 ```
 make build          # compile library + CLI
-make test           # run all tests (203 examples)
+make test           # run all tests (325 examples)
 make demo           # replay the demo restaurant setup (with delay)
 make fast-demo      # same, instant replay
 make run            # launch interactive REPL
@@ -22,8 +22,8 @@ make clean          # remove databases and build artifacts
 ```
 
 The demo replays `demo/restaurant-setup.txt`, which configures a
-restaurant with 7 stations, 8 skills, 12 workers, and 5 shift blocks,
-then generates and reviews a one-week schedule. On completion, the demo
+restaurant with 7 stations, 8 skills, 11 workers, and 5 shift blocks,
+then generates and reviews a multi-week schedule. On completion, the demo
 automatically exports `demo-export.json` which can be imported into an
 interactive session via `import demo-export.json`. Databases are stored
 in `demo-db/` (demos) and `run-db/` (interactive sessions).
@@ -182,6 +182,22 @@ worker set-seniority 2 2         # experienced
 worker set-overtime 2 on         # can exceed limit when needed
 ```
 
+**Employment status** sets sensible defaults for hour limits, overtime
+eligibility, and time tracking:
+
+| Status | Overtime | Tracking | Default hours |
+|--------|----------|----------|---------------|
+| `full-time` | eligible | standard | 40 |
+| `salaried` | manual-only | standard | 40 |
+| `per-diem` | exempt | exempt | no limit |
+
+```
+worker set-status 2 salaried     # Marco: salaried manager
+worker set-status 3 per-diem     # Lucia: per-diem floater
+worker set-temp 11 on            # Pat: temp worker
+worker set-overtime-model 7 manual-only  # override default
+```
+
 Other worker options:
 
 | Command | Effect |
@@ -246,7 +262,80 @@ pin 5 4 friday 14          # Maria on beverage every Friday at 2pm
 Pinned assignments are used as a seed schedule: the greedy algorithm
 fills around them.
 
-### 7. Import / export
+### 7. Calendar and drafts
+
+The **calendar** is a continuous timeline of committed schedules. Once
+a schedule is committed, it becomes the official record for that date
+range.
+
+```
+calendar commit week1 2026-04-06 2026-04-12 initial week 1
+calendar view 2026-04-06 2026-04-12
+calendar hours 2026-04-06 2026-04-12
+calendar history
+```
+
+**Drafts** are non-overlapping weekly schedules under development.
+Create a draft, generate a schedule inside it, review, and commit when
+ready:
+
+```
+draft create 2026-04-13 2026-04-19
+draft generate 1
+draft view-compact 1
+draft hours 1
+draft commit 1 week 2 via draft
+```
+
+Drafts support **cross-draft validation**: when you commit one draft
+and then re-open another, the system detects that the calendar changed
+and re-validates all assignments. For example, workers who worked a
+weekend in a newly committed draft will have their next-weekend
+assignments automatically removed (alternating weekends rule).
+
+The **freeze line** protects historical calendar dates. Dates on or
+before the freeze line (default: yesterday) are frozen -- creating a
+draft that covers them triggers a warning. Two workflows allow
+intentional history edits:
+
+```
+# Option 1: force-create the draft
+draft create 2026-04-06 2026-04-12 --force
+
+# Option 2: explicitly unfreeze, then create normally
+calendar unfreeze 2026-04-06 2026-04-12
+draft create 2026-04-06 2026-04-12
+```
+
+Temporary unfreezes auto-clear after committing a draft that includes
+historical dates.
+
+### 8. What-if exploration
+
+Within a draft session, the **what-if** system lets you explore
+hypothetical changes without modifying any real data:
+
+```
+what-if grant-skill nina grill          # what if Nina could grill?
+what-if close-station pizza 2026-04-27 11  # what if pizza closed Mon 11am?
+what-if list                            # review active hints
+what-if revert                          # undo most recent hint
+what-if revert-all                      # clear all hints
+```
+
+Each hint shows a diff of the schedule impact. Hints are composable
+and fully reversible -- nothing is persisted until you commit.
+
+### 9. Pay periods
+
+Configure pay periods to track per-period hour limits:
+
+```
+config set-pay-period biweekly 2026-04-06
+config show-pay-period
+```
+
+### 10. Import / export
 
 ```
 export week1 schedule.json    # export one schedule
@@ -461,9 +550,10 @@ src/
     Shift.hs                 Shift blocks, grouping
     Calendar.hs              Slot generation (week/month/range)
     Absence.hs               Absence lifecycle, allowances
-    Hint.hs                  What-if sessions, reversible hints (library only; not yet exposed in CLI)
+    Hint.hs                  What-if sessions, reversible hints
     Diagnosis.hs             Unfilled analysis, suggestions
     Pin.hs                   Recurring pinned assignments
+    PayPeriod.hs             Pay period tracking
   Service/
     Auth.hs                  Login, user management
     Schedule.hs              Schedule CRUD (repo-backed)
@@ -471,6 +561,10 @@ src/
     Absence.hs               Absence operations (repo-backed)
     Config.hs                Config persistence
     Optimize.hs              Optimization loop orchestration
+    Calendar.hs              Calendar timeline operations
+    Draft.hs                 Draft schedule management
+    DraftValidation.hs       Cross-draft constraint re-validation
+    FreezeLine.hs            Historical date guardrail
   Repo/
     Types.hs                 Repository interface
     Schema.hs                SQLite schema
@@ -483,7 +577,12 @@ src/
     JSON.hs                  Full import/export
 
 test/
-  Spec.hs                    Test harness (203 examples)
+  Spec.hs                    Test harness (325 examples)
+  CalendarSpec.hs            Calendar operations
+  DraftSpec.hs               Draft lifecycle
+  DraftValidationSpec.hs     Cross-draft constraint checks
+  FreezeLineSpec.hs          Freeze line guardrails
+  HintIntegrationSpec.hs     What-if exploration
 
 demo/
   restaurant-setup.txt       Example restaurant configuration script
@@ -503,6 +602,9 @@ The test suite covers domain logic with both property-based tests
 - **Hints**: session management, all 6 hint types, composition
 - **Diagnosis**: reason classification, suggestion ranking
 - **Calendar**: slot generation, closed dates, day-of-week hours
+- **Drafts**: create/generate/commit lifecycle, discard
+- **Draft validation**: cross-draft constraint re-validation, alternating weekends
+- **Freeze line**: freeze/unfreeze lifecycle, force-create, auto-refreeze
 - **Shifts**: grouping, overlapping blocks
 - **Config**: round-trip serialization, presets, completeness
 - **Pins**: slot-level and shift-level expansion
