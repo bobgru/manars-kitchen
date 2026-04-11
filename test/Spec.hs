@@ -18,6 +18,7 @@ import qualified Domain.Optimizer
 import qualified CalendarSpec
 import qualified DraftSpec
 import qualified DraftValidationSpec
+import qualified FreezeLineSpec
 
 main :: IO ()
 main = hspec $ do
@@ -37,3 +38,4 @@ main = hspec $ do
     describe "Calendar"              CalendarSpec.spec
     describe "Draft"                 DraftSpec.spec
     describe "DraftValidation"      DraftValidationSpec.spec
+    describe "FreezeLine"           FreezeLineSpec.spec

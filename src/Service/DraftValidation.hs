@@ -7,9 +7,8 @@ module Service.DraftValidation
     , validateDraftAgainstCalendar
     ) where
 
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time (Day, DayOfWeek(..), addDays, dayOfWeek)
+import Data.Time (DayOfWeek(..), addDays, dayOfWeek)
 
 import Domain.Types
     ( WorkerId

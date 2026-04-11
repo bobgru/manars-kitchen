@@ -41,6 +41,7 @@ import qualified Service.Optimize as Opt
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
 import Service.DraftValidation (DraftViolation(..), validateDraftAgainstCalendar)
+import qualified Service.FreezeLine as Freeze
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
 import CLI.Commands (Command(..), parseCommand)
@@ -55,6 +56,7 @@ data AppState = AppState
     , asUser       :: !User
     , asContext    :: !(IORef SessionContext)
     , asCheckpoints :: !(IORef [String])
+    , asUnfreezes  :: !(IORef (Set.Set (Day, Day)))
     }
 
 -- | Create an AppState with initialized IORefs.
@@ -62,7 +64,8 @@ mkAppState :: Repository -> User -> IO AppState
 mkAppState repo user = do
     ctxRef <- newIORef emptyContext
     cpRef  <- newIORef []
-    return (AppState repo user ctxRef cpRef)
+    ufRef  <- newIORef Set.empty
+    return (AppState repo user ctxRef cpRef ufRef)
 
 runRepl :: AppState -> IO ()
 runRepl st = do
@@ -145,6 +148,7 @@ isMutating cmd = case cmd of
     CalendarDiagnose _ _     -> False
     CalendarHistory          -> False
     CalendarHistoryView _    -> False
+    CalendarFreezeStatus     -> False
     CmdExport _           -> False
     CmdExportSchedule _ _ -> False
     CmdAuditLog           -> False
@@ -363,14 +367,10 @@ handleCommand st cmd = case cmd of
                                  ++ show under ++ " understaffed positions.")
 
     -- Draft
-    DraftCreate startStr endStr -> requireAdmin st $
+    DraftCreate startStr endStr force -> requireAdmin st $
         case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                result <- Draft.createDraft (asRepo st) s e
-                case result of
-                    Right did -> putStrLn ("Created draft #" ++ show did
-                                          ++ " for " ++ startStr ++ " to " ++ endStr)
-                    Left err  -> putStrLn ("Error: " ++ err)
+            (Just s, Just e) ->
+                createDraftWithFreezeCheck st s e force
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
 
     DraftThisMonth -> requireAdmin st $ do
@@ -380,12 +380,7 @@ handleCommand st cmd = case cmd of
             dateFrom = addDays 1 today
         if dateFrom > lastDay
             then putStrLn "Error: no remaining days in the current month."
-            else do
-                result <- Draft.createDraft (asRepo st) dateFrom lastDay
-                case result of
-                    Right did -> putStrLn ("Created draft #" ++ show did
-                                          ++ " for " ++ show dateFrom ++ " to " ++ show lastDay)
-                    Left err  -> putStrLn ("Error: " ++ err)
+            else createDraftWithFreezeCheck st dateFrom lastDay False
 
     DraftNextMonth -> requireAdmin st $ do
         today <- utctDay <$> getCurrentTime
@@ -393,11 +388,7 @@ handleCommand st cmd = case cmd of
             (ny, nm) = if m == 12 then (y + 1, 1) else (y, m + 1)
             dateFrom = fromGregorian ny nm 1
             dateTo   = fromGregorian ny nm (gregorianMonthLength ny nm)
-        result <- Draft.createDraft (asRepo st) dateFrom dateTo
-        case result of
-            Right did -> putStrLn ("Created draft #" ++ show did
-                                  ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
-            Left err  -> putStrLn ("Error: " ++ err)
+        createDraftWithFreezeCheck st dateFrom dateTo False
 
     DraftList -> do
         drafts <- Draft.listDrafts (asRepo st)
@@ -507,11 +498,27 @@ handleCommand st cmd = case cmd of
         case resolved of
             Left err -> putStrLn err
             Right did -> do
+                -- Load draft metadata before commit (commit deletes the draft)
+                mDraft <- Draft.loadDraft (asRepo st) did
                 let note = maybe "" id mNote
                 result <- Draft.commitDraft (asRepo st) did note
                 case result of
                     Left err  -> putStrLn ("Error: " ++ err)
-                    Right ()  -> putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
+                    Right ()  -> do
+                        putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
+                        -- Auto-refreeze: check if committed dates included historical dates
+                        case mDraft of
+                            Nothing -> return ()
+                            Just draft -> do
+                                freezeLine <- Freeze.computeFreezeLine
+                                let frozen = Freeze.frozenDatesInRange freezeLine
+                                                (diDateFrom draft) (diDateTo draft)
+                                unfreezes <- readIORef (asUnfreezes st)
+                                if not (null frozen) && not (Set.null unfreezes)
+                                    then do
+                                        writeIORef (asUnfreezes st) Set.empty
+                                        putStrLn "Historical dates refrozen. All temporary unfreezes cleared."
+                                    else return ()
 
     DraftDiscard mDidStr -> requireAdmin st $ do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -747,6 +754,55 @@ handleCommand st cmd = case cmd of
                                   ++ " snapshot is empty (no assignments were replaced).")
                     else putStrLn ("Commit not found: " ++ show cid)
             else putStr (displayScheduleByStation sched)
+
+    CalendarUnfreeze dateStr ->
+        case parseDay dateStr of
+            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+            Just d -> do
+                freezeLine <- Freeze.computeFreezeLine
+                if not (Freeze.isFrozen freezeLine d)
+                    then putStrLn ("Date " ++ show d
+                                  ++ " is not frozen (it is after the freeze line "
+                                  ++ show freezeLine ++ ").")
+                    else do
+                        modifyIORef' (asUnfreezes st) (Set.insert (d, d))
+                        putStrLn ("Unfrozen: " ++ show d
+                                 ++ " (session only, will refreeze on commit or restart)")
+
+    CalendarUnfreezeRange startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e)
+                | s > e -> putStrLn "Invalid range: start date must be on or before end date."
+                | otherwise -> do
+                    freezeLine <- Freeze.computeFreezeLine
+                    let frozenStart = s
+                        frozenEnd   = min e freezeLine
+                    if frozenStart > frozenEnd
+                        then putStrLn ("No dates in range are frozen (all after freeze line "
+                                      ++ show freezeLine ++ ").")
+                        else do
+                            modifyIORef' (asUnfreezes st) (Set.insert (frozenStart, frozenEnd))
+                            if e > freezeLine
+                                then putStrLn ("Unfrozen: " ++ show frozenStart ++ " to "
+                                              ++ show frozenEnd
+                                              ++ " (session only, dates after freeze line already unfrozen)")
+                                else putStrLn ("Unfrozen: " ++ show frozenStart ++ " to "
+                                              ++ show frozenEnd ++ " (session only)")
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarFreezeStatus -> do
+        freezeLine <- Freeze.computeFreezeLine
+        putStrLn ("Freeze line: " ++ show freezeLine ++ " (yesterday)")
+        unfreezes <- readIORef (asUnfreezes st)
+        if Set.null unfreezes
+            then putStrLn "No temporary unfreezes active."
+            else do
+                let ranges = Set.toAscList unfreezes
+                mapM_ (\(s, e) ->
+                    if s == e
+                        then putStrLn ("Unfrozen ranges: " ++ show s)
+                        else putStrLn ("Unfrozen ranges: " ++ show s ++ " to " ++ show e)
+                    ) ranges
 
     -- Stations (admin)
     StationAdd sid name -> requireAdmin st $ do
@@ -1380,6 +1436,34 @@ resolveDraftId repo Nothing = do
 resolveDraftId _ (Just didStr) = return (Right (read didStr))
 
 -- -----------------------------------------------------------------
+-- Draft creation with freeze-line check
+-- -----------------------------------------------------------------
+
+createDraftWithFreezeCheck :: AppState -> Day -> Day -> Bool -> IO ()
+createDraftWithFreezeCheck st dateFrom dateTo force = do
+    freezeLine <- Freeze.computeFreezeLine
+    unfreezes <- readIORef (asUnfreezes st)
+    let frozen = Freeze.frozenDatesInRange freezeLine dateFrom dateTo
+        stillFrozen = filter (not . Freeze.isDateUnfrozen unfreezes) frozen
+    case stillFrozen of
+        (firstFrozen : _) | not force -> do
+            let lastFrozen = last' firstFrozen stillFrozen
+            putStrLn ("This draft covers frozen dates (freeze line: "
+                     ++ show freezeLine ++ ").")
+            putStrLn ("  Frozen dates in range: " ++ show firstFrozen
+                     ++ " to " ++ show lastFrozen)
+            putStrLn ("  To unfreeze: calendar unfreeze "
+                     ++ show firstFrozen ++ " " ++ show lastFrozen)
+            putStrLn ("  To override: draft create "
+                     ++ show dateFrom ++ " " ++ show dateTo ++ " --force")
+        _ -> do
+            result <- Draft.createDraft (asRepo st) dateFrom dateTo
+            case result of
+                Right did -> putStrLn ("Created draft #" ++ show did
+                                      ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
+                Left err  -> putStrLn ("Error: " ++ err)
+
+-- -----------------------------------------------------------------
 -- Help registry
 -- -----------------------------------------------------------------
 
@@ -1389,7 +1473,7 @@ type HelpEntry = (String, Bool, String, String)
 helpRegistry :: [HelpEntry]
 helpRegistry =
     -- Draft
-      [ ("draft",    True,  "draft create <start> <end>",             "Create a draft for date range")
+      [ ("draft",    True,  "draft create <start> <end> [--force]",   "Create a draft for date range")
     , ("draft",    True,  "draft this-month",                        "Create draft for rest of month")
     , ("draft",    True,  "draft next-month",                        "Create draft for next month")
     , ("draft",    False, "draft list",                              "List active drafts")
@@ -1411,6 +1495,9 @@ helpRegistry =
     , ("calendar", True,  "calendar commit <name> <start> <end> [note]", "Commit named schedule to calendar")
     , ("calendar", False, "calendar history",                       "List calendar commits")
     , ("calendar", False, "calendar history <id>",                  "View historical snapshot")
+    , ("calendar", True,  "calendar unfreeze <date>",              "Temporarily unfreeze a date")
+    , ("calendar", True,  "calendar unfreeze <start> <end>",       "Temporarily unfreeze a date range")
+    , ("calendar", False, "calendar freeze-status",                "Show freeze line and unfreezes")
     -- Schedule (user)
     , ("schedule", False, "schedule list",                   "List saved schedules")
     , ("schedule", False, "schedule view <name>",            "View a schedule (table)")
@@ -1604,3 +1691,8 @@ displayViolationReport draft workerNames stationNames violations = do
 -- | Show a Double with 1 decimal place.
 showFFloat1 :: Double -> String
 showFFloat1 x = show (fromIntegral (round (x * 10) :: Integer) / 10.0 :: Double)
+
+-- | Safe version of 'last' with a default value.
+last' :: a -> [a] -> a
+last' def [] = def
+last' _   xs = last xs

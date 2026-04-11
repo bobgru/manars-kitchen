@@ -282,3 +282,51 @@ draft commit 2 week 3 with Saturday grill
 # Re-open week 4 draft — system detects calendar changed, re-validates,
 # and removes weekend assignments for workers who worked Apr 25-26
 draft open 3
+
+# === Freeze Line ===
+# Demonstrates the freeze-line guardrail for historical calendar dates.
+#
+# The freeze line defaults to yesterday (2026-04-10). Dates on or before
+# the freeze line are "frozen" — creating a draft that covers them
+# triggers a warning. The intended workflow for intentional history edits:
+# 1. Check freeze status
+# 2. Explicitly unfreeze the historical dates
+# 3. Create and commit the draft (no warning since dates are unfrozen)
+# 4. Unfreezes auto-clear after committing historical dates
+
+# Discard the cross-validation demo draft so we start clean
+draft discard 3
+
+# Check the current freeze line — no unfreezes active yet
+calendar freeze-status
+
+# Try to create a draft covering historical dates — blocked by freeze line
+draft create 2026-04-06 2026-04-12
+
+# Override with --force to create the draft despite frozen dates
+draft create 2026-04-06 2026-04-12 --force
+
+# Generate and commit the corrected schedule
+draft generate
+draft commit 4 corrected week 1 (forced)
+
+# Auto-refreeze: all temporary unfreezes cleared after committing
+# a draft that included historical dates
+calendar freeze-status
+
+# Now demonstrate the unfreeze workflow as an alternative to --force
+# Unfreeze week 1 dates — only frozen portion is affected
+calendar unfreeze 2026-04-06 2026-04-12
+
+# Verify the unfreeze is active
+calendar freeze-status
+
+# Create a draft covering week 1 — no freeze error because we unfroze
+draft create 2026-04-06 2026-04-12
+
+# Generate and commit
+draft generate
+draft commit 5 corrected week 1 (unfrozen)
+
+# Auto-refreeze clears all unfreezes after committing historical dates
+calendar freeze-status

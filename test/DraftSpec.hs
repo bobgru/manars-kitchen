@@ -102,10 +102,13 @@ spec = do
                 Right did -> do
                     -- List
                     drafts <- Draft.listDrafts repo
-                    length drafts `shouldBe` 1
-                    diId (head drafts) `shouldBe` did
-                    diDateFrom (head drafts) `shouldBe` apr 1
-                    diDateTo (head drafts) `shouldBe` apr 30
+                    case drafts of
+                        [d] -> do
+                            diId d `shouldBe` did
+                            diDateFrom d `shouldBe` apr 1
+                            diDateTo d `shouldBe` apr 30
+                        _ -> expectationFailure
+                                ("Expected 1 draft, got " ++ show (length drafts))
                     -- Delete (discard)
                     _ <- Draft.discardDraft repo did
                     drafts' <- Draft.listDrafts repo

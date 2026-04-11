@@ -106,8 +106,11 @@ data Command
     | CalendarDoCommit String String String (Maybe String) -- ^ schedule-name start end [note]
     | CalendarHistory
     | CalendarHistoryView String              -- ^ commit-id
+    | CalendarUnfreeze String                 -- ^ single date
+    | CalendarUnfreezeRange String String     -- ^ start end
+    | CalendarFreezeStatus
     -- Draft
-    | DraftCreate String String         -- ^ start-date end-date
+    | DraftCreate String String Bool    -- ^ start-date end-date force?
     | DraftThisMonth
     | DraftNextMonth
     | DraftList
@@ -259,7 +262,8 @@ parseCommand input = case words input of
     ["checkpoint", "rollback", name] -> CheckpointRollback (Just name)
     ["checkpoint", "list"]          -> CheckpointList
 
-    ["draft", "create", s, e]            -> DraftCreate s e
+    ["draft", "create", s, e, "--force"]  -> DraftCreate s e True
+    ["draft", "create", s, e]            -> DraftCreate s e False
     ["draft", "this-month"]              -> DraftThisMonth
     ["draft", "next-month"]              -> DraftNextMonth
     ["draft", "list"]                    -> DraftList
@@ -302,6 +306,9 @@ parseCommand input = case words input of
     ["calendar", "history", cid]
         | isDigit' cid -> CalendarHistoryView cid
     ["calendar", "history", _]           -> Unknown "calendar history <commit-id> — id must be a number"
+    ["calendar", "unfreeze", s, e]         -> CalendarUnfreezeRange s e
+    ["calendar", "unfreeze", d]            -> CalendarUnfreeze d
+    ["calendar", "freeze-status"]          -> CalendarFreezeStatus
 
     ["use", typ, ref]              -> CmdUse typ ref
     ["context", "view"]            -> ContextView

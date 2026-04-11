@@ -3,23 +3,19 @@ module DraftValidationSpec (spec) where
 import Test.Hspec
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time
-    ( Day, TimeOfDay(..), fromGregorian, DayOfWeek(..)
-    )
+import Data.Time (Day, TimeOfDay(..), fromGregorian)
 
 import Domain.Types
     ( WorkerId(..), StationId(..), SkillId(..)
     , Slot(..), Assignment(..), Schedule(..)
-    , emptySchedule
     )
 import Domain.Scheduler (SchedulerContext(..))
 import Domain.Skill (SkillContext(..))
 import Domain.Worker (WorkerContext(..))
-import Domain.Absence (AbsenceContext(..), emptyAbsenceContext)
+import Domain.Absence (emptyAbsenceContext)
 import Domain.SchedulerConfig (defaultConfig)
-import Domain.Schedule (assign)
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..), DraftInfo(..))
+import Repo.Types (Repository(..))
 import Service.DraftValidation
     ( DraftViolation(..)
     , validateAssignment, buildLookBackContext
