@@ -146,7 +146,7 @@ worker grant-skill 12 8
 # === Worker Hours ===
 worker set-hours 1 0
 worker set-hours 2 40
-worker set-hours 3 4
+worker set-hours 3 4  # overridden below by set-status per-diem
 worker set-hours 4 40
 worker set-hours 5 40
 worker set-hours 6 40
@@ -156,6 +156,22 @@ worker set-hours 9 40
 worker set-hours 10 40
 worker set-hours 11 40
 worker set-hours 12 40
+
+# === Employment Status ===
+# Marco (W2): salaried manager — overtime=manual-only, tracking=standard, 40h
+worker set-status 2 salaried
+# Lucia (W3): per-diem — overtime=exempt, tracking=exempt, no hour limit
+# (replaces manual set-hours 3 4 above — per-diem removes the limit)
+worker set-status 3 per-diem
+# Tony (W4): full-time — overtime=eligible, tracking=standard, 40h
+worker set-status 4 full-time
+# Pat (W11): temp worker
+worker set-temp 11 on
+# Rosa (W7): override overtime model to manual-only (won't get auto-overtime)
+worker set-overtime-model 7 manual-only
+
+# Show employment properties alongside other worker info
+worker info
 
 # No overtime opt-in — we want a schedule with zero planned overtime
 # Admin is last resort only

@@ -25,7 +25,7 @@ import Domain.Skill (Skill(..), SkillContext(..), stationClosedSlots)
 import qualified Domain.Scheduler as Scheduler
 import qualified Domain.Diagnosis as Diagnosis
 import qualified Domain.Calendar as Calendar
-import Domain.Worker (WorkerContext(..))
+import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.SchedulerConfig (presetNames, configToMap)
 import Domain.Pin (expandPins, PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
@@ -877,8 +877,10 @@ handleCommand st cmd = case cmd of
         putStrLn ("Set Worker " ++ show wid ++ " max hours: " ++ show h ++ "h/week")
 
     WorkerSetOvertime wid b -> requireAdmin st $ do
-        SW.setOvertimeOptIn (asRepo st) (WorkerId wid) b
-        putStrLn ("Worker " ++ show wid ++ " overtime: " ++ if b then "on" else "off")
+        mWarn <- SW.setOvertimeOptIn (asRepo st) (WorkerId wid) b
+        case mWarn of
+            Just warning -> putStrLn warning
+            Nothing -> putStrLn ("Worker " ++ show wid ++ " overtime: " ++ if b then "on" else "off")
 
     WorkerSetPrefs wid sids -> requireAdmin st $ do
         SW.setStationPreferences (asRepo st) (WorkerId wid) (map StationId sids)
@@ -927,6 +929,32 @@ handleCommand st cmd = case cmd of
     WorkerClearPreferPairing w1 w2 -> requireAdmin st $ do
         SW.removePreferPairing (asRepo st) (WorkerId w1) (WorkerId w2)
         putStrLn ("Cleared prefer-pairing: Workers " ++ show w1 ++ " and " ++ show w2)
+
+    -- Employment status
+    WorkerSetStatus wid status -> requireAdmin st $ do
+        msg <- SW.setEmploymentStatus (asRepo st) (WorkerId wid) status
+        putStrLn ("Worker " ++ show wid ++ ": " ++ msg)
+
+    WorkerSetOvertimeModel wid model -> requireAdmin st $ do
+        case model of
+            "eligible"    -> SW.setOvertimeModel (asRepo st) (WorkerId wid) OTEligible
+            "manual-only" -> SW.setOvertimeModel (asRepo st) (WorkerId wid) OTManualOnly
+            "exempt"      -> SW.setOvertimeModel (asRepo st) (WorkerId wid) OTExempt
+            _ -> do putStrLn ("Unknown overtime model: " ++ model ++ ". Use eligible|manual-only|exempt.")
+                    return ()
+        putStrLn ("Worker " ++ show wid ++ " overtime model: " ++ model)
+
+    WorkerSetPayTracking wid tracking -> requireAdmin st $ do
+        case tracking of
+            "standard" -> SW.setPayPeriodTracking (asRepo st) (WorkerId wid) PPStandard
+            "exempt"   -> SW.setPayPeriodTracking (asRepo st) (WorkerId wid) PPExempt
+            _ -> do putStrLn ("Unknown pay tracking: " ++ tracking ++ ". Use standard|exempt.")
+                    return ()
+        putStrLn ("Worker " ++ show wid ++ " pay tracking: " ++ tracking)
+
+    WorkerSetTemp wid b -> requireAdmin st $ do
+        SW.setTempFlag (asRepo st) (WorkerId wid) b
+        putStrLn ("Worker " ++ show wid ++ " temp: " ++ if b then "on" else "off")
 
     -- Pinned assignments
     PinAdd wid sid dayStr specStr -> requireAdmin st $
@@ -1534,6 +1562,10 @@ helpRegistry =
     , ("worker",   True,  "worker set-shift-pref <wid> <shift...>", "Set shift preferences")
     , ("worker",   True,  "worker set-weekend-only <wid> <on|off>", "Mark worker as weekend-only")
     , ("worker",   True,  "worker set-variety <wid> <on|off>", "Toggle variety preference")
+    , ("worker",   True,  "worker set-status <wid> <status>", "Set employment status preset (salaried|full-time|part-time|per-diem)")
+    , ("worker",   True,  "worker set-overtime-model <wid> <model>", "Set overtime model (eligible|manual-only|exempt)")
+    , ("worker",   True,  "worker set-pay-tracking <wid> <mode>", "Set pay tracking (standard|exempt)")
+    , ("worker",   True,  "worker set-temp <wid> <on|off>", "Toggle temp worker flag")
     , ("worker",   True,  "worker set-seniority <wid> <level>", "Set seniority level")
     , ("worker",   True,  "worker set-cross-training <wid> <sid>", "Add cross-training goal")
     , ("worker",   True,  "worker clear-cross-training <wid> <sid>", "Remove cross-training goal")

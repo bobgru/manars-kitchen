@@ -2,12 +2,18 @@ module Domain.Worker
     ( -- * Types
       WorkerContext(..)
     , emptyWorkerContext
+    , OvertimeModel(..)
+    , PayPeriodTracking(..)
       -- * Hours computation
     , slotWeek
     , workerWeeklyHours
     , workerMaxHours
     , workerOptedInOvertime
     , wouldBeOvertime
+      -- * Employment status queries
+    , workerOvertimeModel
+    , workerPayPeriodTracking
+    , workerIsTemp
       -- * Daily rules
     , workerDailyHours
     , wouldExceedDailyRegular
@@ -50,6 +56,19 @@ import Domain.SchedulerConfig (SchedulerConfig(..), defaultConfig)
 -- Types
 -- ---------------------------------------------------------------------
 
+-- | Overtime model for a worker.
+data OvertimeModel
+    = OTEligible    -- ^ Scheduler auto-assigns overtime
+    | OTManualOnly  -- ^ Manager must explicitly accept; never auto-assigned
+    | OTExempt      -- ^ Overtime concept doesn't apply (e.g., per-diem)
+    deriving (Eq, Ord, Show, Read)
+
+-- | Pay period tracking mode for a worker.
+data PayPeriodTracking
+    = PPStandard  -- ^ Hours tracked against weekly limit
+    | PPExempt    -- ^ No hour limit enforced by scheduler
+    deriving (Eq, Ord, Show, Read)
+
 -- | Reference data for worker constraints and preferences.
 data WorkerContext = WorkerContext
     { wcMaxWeeklyHours :: !(Map WorkerId DiffTime)
@@ -82,10 +101,16 @@ data WorkerContext = WorkerContext
     , wcPreferPairing :: !(Map WorkerId (Set WorkerId))
       -- ^ Workers who prefer to be assigned to the same slot.
       -- Symmetric: if A prefers B, B also prefers A.
+    , wcOvertimeModel :: !(Map WorkerId OvertimeModel)
+      -- ^ Per-worker overtime model. Workers not in the map default to OTEligible.
+    , wcPayPeriodTracking :: !(Map WorkerId PayPeriodTracking)
+      -- ^ Per-worker pay period tracking. Workers not in the map default to PPStandard.
+    , wcIsTemp :: !(Set WorkerId)
+      -- ^ Workers flagged as temporary. Informational only, no scheduling impact.
     } deriving (Eq, Ord, Show, Read)
 
 emptyWorkerContext :: WorkerContext
-emptyWorkerContext = WorkerContext Map.empty Set.empty Map.empty Set.empty Map.empty Set.empty Map.empty Map.empty Map.empty Map.empty
+emptyWorkerContext = WorkerContext Map.empty Set.empty Map.empty Set.empty Map.empty Set.empty Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty Set.empty
 
 -- ---------------------------------------------------------------------
 -- Hours computation
@@ -131,6 +156,18 @@ workerMaxHours ctx w = Map.lookup w (wcMaxWeeklyHours ctx)
 workerOptedInOvertime :: WorkerContext -> WorkerId -> Bool
 workerOptedInOvertime ctx w = Set.member w (wcOvertimeOptIn ctx)
 
+-- | Overtime model for a worker (default OTEligible).
+workerOvertimeModel :: WorkerContext -> WorkerId -> OvertimeModel
+workerOvertimeModel ctx w = Map.findWithDefault OTEligible w (wcOvertimeModel ctx)
+
+-- | Pay period tracking for a worker (default PPStandard).
+workerPayPeriodTracking :: WorkerContext -> WorkerId -> PayPeriodTracking
+workerPayPeriodTracking ctx w = Map.findWithDefault PPStandard w (wcPayPeriodTracking ctx)
+
+-- | Is a worker flagged as temporary?
+workerIsTemp :: WorkerContext -> WorkerId -> Bool
+workerIsTemp ctx w = Set.member w (wcIsTemp ctx)
+
 -- | Would adding this assignment cause the worker to exceed their
 -- regular weekly hours?
 -- Returns False if the worker has no hour limit.
@@ -138,13 +175,16 @@ workerOptedInOvertime ctx w = Set.member w (wcOvertimeOptIn ctx)
 -- the added time is 0.
 wouldBeOvertime :: WorkerContext -> Schedule -> Assignment -> Bool
 wouldBeOvertime ctx sched a =
-    case workerMaxHours ctx (assignWorker a) of
-        Nothing  -> False
-        Just maxH ->
-            let current = workerWeeklyHours (assignWorker a) (slotDate (assignSlot a)) sched
-                alreadyAtSlot = not (Set.null (byWorkerSlot (assignWorker a) (assignSlot a) sched))
-                added = if alreadyAtSlot then 0 else slotDuration (assignSlot a)
-            in current + added > maxH
+    case workerPayPeriodTracking ctx (assignWorker a) of
+        PPExempt -> False  -- no hour limit enforced
+        PPStandard ->
+            case workerMaxHours ctx (assignWorker a) of
+                Nothing  -> False
+                Just maxH ->
+                    let current = workerWeeklyHours (assignWorker a) (slotDate (assignSlot a)) sched
+                        alreadyAtSlot = not (Set.null (byWorkerSlot (assignWorker a) (assignSlot a) sched))
+                        added = if alreadyAtSlot then 0 else slotDuration (assignSlot a)
+                    in current + added > maxH
 
 -- ---------------------------------------------------------------------
 -- Daily rules
@@ -311,14 +351,19 @@ tryAssignHours ctx a sched
     | wouldBeOvertime ctx sched a = Nothing
     | otherwise                   = Just (assign a sched)
 
--- | Attempt an assignment, allowing overtime only if the worker
--- has opted in. Fails if the worker would be overtime and has
--- not opted in.
+-- | Attempt an assignment, allowing overtime only if the worker's
+-- overtime model permits it. OTEligible workers who opted in get
+-- overtime. OTManualOnly workers never get auto-assigned overtime.
+-- OTExempt workers skip the overtime concept entirely.
 tryAssignOvertimeHours :: WorkerContext -> Assignment -> Schedule -> Maybe Schedule
 tryAssignOvertimeHours ctx a sched
     | not (wouldBeOvertime ctx sched a) = Just (assign a sched)
-    | workerOptedInOvertime ctx (assignWorker a) = Just (assign a sched)
-    | otherwise = Nothing
+    | otherwise = case workerOvertimeModel ctx (assignWorker a) of
+        OTExempt     -> Just (assign a sched)
+        OTManualOnly -> Nothing
+        OTEligible   -> if workerOptedInOvertime ctx (assignWorker a)
+                        then Just (assign a sched)
+                        else Nothing
 
 -- ---------------------------------------------------------------------
 -- Tests
@@ -354,6 +399,9 @@ testWorkerContext = WorkerContext
     , wcCrossTraining = Map.empty
     , wcAvoidPairing = Map.empty
     , wcPreferPairing = Map.empty
+    , wcOvertimeModel = Map.empty
+    , wcPayPeriodTracking = Map.empty
+    , wcIsTemp = Set.empty
     }
 
 -- Monday 2026-05-04 through Sunday 2026-05-10
@@ -615,3 +663,90 @@ spec = do
                             (mkTestSlot (fromGregorian 2026 5 4) 19)) emptySchedule
                 slot = mkTestSlot (fromGregorian 2026 5 5) 4
             in violatesRestPeriod defaultConfig tw_alice slot sched `shouldBe` False
+
+    describe "Employment status: wouldBeOvertime with PPExempt" $ do
+        it "returns False for PPExempt worker regardless of hours" $
+            let ctx = testWorkerContext
+                    { wcPayPeriodTracking = Map.singleton tw_bob PPExempt }
+                sched = scheduleWithDayHours tw_bob 20  -- bob at limit
+                a = Assignment tw_bob tst_grill testTuesday
+            in wouldBeOvertime ctx sched a `shouldBe` False
+
+        it "returns True for PPStandard worker at limit" $
+            let sched = scheduleWithDayHours tw_bob 20
+                a = Assignment tw_bob tst_grill testTuesday
+            in wouldBeOvertime testWorkerContext sched a `shouldBe` True
+
+        it "PPExempt with no hour limit is still False" $
+            let ctx = testWorkerContext
+                    { wcPayPeriodTracking = Map.singleton tw_carol PPExempt }
+                sched = scheduleWithDayHours tw_carol 12
+                a = Assignment tw_carol tst_grill testTuesday
+            in wouldBeOvertime ctx sched a `shouldBe` False
+
+    describe "Employment status: overtime model query functions" $ do
+        it "workerOvertimeModel defaults to OTEligible" $
+            workerOvertimeModel testWorkerContext tw_alice `shouldBe` OTEligible
+
+        it "workerOvertimeModel returns explicit value" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_alice OTManualOnly }
+            in workerOvertimeModel ctx tw_alice `shouldBe` OTManualOnly
+
+        it "workerOvertimeModel OTExempt" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_bob OTExempt }
+            in workerOvertimeModel ctx tw_bob `shouldBe` OTExempt
+
+        it "workerPayPeriodTracking defaults to PPStandard" $
+            workerPayPeriodTracking testWorkerContext tw_alice `shouldBe` PPStandard
+
+        it "workerPayPeriodTracking returns explicit PPExempt" $
+            let ctx = testWorkerContext
+                    { wcPayPeriodTracking = Map.singleton tw_alice PPExempt }
+            in workerPayPeriodTracking ctx tw_alice `shouldBe` PPExempt
+
+        it "workerIsTemp is False by default" $
+            workerIsTemp testWorkerContext tw_alice `shouldBe` False
+
+        it "workerIsTemp returns True when flagged" $
+            let ctx = testWorkerContext { wcIsTemp = Set.singleton tw_alice }
+            in workerIsTemp ctx tw_alice `shouldBe` True
+
+    describe "Employment status: tryAssignOvertimeHours with overtime model" $ do
+        it "OTEligible + opted in allows overtime" $
+            let sched = scheduleWithDayHours tw_alice 40  -- at limit
+                a = Assignment tw_alice tst_grill testTuesday
+            in tryAssignOvertimeHours testWorkerContext a sched
+                `shouldSatisfy` (== Just (assign a sched))
+
+        it "OTEligible + not opted in rejects overtime" $
+            let ctx = testWorkerContext
+                    { wcOvertimeOptIn = Set.empty }  -- alice no longer opted in
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in tryAssignOvertimeHours ctx a sched `shouldBe` Nothing
+
+        it "OTManualOnly rejects overtime even if opted in" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_alice OTManualOnly
+                    , wcOvertimeOptIn = Set.singleton tw_alice }
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in tryAssignOvertimeHours ctx a sched `shouldBe` Nothing
+
+        it "OTExempt allows assignment regardless of hours" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_alice OTExempt }
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in tryAssignOvertimeHours ctx a sched
+                `shouldSatisfy` (== Just (assign a sched))
+
+        it "under limit succeeds for all models" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_alice OTManualOnly }
+                sched = scheduleWithHours tw_alice 10  -- well under limit
+                a = Assignment tw_alice tst_grill testFriday
+            in tryAssignOvertimeHours ctx a sched
+                `shouldSatisfy` (== Just (assign a sched))

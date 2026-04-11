@@ -5,11 +5,13 @@ module Repo.Types
     ) where
 
 import Auth.Types (UserId, Role, User)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Time (Day)
 import Domain.Types (WorkerId, StationId, SkillId, Schedule)
 import Domain.Shift (ShiftDef)
 import Domain.Skill (Skill, SkillContext)
-import Domain.Worker (WorkerContext)
+import Domain.Worker (WorkerContext, OvertimeModel, PayPeriodTracking)
 import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Pin (PinnedAssignment)
@@ -76,6 +78,16 @@ data Repository = Repository
       -- ---------------------------------------------------------------
     , repoSaveWorkerCtx  :: WorkerContext -> IO ()
     , repoLoadWorkerCtx  :: IO WorkerContext
+
+      -- ---------------------------------------------------------------
+      -- Worker employment status
+      -- ---------------------------------------------------------------
+    , repoLoadEmployment :: IO (Map.Map WorkerId OvertimeModel,
+                                Map.Map WorkerId PayPeriodTracking,
+                                Set.Set WorkerId)
+      -- ^ Load all employment records: (overtime models, pay tracking, temp flags)
+    , repoSaveEmployment :: WorkerId -> OvertimeModel -> PayPeriodTracking -> Bool -> IO ()
+      -- ^ Upsert a single worker's employment record
 
       -- ---------------------------------------------------------------
       -- Absence context

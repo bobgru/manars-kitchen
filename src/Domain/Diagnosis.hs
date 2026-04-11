@@ -245,6 +245,9 @@ dWorkerCtx = WorkerContext
     , wcCrossTraining = Map.empty
     , wcAvoidPairing = Map.empty
     , wcPreferPairing = Map.empty
+    , wcOvertimeModel = Map.empty
+    , wcPayPeriodTracking = Map.empty
+    , wcIsTemp = Set.empty
     }
 
 -- | Worker context where bob has very tight hours.

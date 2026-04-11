@@ -440,10 +440,18 @@ canAssignSlot ctx allowOT w st slot sched =
         else isMultiStationSlot sctx st slot
              && Set.size existing < seniorityLvl + 1
              && not (any (\ea -> assignStation ea == st) (Set.toList existing))
-    weeklyOk = if allowOT
-               then not (wouldBeOvertime wctx sched a)
-                    || workerOptedInOvertime wctx w
-               else not (wouldBeOvertime wctx sched a)
+    otModel = workerOvertimeModel wctx w
+    ppTrack = workerPayPeriodTracking wctx w
+    weeklyOk = case ppTrack of
+        PPExempt   -> True  -- no weekly hour limit enforced
+        PPStandard ->
+            if allowOT
+            then case otModel of
+                OTExempt     -> True   -- overtime concept doesn't apply
+                OTManualOnly -> not (wouldBeOvertime wctx sched a)  -- never auto-assigned OT
+                OTEligible   -> not (wouldBeOvertime wctx sched a)
+                                || workerOptedInOvertime wctx w
+            else not (wouldBeOvertime wctx sched a)
     dailyOk = if allowOT
               then not (wouldExceedDailyTotal cfg a sched)
               else not (wouldExceedDailyRegular cfg a sched)
@@ -834,6 +842,9 @@ schRelaxedWorkerCtx = WorkerContext
     , wcCrossTraining = Map.empty
     , wcAvoidPairing = Map.empty
     , wcPreferPairing = Map.empty
+    , wcOvertimeModel = Map.empty
+    , wcPayPeriodTracking = Map.empty
+    , wcIsTemp = Set.empty
     }
 
 -- | Worker context where bob has very limited hours (1 hour/week).
@@ -1090,3 +1101,38 @@ spec = do
                 sched = srSchedule result
                 bobAssignments = byWorker schw_bob sched
             Set.size bobAssignments `shouldSatisfy` (>= 1)
+
+    describe "Employment status: Phase 2 does not auto-assign overtime to manual-only workers" $ do
+        it "OTManualOnly worker is skipped for auto-overtime" $ do
+            -- bob has tight hours (1h) and is manual-only: Phase 2 should NOT assign overtime
+            let tuesdaySlot = schMkSlot (fromGregorian 2026 5 5) 9
+                wctx = schTightHoursWorkerCtx
+                    { wcOvertimeModel = Map.singleton schw_bob OTManualOnly
+                    , wcOvertimeOptIn = Set.singleton schw_bob  -- opted in, but model overrides
+                    }
+                slots = [schMondaySlot, tuesdaySlot]
+                ctx = schMkCtx schBasicSkillCtx wctx emptyAbsenceContext
+                        slots schAllWorkers
+                result = buildSchedule ctx
+                sched = srSchedule result
+                bobAssignments = byWorker schw_bob sched
+                bobSlots = Set.map assignSlot bobAssignments
+                -- bob should get at most 1 hour (his limit), not be auto-assigned more
+                bobHours = Set.foldl' (\acc s -> acc + slotDuration s) 0 (Set.fromList (Set.toList bobSlots))
+            bobHours `shouldSatisfy` (<= 1 * 3600)
+
+    describe "Employment status: PPExempt workers assignable beyond weekly hour limit" $ do
+        it "PPExempt worker gets assigned even beyond weekly hours" $ do
+            -- bob has 1h limit but PPExempt tracking — limit should not be enforced
+            let tuesdaySlot = schMkSlot (fromGregorian 2026 5 5) 9
+                wctx = schTightHoursWorkerCtx
+                    { wcPayPeriodTracking = Map.singleton schw_bob PPExempt }
+                -- Use only bob as worker with multiple slots
+                slots = [schMondaySlot, tuesdaySlot]
+                ctx = schMkCtx schBasicSkillCtx wctx emptyAbsenceContext
+                        slots (Set.singleton schw_bob)
+                result = buildSchedule ctx
+                sched = srSchedule result
+                bobAssignments = byWorker schw_bob sched
+            -- bob should be assigned to both slots despite 1h limit
+            Set.size bobAssignments `shouldSatisfy` (>= 2)

@@ -30,7 +30,7 @@ import Data.Time
 import Domain.Types
 import Domain.Schedule (byWorker, byStation, byDay)
 import Domain.Skill (SkillContext(..))
-import Domain.Worker (WorkerContext(..))
+import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.Absence
     ( AbsenceType(..), AbsenceRequest(..), AbsenceStatus(..), AbsenceContext(..)
     )
@@ -542,7 +542,27 @@ displayWorkerCtx ctx = unlines $ concat
       ["Prefer pairing:"]
       ++ [ "  " ++ showWorker wid ++ " prefers " ++ showWorkerSet others
          | (wid, others) <- Map.toList (wcPreferPairing ctx) ]
+    , if Map.null (wcOvertimeModel ctx) then [] else
+      ["Overtime model:"]
+      ++ [ "  " ++ showWorker wid ++ ": " ++ showOvertimeModel om
+         | (wid, om) <- Map.toList (wcOvertimeModel ctx) ]
+    , if Map.null (wcPayPeriodTracking ctx) then [] else
+      ["Pay period tracking:"]
+      ++ [ "  " ++ showWorker wid ++ ": " ++ showPayPeriodTracking pp
+         | (wid, pp) <- Map.toList (wcPayPeriodTracking ctx) ]
+    , if Set.null (wcIsTemp ctx) then [] else
+      ["Temp workers:"]
+      ++ [ "  " ++ showWorker wid | wid <- Set.toList (wcIsTemp ctx) ]
     ]
+
+showOvertimeModel :: OvertimeModel -> String
+showOvertimeModel OTEligible   = "eligible"
+showOvertimeModel OTManualOnly = "manual-only"
+showOvertimeModel OTExempt     = "exempt"
+
+showPayPeriodTracking :: PayPeriodTracking -> String
+showPayPeriodTracking PPStandard = "standard"
+showPayPeriodTracking PPExempt   = "exempt"
 
 displayAbsenceTypes :: AbsenceContext -> String
 displayAbsenceTypes ctx

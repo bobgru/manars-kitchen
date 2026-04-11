@@ -17,7 +17,7 @@ import Domain.Types
 import Data.Time (DayOfWeek(..))
 import Domain.Shift (ShiftDef(..))
 import Domain.Skill (Skill(..), SkillContext(..))
-import Domain.Worker (WorkerContext(..))
+import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.SchedulerConfig (SchedulerConfig, configToMap, configFromMap)
 import Domain.Pin (PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
@@ -54,6 +54,8 @@ mkSQLiteRepo path = do
         , repoLoadSkillCtx   = sqlLoadSkillCtx conn
         , repoSaveWorkerCtx  = sqlSaveWorkerCtx conn
         , repoLoadWorkerCtx  = sqlLoadWorkerCtx conn
+        , repoLoadEmployment = sqlLoadEmployment conn
+        , repoSaveEmployment = sqlSaveEmployment conn
         , repoSaveAbsenceCtx = sqlSaveAbsenceCtx conn
         , repoLoadAbsenceCtx = sqlLoadAbsenceCtx conn
         , repoSaveShift      = sqlSaveShift conn
@@ -415,6 +417,9 @@ sqlLoadWorkerCtx conn = do
     avoidPairing  <- sqlLoadPairing conn "worker_avoid_pairing"
     preferPairing <- sqlLoadPairing conn "worker_prefer_pairing"
 
+    -- Employment status
+    (otModels, ppTracking, tempSet) <- sqlLoadEmployment conn
+
     return WorkerContext
         { wcMaxWeeklyHours = maxHours
         , wcOvertimeOptIn  = overtime
@@ -426,7 +431,57 @@ sqlLoadWorkerCtx conn = do
         , wcCrossTraining  = crossTraining
         , wcAvoidPairing   = avoidPairing
         , wcPreferPairing  = preferPairing
+        , wcOvertimeModel  = otModels
+        , wcPayPeriodTracking = ppTracking
+        , wcIsTemp         = tempSet
         }
+
+-- =====================================================================
+-- Worker employment status
+-- =====================================================================
+
+-- | Load all employment records into maps.
+sqlLoadEmployment :: Connection
+                  -> IO (Map.Map WorkerId OvertimeModel,
+                         Map.Map WorkerId PayPeriodTracking,
+                         Set.Set WorkerId)
+sqlLoadEmployment conn = do
+    rows <- query_ conn
+        "SELECT worker_id, overtime_model, pay_period_tracking, is_temp FROM worker_employment"
+        :: IO [(Int, String, String, Int)]
+    let otMap = Map.fromList
+            [(WorkerId w, textToOvertimeModel om) | (w, om, _, _) <- rows]
+        ppMap = Map.fromList
+            [(WorkerId w, textToPayPeriodTracking pp) | (w, _, pp, _) <- rows]
+        tempSet = Set.fromList
+            [WorkerId w | (w, _, _, t) <- rows, t /= 0]
+    return (otMap, ppMap, tempSet)
+
+-- | Upsert a single worker's employment record.
+sqlSaveEmployment :: Connection -> WorkerId -> OvertimeModel -> PayPeriodTracking -> Bool -> IO ()
+sqlSaveEmployment conn (WorkerId wid) om pp temp =
+    execute conn
+        "INSERT OR REPLACE INTO worker_employment \
+        \(worker_id, overtime_model, pay_period_tracking, is_temp) VALUES (?, ?, ?, ?)"
+        (wid, overtimeModelToText om, payPeriodTrackingToText pp, if temp then (1::Int) else 0)
+
+overtimeModelToText :: OvertimeModel -> String
+overtimeModelToText OTEligible   = "eligible"
+overtimeModelToText OTManualOnly = "manual-only"
+overtimeModelToText OTExempt     = "exempt"
+
+textToOvertimeModel :: String -> OvertimeModel
+textToOvertimeModel "manual-only" = OTManualOnly
+textToOvertimeModel "exempt"      = OTExempt
+textToOvertimeModel _             = OTEligible
+
+payPeriodTrackingToText :: PayPeriodTracking -> String
+payPeriodTrackingToText PPStandard = "standard"
+payPeriodTrackingToText PPExempt   = "exempt"
+
+textToPayPeriodTracking :: String -> PayPeriodTracking
+textToPayPeriodTracking "exempt" = PPExempt
+textToPayPeriodTracking _        = PPStandard
 
 -- =====================================================================
 -- Absence context
@@ -734,6 +789,7 @@ sqlWipeAll conn = withTransaction conn $ do
     execute_ conn "DELETE FROM worker_cross_training"
     execute_ conn "DELETE FROM worker_avoid_pairing"
     execute_ conn "DELETE FROM worker_prefer_pairing"
+    execute_ conn "DELETE FROM worker_employment"
     execute_ conn "DELETE FROM station_multi_hours"
     execute_ conn "DELETE FROM worker_weekend_only"
     execute_ conn "DELETE FROM worker_shift_prefs"

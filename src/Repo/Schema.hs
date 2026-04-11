@@ -248,6 +248,14 @@ statements =
       \  slot_duration_seconds INTEGER NOT NULL,\
       \  PRIMARY KEY (draft_id, worker_id, station_id, slot_date, slot_start)\
       \)"
+
+      -- Worker employment status (decomposed properties)
+    , "CREATE TABLE IF NOT EXISTS worker_employment (\
+      \  worker_id INTEGER PRIMARY KEY,\
+      \  overtime_model TEXT NOT NULL DEFAULT 'eligible' CHECK (overtime_model IN ('eligible', 'manual-only', 'exempt')),\
+      \  pay_period_tracking TEXT NOT NULL DEFAULT 'standard' CHECK (pay_period_tracking IN ('standard', 'exempt')),\
+      \  is_temp BOOLEAN NOT NULL DEFAULT 0\
+      \)"
     ]
 
 -- | Idempotent migrations for schema evolution.

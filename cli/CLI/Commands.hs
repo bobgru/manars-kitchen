@@ -71,6 +71,11 @@ data Command
     -- Cross-training goals
     | WorkerSetCrossTraining Int Int    -- ^ worker-id skill-id
     | WorkerClearCrossTraining Int Int  -- ^ worker-id skill-id
+    -- Employment status
+    | WorkerSetStatus Int String       -- ^ worker-id salaried|full-time|part-time|per-diem
+    | WorkerSetOvertimeModel Int String -- ^ worker-id eligible|manual-only|exempt
+    | WorkerSetPayTracking Int String   -- ^ worker-id standard|exempt
+    | WorkerSetTemp Int Bool            -- ^ worker-id on|off
     -- Pairing
     | WorkerAvoidPairing Int Int       -- ^ worker-id other-id
     | WorkerClearAvoidPairing Int Int
@@ -225,6 +230,14 @@ parseCommand input = case words input of
     ["config", "preset-list"]        -> ConfigPresetList
     ["config", "reset"]              -> ConfigReset
 
+    ["worker", "set-status", wid, status]
+        | isDigit' wid -> WorkerSetStatus (read wid) status
+    ["worker", "set-overtime-model", wid, model]
+        | isDigit' wid -> WorkerSetOvertimeModel (read wid) model
+    ["worker", "set-pay-tracking", wid, tracking]
+        | isDigit' wid -> WorkerSetPayTracking (read wid) tracking
+    ["worker", "set-temp", wid, b]
+        | isDigit' wid -> WorkerSetTemp (read wid) (parseBool b)
     ["worker", "set-seniority", wid, lvl]
         | all isDigit' [wid, lvl] -> WorkerSetSeniority (read wid) (read lvl)
     ["worker", "set-cross-training", wid, sid]

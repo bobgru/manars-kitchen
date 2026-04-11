@@ -25,6 +25,11 @@ module Service.Worker
     , setSeniority
     , addCrossTraining
     , removeCrossTraining
+      -- * Employment status
+    , setOvertimeModel
+    , setPayPeriodTracking
+    , setTempFlag
+    , setEmploymentStatus
       -- * Pairing
     , addAvoidPairing
     , removeAvoidPairing
@@ -46,7 +51,7 @@ import qualified Data.Set as Set
 import Data.Time (DayOfWeek(..))
 import Domain.Types (WorkerId, StationId, SkillId, DiffTime)
 import Domain.Skill (Skill, SkillContext(..))
-import Domain.Worker (WorkerContext(..))
+import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.Pin (PinnedAssignment(..))
 import Repo.Types (Repository(..))
 
@@ -151,12 +156,23 @@ setMaxHours repo wid hours = do
     repoSaveWorkerCtx repo ctx'
 
 -- | Set whether a worker opts in to overtime.
-setOvertimeOptIn :: Repository -> WorkerId -> Bool -> IO ()
+-- For salaried (OTManualOnly) workers, this is a no-op — returns a warning.
+-- For other workers, sets overtime_model to OTEligible (on) or updates opt-in set.
+setOvertimeOptIn :: Repository -> WorkerId -> Bool -> IO (Maybe String)
 setOvertimeOptIn repo wid optIn = do
-    ctx <- repoLoadWorkerCtx repo
-    let ctx' = ctx { wcOvertimeOptIn =
-            (if optIn then Set.insert else Set.delete) wid (wcOvertimeOptIn ctx) }
-    repoSaveWorkerCtx repo ctx'
+    (otMap, _, _) <- repoLoadEmployment repo
+    let om = Map.findWithDefault OTEligible wid otMap
+    case om of
+        OTManualOnly -> return (Just "Warning: salaried workers always use manual-only overtime. No change made.")
+        _ -> do
+            ctx <- repoLoadWorkerCtx repo
+            let ctx' = ctx { wcOvertimeOptIn =
+                    (if optIn then Set.insert else Set.delete) wid (wcOvertimeOptIn ctx) }
+            repoSaveWorkerCtx repo ctx'
+            if optIn
+                then setOvertimeModel repo wid OTEligible
+                else return ()
+            return Nothing
 
 -- | Set a worker's station preferences (ordered, most preferred first).
 setStationPreferences :: Repository -> WorkerId -> [StationId] -> IO ()
@@ -246,6 +262,60 @@ removeCrossTraining repo wid sid = do
             then Map.delete wid (wcCrossTraining ctx)
             else Map.insert wid updated (wcCrossTraining ctx) }
     repoSaveWorkerCtx repo ctx'
+
+-- -----------------------------------------------------------------
+-- Employment status
+-- -----------------------------------------------------------------
+
+-- | Set a worker's overtime model.
+setOvertimeModel :: Repository -> WorkerId -> OvertimeModel -> IO ()
+setOvertimeModel repo wid om = do
+    (_, ppMap, tempSet) <- repoLoadEmployment repo
+    let pp = Map.findWithDefault PPStandard wid ppMap
+        temp = Set.member wid tempSet
+    repoSaveEmployment repo wid om pp temp
+
+-- | Set a worker's pay period tracking.
+setPayPeriodTracking :: Repository -> WorkerId -> PayPeriodTracking -> IO ()
+setPayPeriodTracking repo wid pp = do
+    (otMap, _, tempSet) <- repoLoadEmployment repo
+    let om = Map.findWithDefault OTEligible wid otMap
+        temp = Set.member wid tempSet
+    repoSaveEmployment repo wid om pp temp
+
+-- | Set a worker's temp flag.
+setTempFlag :: Repository -> WorkerId -> Bool -> IO ()
+setTempFlag repo wid temp = do
+    (otMap, ppMap, _) <- repoLoadEmployment repo
+    let om = Map.findWithDefault OTEligible wid otMap
+        pp = Map.findWithDefault PPStandard wid ppMap
+    repoSaveEmployment repo wid om pp temp
+
+-- | Apply a convenience employment status preset.
+-- Returns a message string describing what was set.
+setEmploymentStatus :: Repository -> WorkerId -> String -> IO String
+setEmploymentStatus repo wid status = case status of
+    "salaried" -> do
+        repoSaveEmployment repo wid OTManualOnly PPStandard False
+        setMaxHours repo wid (40 * 3600)
+        return "Set salaried: overtime=manual-only, tracking=standard, hours=40h"
+    "full-time" -> do
+        repoSaveEmployment repo wid OTEligible PPStandard False
+        setMaxHours repo wid (40 * 3600)
+        return "Set full-time: overtime=eligible, tracking=standard, hours=40h"
+    "part-time" -> do
+        (_, _, tempSet) <- repoLoadEmployment repo
+        let temp = Set.member wid tempSet
+        repoSaveEmployment repo wid OTEligible PPStandard temp
+        return "Set part-time: overtime=eligible, tracking=standard. Remember to set hours with 'worker set-hours'."
+    "per-diem" -> do
+        repoSaveEmployment repo wid OTExempt PPExempt False
+        -- Remove hour limit
+        ctx <- repoLoadWorkerCtx repo
+        let ctx' = ctx { wcMaxWeeklyHours = Map.delete wid (wcMaxWeeklyHours ctx) }
+        repoSaveWorkerCtx repo ctx'
+        return "Set per-diem: overtime=exempt, tracking=exempt, hour limit removed"
+    _ -> return ("Unknown status: " ++ status ++ ". Use salaried|full-time|part-time|per-diem.")
 
 -- | Add a symmetric avoid-pairing relationship between two workers.
 addAvoidPairing :: Repository -> WorkerId -> WorkerId -> IO ()
