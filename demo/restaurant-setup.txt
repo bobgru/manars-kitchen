@@ -253,3 +253,32 @@ draft hours 1
 # Commit the draft to the live calendar
 draft commit 1 week 2 via draft
 calendar history
+
+# === Cross-Draft Validation ===
+# Demonstrates automatic constraint re-validation when the calendar changes
+# after a draft was created.
+#
+# Scenario: We create two weekly drafts (week 3 and week 4), generate both,
+# then commit week 3. When we re-open week 4, the system detects that the
+# calendar changed and re-validates all assignments. Workers who worked the
+# Apr 25-26 weekend now violate the alternating-weekends rule for the
+# May 2-3 weekend — those assignments are automatically removed.
+
+# Pin Marco to grill on Saturday midday (grill hours: 10-17)
+pin 2 1 saturday midday
+
+# Create two concurrent drafts (non-overlapping)
+draft create 2026-04-20 2026-04-26
+draft create 2026-04-27 2026-05-03
+draft list
+
+# Generate both drafts — scheduler assigns workers to all shifts including weekends
+draft generate 2
+draft generate 3
+
+# Commit week 3 to the calendar — locks in weekend assignments for Apr 25-26
+draft commit 2 week 3 with Saturday grill
+
+# Re-open week 4 draft — system detects calendar changed, re-validates,
+# and removes weekend assignments for workers who worked Apr 25-26
+draft open 3

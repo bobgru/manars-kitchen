@@ -16,10 +16,11 @@ import Domain.Pin (PinnedAssignment)
 
 -- | Metadata for a draft session.
 data DraftInfo = DraftInfo
-    { diId        :: !Int
-    , diDateFrom  :: !Day
-    , diDateTo    :: !Day
-    , diCreatedAt :: !String
+    { diId             :: !Int
+    , diDateFrom       :: !Day
+    , diDateTo         :: !Day
+    , diCreatedAt      :: !String
+    , diLastValidatedAt :: !String
     } deriving (Show, Eq)
 
 -- | Metadata for a calendar history commit.
@@ -151,6 +152,10 @@ data Repository = Repository
       -- ^ Save assignments for a draft (replace existing)
     , repoLoadDraftAssignments :: Int -> IO Schedule
       -- ^ Load assignments for a draft
+    , repoCalendarCommitsAfter :: String -> IO [CalendarCommit]
+      -- ^ List calendar commits with committed_at after the given timestamp
+    , repoUpdateDraftValidatedAt :: Int -> IO ()
+      -- ^ Update a draft's last_validated_at to current time
 
       -- ---------------------------------------------------------------
       -- Checkpoint (SQLite savepoints)

@@ -82,6 +82,8 @@ mkSQLiteRepo path = do
         , repoCheckDraftOverlap = sqlCheckDraftOverlap conn
         , repoSaveDraftAssignments = sqlSaveDraftAssignments conn
         , repoLoadDraftAssignments = sqlLoadDraftAssignments conn
+        , repoCalendarCommitsAfter = sqlCalendarCommitsAfter conn
+        , repoUpdateDraftValidatedAt = sqlUpdateDraftValidatedAt conn
         , repoSavepoint      = sqlSavepoint conn
         , repoRelease        = sqlRelease conn
         , repoRollbackTo     = sqlRollbackTo conn
@@ -789,7 +791,8 @@ sqlLoadCalendar conn dateFrom dateTo = do
 sqlSaveCommit :: Connection -> Day -> Day -> String -> Schedule -> IO Int
 sqlSaveCommit conn dateFrom dateTo note (Schedule assignments) = withTransaction conn $ do
     execute conn
-        "INSERT INTO calendar_commits (date_from, date_to, note) VALUES (?, ?, ?)"
+        "INSERT INTO calendar_commits (committed_at, date_from, date_to, note) \
+        \VALUES (strftime('%Y-%m-%d %H:%M:%f', 'now'), ?, ?, ?)"
         (dayToText dateFrom, dayToText dateTo, note)
     commitId <- fromIntegral <$> lastInsertRowId conn
     mapM_ (\a -> do
@@ -846,7 +849,8 @@ showDow Sunday    = "sunday"
 sqlCreateDraft :: Connection -> Day -> Day -> IO Int
 sqlCreateDraft conn dateFrom dateTo = do
     execute conn
-        "INSERT INTO drafts (date_from, date_to) VALUES (?, ?)"
+        "INSERT INTO drafts (date_from, date_to, created_at, last_validated_at) \
+        \VALUES (?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'), strftime('%Y-%m-%d %H:%M:%f', 'now'))"
         (dayToText dateFrom, dayToText dateTo)
     fromIntegral <$> lastInsertRowId conn
 
@@ -860,21 +864,23 @@ sqlDeleteDraft conn draftId = do
 sqlListDrafts :: Connection -> IO [DraftInfo]
 sqlListDrafts conn = do
     rows <- query_ conn
-        "SELECT draft_id, date_from, date_to, created_at FROM drafts ORDER BY created_at"
-        :: IO [(Int, String, String, String)]
-    return [DraftInfo did (textToDay df) (textToDay dt) ts
-           | (did, df, dt, ts) <- rows]
+        "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
+        \FROM drafts ORDER BY created_at"
+        :: IO [(Int, String, String, String, String)]
+    return [DraftInfo did (textToDay df) (textToDay dt) ts lv
+           | (did, df, dt, ts, lv) <- rows]
 
 -- | Get a single draft by id.
 sqlGetDraft :: Connection -> Int -> IO (Maybe DraftInfo)
 sqlGetDraft conn draftId = do
     rows <- query conn
-        "SELECT draft_id, date_from, date_to, created_at FROM drafts WHERE draft_id = ?"
+        "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
+        \FROM drafts WHERE draft_id = ?"
         (Only draftId)
-        :: IO [(Int, String, String, String)]
+        :: IO [(Int, String, String, String, String)]
     return $ case rows of
-        [(did, df, dt, ts)] -> Just (DraftInfo did (textToDay df) (textToDay dt) ts)
-        _                   -> Nothing
+        [(did, df, dt, ts, lv)] -> Just (DraftInfo did (textToDay df) (textToDay dt) ts lv)
+        _                       -> Nothing
 
 -- | Check if a date range overlaps any existing draft.
 sqlCheckDraftOverlap :: Connection -> Day -> Day -> IO Bool
@@ -914,6 +920,24 @@ sqlLoadDraftAssignments conn draftId = do
                 (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
             | (w, st, d, t, dur) <- rows]
     return (Schedule as)
+
+-- | List calendar commits with committed_at after the given timestamp.
+sqlCalendarCommitsAfter :: Connection -> String -> IO [CalendarCommit]
+sqlCalendarCommitsAfter conn ts = do
+    rows <- query conn
+        "SELECT id, committed_at, date_from, date_to, note \
+        \FROM calendar_commits WHERE committed_at > ? ORDER BY id DESC"
+        (Only ts)
+        :: IO [(Int, String, String, String, String)]
+    return [CalendarCommit cid ca (textToDay df) (textToDay dt) n
+           | (cid, ca, df, dt, n) <- rows]
+
+-- | Update a draft's last_validated_at to the current time.
+sqlUpdateDraftValidatedAt :: Connection -> Int -> IO ()
+sqlUpdateDraftValidatedAt conn draftId =
+    execute conn
+        "UPDATE drafts SET last_validated_at = strftime('%Y-%m-%d %H:%M:%f', 'now') WHERE draft_id = ?"
+        (Only draftId)
 
 -- =====================================================================
 -- Checkpoint (SQLite savepoints)

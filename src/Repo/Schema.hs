@@ -1,13 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Repo.Schema
     ( initSchema
     ) where
 
+import Control.Exception (catch, SomeException)
 import Database.SQLite.Simple (Connection, Query, execute_)
 
--- | Create all tables if they don't already exist.
+-- | Create all tables if they don't already exist, then apply migrations.
 initSchema :: Connection -> IO ()
-initSchema conn = mapM_ (execute_ conn) statements
+initSchema conn = do
+    mapM_ (execute_ conn) statements
+    mapM_ (tryExec conn) migrations
 
 statements :: [Query]
 statements =
@@ -230,7 +234,8 @@ statements =
       \  draft_id INTEGER PRIMARY KEY AUTOINCREMENT,\
       \  date_from TEXT NOT NULL,\
       \  date_to TEXT NOT NULL,\
-      \  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
+      \  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
+      \  last_validated_at TEXT NOT NULL DEFAULT (datetime('now'))\
       \)"
 
       -- Draft assignments (working copy, same shape as calendar_assignments + draft_id)
@@ -244,3 +249,15 @@ statements =
       \  PRIMARY KEY (draft_id, worker_id, station_id, slot_date, slot_start)\
       \)"
     ]
+
+-- | Idempotent migrations for schema evolution.
+-- Each ALTER TABLE is wrapped in a catch so it succeeds even if the
+-- column already exists (e.g., on a freshly created database).
+migrations :: [Query]
+migrations =
+    [ "ALTER TABLE drafts ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    ]
+
+-- | Try to execute a statement, silently ignoring errors (for idempotent migrations).
+tryExec :: Connection -> Query -> IO ()
+tryExec conn q = execute_ conn q `catch` \(_ :: SomeException) -> return ()

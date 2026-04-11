@@ -15,6 +15,8 @@ module Domain.Scheduler
     , scoreShiftWorker
     , scoreSlotWorker
     , canAssignSlot
+      -- * Constraint checks (for validation)
+    , blockedByAlternateWeekend
       -- * Tests
     , spec
     ) where

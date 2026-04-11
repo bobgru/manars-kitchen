@@ -40,6 +40,7 @@ import qualified Service.Config as SC
 import qualified Service.Optimize as Opt
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
+import Service.DraftValidation (DraftViolation(..), validateDraftAgainstCalendar)
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
 import CLI.Commands (Command(..), parseCommand)
@@ -419,6 +420,21 @@ handleCommand st cmd = case cmd of
         case mDraft of
             Nothing -> putStrLn "Draft not found."
             Just d  -> do
+                -- Validate draft against calendar before displaying
+                violations <- validateDraftAgainstCalendar (asRepo st) did
+                -- Display violation report if any
+                if null violations
+                    then return ()
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList stations
+                        displayViolationReport d workerNames stationNames violations
+                        putStrLn ""
+                -- Load (possibly updated) draft assignments
                 sched <- repoLoadDraftAssignments (asRepo st) did
                 putStrLn ("Draft #" ++ show (diId d))
                 putStrLn ("  Date range: " ++ show (diDateFrom d) ++ " to " ++ show (diDateTo d))
@@ -1549,6 +1565,41 @@ printHelpGroup role group =
 when :: Bool -> IO () -> IO ()
 when True  action = action
 when False _      = return ()
+
+-- -----------------------------------------------------------------
+-- Draft validation display
+-- -----------------------------------------------------------------
+
+-- | Display a violation report grouped by worker.
+displayViolationReport :: DraftInfo -> Map.Map WorkerId String
+                       -> Map.Map StationId String
+                       -> [DraftViolation] -> IO ()
+displayViolationReport draft workerNames stationNames violations = do
+    let nRemoved = length violations
+    putStrLn ("Draft #" ++ show (diId draft) ++ " validated against updated calendar.")
+    putStrLn (show nRemoved ++ " assignment" ++ (if nRemoved == 1 then "" else "s")
+             ++ " removed due to constraint violations:")
+    putStrLn ""
+    -- Group by worker
+    let grouped = Map.toAscList $ foldl (\acc v ->
+            let w = assignWorker (dvAssignment v)
+            in Map.insertWith (++) w [v] acc) Map.empty violations
+    mapM_ (\(wid@(WorkerId widN), vs) -> do
+        let wName = Map.findWithDefault ("Worker " ++ show widN) wid workerNames
+        putStrLn ("  " ++ wName ++ " (Worker " ++ show widN ++ "):")
+        mapM_ (\v ->
+            let a = dvAssignment v
+                s = assignSlot a
+                sid = assignStation a
+                sName = Map.findWithDefault ("station " ++ show (let StationId n = sid in n)) sid stationNames
+            in putStrLn ("    - " ++ show (slotDate s)
+                        ++ " " ++ sName
+                        ++ " " ++ show (slotStart s)
+                        ++ ": " ++ dvConstraint v)
+            ) vs
+        ) grouped
+    putStrLn ""
+    putStrLn "Run 'diagnose' to see how to fill the gaps."
 
 -- | Show a Double with 1 decimal place.
 showFFloat1 :: Double -> String
