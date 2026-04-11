@@ -1,8 +1,10 @@
 module Repo.Types
     ( Repository(..)
+    , CalendarCommit(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
+import Data.Time (Day)
 import Domain.Types (WorkerId, StationId, SkillId, Schedule)
 import Domain.Shift (ShiftDef)
 import Domain.Skill (Skill, SkillContext)
@@ -10,6 +12,15 @@ import Domain.Worker (WorkerContext)
 import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Pin (PinnedAssignment)
+
+-- | Metadata for a calendar history commit.
+data CalendarCommit = CalendarCommit
+    { ccId          :: !Int
+    , ccCommittedAt :: !String
+    , ccDateFrom    :: !Day
+    , ccDateTo      :: !Day
+    , ccNote        :: !String
+    } deriving (Show)
 
 -- | Record-of-functions abstracting over storage backend.
 -- Each field is an IO action; swap the record to swap the backend
@@ -99,6 +110,20 @@ data Repository = Repository
       -- ^ returns (timestamp, username, command)
     , repoWipeAll        :: IO ()
       -- ^ delete all data from all tables (for demo/replay)
+
+      -- ---------------------------------------------------------------
+      -- Calendar (continuous assignment store)
+      -- ---------------------------------------------------------------
+    , repoSaveCalendar   :: Day -> Day -> Schedule -> IO ()
+      -- ^ Save calendar assignments for a date range (delete existing in range, insert new)
+    , repoLoadCalendar   :: Day -> Day -> IO Schedule
+      -- ^ Load calendar assignments by date range
+    , repoSaveCommit     :: Day -> Day -> String -> Schedule -> IO Int
+      -- ^ Save a history commit with snapshot of old assignments, return commit id
+    , repoListCommits    :: IO [CalendarCommit]
+      -- ^ List calendar commits in reverse chronological order
+    , repoLoadCommitAssignments :: Int -> IO Schedule
+      -- ^ Load snapshot assignments for a commit id
 
       -- ---------------------------------------------------------------
       -- Checkpoint (SQLite savepoints)

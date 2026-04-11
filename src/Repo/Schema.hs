@@ -194,4 +194,34 @@ statements =
       \  username TEXT NOT NULL,\
       \  command TEXT NOT NULL\
       \)"
+
+      -- Calendar assignments (continuous calendar, no schedule name)
+    , "CREATE TABLE IF NOT EXISTS calendar_assignments (\
+      \  worker_id INTEGER NOT NULL,\
+      \  station_id INTEGER NOT NULL,\
+      \  slot_date TEXT NOT NULL,\
+      \  slot_start TEXT NOT NULL,\
+      \  slot_duration_seconds INTEGER NOT NULL,\
+      \  PRIMARY KEY (worker_id, station_id, slot_date, slot_start)\
+      \)"
+
+      -- Calendar commits (history metadata)
+    , "CREATE TABLE IF NOT EXISTS calendar_commits (\
+      \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      \  committed_at TEXT NOT NULL DEFAULT (datetime('now')),\
+      \  date_from TEXT NOT NULL,\
+      \  date_to TEXT NOT NULL,\
+      \  note TEXT NOT NULL DEFAULT ''\
+      \)"
+
+      -- Calendar commit assignments (snapshot of replaced assignments)
+    , "CREATE TABLE IF NOT EXISTS calendar_commit_assignments (\
+      \  commit_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL,\
+      \  station_id INTEGER NOT NULL,\
+      \  slot_date TEXT NOT NULL,\
+      \  slot_start TEXT NOT NULL,\
+      \  slot_duration_seconds INTEGER NOT NULL,\
+      \  PRIMARY KEY (commit_id, worker_id, station_id, slot_date, slot_start)\
+      \)"
     ]

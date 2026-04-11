@@ -24,7 +24,8 @@ import Domain.Absence
     ( AbsenceType(..)
     , AbsenceRequest(..), AbsenceContext(..)
     )
-import Repo.Types (Repository(..))
+import Data.Time (Day)
+import Repo.Types (Repository(..), CalendarCommit(..))
 import Repo.Schema (initSchema)
 import Repo.Serialize
 
@@ -69,6 +70,11 @@ mkSQLiteRepo path = do
         , repoLogCommand     = sqlLogCommand conn
         , repoGetAuditLog    = sqlGetAuditLog conn
         , repoWipeAll        = sqlWipeAll conn
+        , repoSaveCalendar   = sqlSaveCalendar conn
+        , repoLoadCalendar   = sqlLoadCalendar conn
+        , repoSaveCommit     = sqlSaveCommit conn
+        , repoListCommits    = sqlListCommits conn
+        , repoLoadCommitAssignments = sqlLoadCommitAssignments conn
         , repoSavepoint      = sqlSavepoint conn
         , repoRelease        = sqlRelease conn
         , repoRollbackTo     = sqlRollbackTo conn
@@ -702,6 +708,9 @@ sqlWipeAll :: Connection -> IO ()
 sqlWipeAll conn = withTransaction conn $ do
     -- Order matters for foreign key safety, but we have no FK constraints
     -- in the schema, so just delete everything.
+    execute_ conn "DELETE FROM calendar_commit_assignments"
+    execute_ conn "DELETE FROM calendar_commits"
+    execute_ conn "DELETE FROM calendar_assignments"
     execute_ conn "DELETE FROM assignments"
     execute_ conn "DELETE FROM schedules"
     execute_ conn "DELETE FROM shifts"
@@ -730,6 +739,86 @@ sqlWipeAll conn = withTransaction conn $ do
     execute_ conn "DELETE FROM users"
     -- Reset autoincrement counters
     execute_ conn "DELETE FROM sqlite_sequence"
+
+-- =====================================================================
+-- Calendar (continuous assignment store)
+-- =====================================================================
+
+-- | Delete existing calendar assignments in date range, insert new ones.
+sqlSaveCalendar :: Connection -> Day -> Day -> Schedule -> IO ()
+sqlSaveCalendar conn dateFrom dateTo (Schedule assignments) = withTransaction conn $ do
+    execute conn
+        "DELETE FROM calendar_assignments WHERE slot_date >= ? AND slot_date <= ?"
+        (dayToText dateFrom, dayToText dateTo)
+    mapM_ (\a -> do
+        let WorkerId wid = assignWorker a
+            StationId sid = assignStation a
+            s = assignSlot a
+        execute conn
+            "INSERT INTO calendar_assignments \
+            \(worker_id, station_id, slot_date, slot_start, slot_duration_seconds) \
+            \VALUES (?, ?, ?, ?, ?)"
+            (wid, sid, dayToText (slotDate s), todToText (slotStart s),
+             diffTimeToSeconds (slotDuration s))
+        ) (Set.toList assignments)
+
+-- | Load calendar assignments by date range into a Schedule.
+sqlLoadCalendar :: Connection -> Day -> Day -> IO Schedule
+sqlLoadCalendar conn dateFrom dateTo = do
+    rows <- query conn
+        "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
+        \FROM calendar_assignments WHERE slot_date >= ? AND slot_date <= ?"
+        (dayToText dateFrom, dayToText dateTo)
+        :: IO [(Int, Int, String, String, Int)]
+    let as = Set.fromList
+            [Assignment (WorkerId w) (StationId st)
+                (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
+            | (w, st, d, t, dur) <- rows]
+    return (Schedule as)
+
+-- | Insert commit metadata and snapshot assignments, return commit id.
+sqlSaveCommit :: Connection -> Day -> Day -> String -> Schedule -> IO Int
+sqlSaveCommit conn dateFrom dateTo note (Schedule assignments) = withTransaction conn $ do
+    execute conn
+        "INSERT INTO calendar_commits (date_from, date_to, note) VALUES (?, ?, ?)"
+        (dayToText dateFrom, dayToText dateTo, note)
+    commitId <- fromIntegral <$> lastInsertRowId conn
+    mapM_ (\a -> do
+        let WorkerId wid = assignWorker a
+            StationId sid = assignStation a
+            s = assignSlot a
+        execute conn
+            "INSERT INTO calendar_commit_assignments \
+            \(commit_id, worker_id, station_id, slot_date, slot_start, slot_duration_seconds) \
+            \VALUES (?, ?, ?, ?, ?, ?)"
+            (commitId, wid, sid, dayToText (slotDate s), todToText (slotStart s),
+             diffTimeToSeconds (slotDuration s))
+        ) (Set.toList assignments)
+    return commitId
+
+-- | List commits in reverse chronological order.
+sqlListCommits :: Connection -> IO [CalendarCommit]
+sqlListCommits conn = do
+    rows <- query_ conn
+        "SELECT id, committed_at, date_from, date_to, note \
+        \FROM calendar_commits ORDER BY id DESC"
+        :: IO [(Int, String, String, String, String)]
+    return [CalendarCommit cid ts (textToDay df) (textToDay dt) n
+           | (cid, ts, df, dt, n) <- rows]
+
+-- | Load snapshot assignments for a commit id.
+sqlLoadCommitAssignments :: Connection -> Int -> IO Schedule
+sqlLoadCommitAssignments conn commitId = do
+    rows <- query conn
+        "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
+        \FROM calendar_commit_assignments WHERE commit_id = ?"
+        (Only commitId)
+        :: IO [(Int, Int, String, String, Int)]
+    let as = Set.fromList
+            [Assignment (WorkerId w) (StationId st)
+                (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
+            | (w, st, d, t, dur) <- rows]
+    return (Schedule as)
 
 showDow :: DayOfWeek -> String
 showDow Monday    = "monday"

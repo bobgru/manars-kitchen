@@ -41,6 +41,7 @@ library
                      , Service.Absence
                      , Service.Config
                      , Service.Optimize
+                     , Service.Calendar
                      , Export.JSON
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
@@ -94,10 +95,14 @@ test-suite manars-kitchen-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
+  other-modules:       CalendarSpec
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
                      , hspec
+                     , containers
+                     , time
+                     , directory
   ghc-options:         -Wall
                        -Wcompat
 

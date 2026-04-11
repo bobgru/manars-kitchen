@@ -28,12 +28,13 @@ import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
-import Repo.Types (Repository(..))
+import Repo.Types (Repository(..), CalendarCommit(..))
 import Service.Auth (AuthError(..), register, changePassword)
 import qualified Service.Worker as SW
 import qualified Service.Absence as SA
 import qualified Service.Config as SC
 import qualified Service.Optimize as Opt
+import qualified Service.Calendar as Cal
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
 import CLI.Commands (Command(..), parseCommand)
@@ -124,6 +125,14 @@ isMutating cmd = case cmd of
     ConfigShow            -> False
     ConfigPresetList      -> False
     PinList               -> False
+    CalendarView _ _         -> False
+    CalendarViewByWorker _ _ -> False
+    CalendarViewByStation _ _ -> False
+    CalendarViewCompact _ _  -> False
+    CalendarHours _ _        -> False
+    CalendarDiagnose _ _     -> False
+    CalendarHistory          -> False
+    CalendarHistoryView _    -> False
     CmdExport _           -> False
     CmdExportSchedule _ _ -> False
     CmdAuditLog           -> False
@@ -340,6 +349,170 @@ handleCommand st cmd = case cmd of
                         putStrLn ("Saved. " ++ show (Set.size (unSchedule sched)) ++ " assignments, "
                                  ++ show truly ++ " unfilled, "
                                  ++ show under ++ " understaffed positions.")
+
+    -- Calendar
+    CalendarView startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                sched <- Cal.loadCalendarSlice (asRepo st) s e
+                if Set.null (unSchedule sched)
+                    then putStrLn "No calendar assignments in this range."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        skillCtx <- repoLoadSkillCtx (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList
+                                [ (StationId sid, sname)
+                                | (StationId sid, sname) <- stations ]
+                        putStr (displayScheduleTable workerNames stationNames
+                                   Calendar.defaultHours (scStationHours skillCtx) sched)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarViewByWorker startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                sched <- Cal.loadCalendarSlice (asRepo st) s e
+                if Set.null (unSchedule sched)
+                    then putStrLn "No calendar assignments in this range."
+                    else putStr (displayScheduleByWorker sched)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarViewByStation startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                sched <- Cal.loadCalendarSlice (asRepo st) s e
+                if Set.null (unSchedule sched)
+                    then putStrLn "No calendar assignments in this range."
+                    else putStr (displayScheduleByStation sched)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarViewCompact startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                sched <- Cal.loadCalendarSlice (asRepo st) s e
+                if Set.null (unSchedule sched)
+                    then putStrLn "No calendar assignments in this range."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        skillCtx <- repoLoadSkillCtx (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList
+                                [ (StationId sid, sname)
+                                | (StationId sid, sname) <- stations ]
+                        putStr (displayScheduleCompact workerNames stationNames
+                                   Calendar.defaultHours (scStationHours skillCtx) sched)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarHours startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                sched <- Cal.loadCalendarSlice (asRepo st) s e
+                if Set.null (unSchedule sched)
+                    then putStrLn "No calendar assignments in this range."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        workerCtx <- repoLoadWorkerCtx (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                        putStr (displayWorkerHours workerNames
+                                   (wcMaxWeeklyHours workerCtx) sched)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarDiagnose startStr endStr ->
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                sched <- Cal.loadCalendarSlice (asRepo st) s e
+                if Set.null (unSchedule sched)
+                    then putStrLn "No calendar assignments in this range."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        skills <- SW.listSkills (asRepo st)
+                        skillCtx   <- repoLoadSkillCtx (asRepo st)
+                        workerCtx  <- repoLoadWorkerCtx (asRepo st)
+                        absenceCtx <- repoLoadAbsenceCtx (asRepo st)
+                        shifts     <- repoLoadShifts (asRepo st)
+                        cfg        <- repoLoadSchedulerConfig (asRepo st)
+                        let workers = Set.fromList [userWorkerId u | u <- users]
+                            slots = Set.toList $ Set.map assignSlot (unSchedule sched)
+                            closed = stationClosedSlots skillCtx slots
+                            ctx = Scheduler.SchedulerContext
+                                { Scheduler.schSkillCtx    = skillCtx
+                                , Scheduler.schWorkerCtx   = workerCtx
+                                , Scheduler.schAbsenceCtx  = absenceCtx
+                                , Scheduler.schSlots       = slots
+                                , Scheduler.schWorkers     = workers
+                                , Scheduler.schClosedSlots = closed
+                                , Scheduler.schShifts      = shifts
+                                , Scheduler.schPrevWeekendWorkers = Set.empty
+                                , Scheduler.schConfig      = cfg
+                                }
+                            result = Scheduler.buildScheduleFrom sched ctx
+                            diags = Diagnosis.diagnose result ctx
+                            workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList
+                                [ (StationId sid, sname)
+                                | (StationId sid, sname) <- stations ]
+                            skillNames = Map.fromList
+                                [ (sid, skillName sk)
+                                | (sid, sk) <- skills ]
+                        putStr (displayDiagnosis workerNames stationNames skillNames result diags)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarDoCommit name startStr endStr mNote -> requireAdmin st $
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                ms <- repoLoadSchedule (asRepo st) name
+                case ms of
+                    Nothing -> putStrLn ("Schedule not found: " ++ name)
+                    Just sched -> do
+                        let note = maybe "" id mNote
+                        Cal.commitToCalendar (asRepo st) s e note sched
+                        let n = Set.size (unSchedule sched)
+                        putStrLn ("Committed " ++ show n ++ " assignments from '"
+                                 ++ name ++ "' to calendar for "
+                                 ++ startStr ++ " to " ++ endStr ++ ".")
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    CalendarHistory -> do
+        commits <- Cal.listCalendarHistory (asRepo st)
+        if null commits
+            then putStrLn "  (no calendar history)"
+            else do
+                let idW = max 4 (maximum [length (show (ccId c)) | c <- commits]) + 1
+                    dateW = 26
+                putStrLn (padRight idW "ID" ++ padRight dateW "Date Range"
+                         ++ padRight 22 "Committed At" ++ "Note")
+                putStrLn (replicate (idW + dateW + 22 + 20) '-')
+                mapM_ (\c ->
+                    let dateRange = show (ccDateFrom c) ++ " to " ++ show (ccDateTo c)
+                    in putStrLn (padRight idW (show (ccId c))
+                                ++ padRight dateW dateRange
+                                ++ padRight 22 (ccCommittedAt c)
+                                ++ ccNote c)
+                    ) commits
+
+    CalendarHistoryView cidStr -> do
+        let cid = read cidStr :: Int
+        sched <- Cal.viewCommit (asRepo st) cid
+        if Set.null (unSchedule sched)
+            then do
+                -- Check if the commit exists by listing all
+                commits <- Cal.listCalendarHistory (asRepo st)
+                if any (\c -> ccId c == cid) commits
+                    then putStrLn ("Commit #" ++ show cid
+                                  ++ " snapshot is empty (no assignments were replaced).")
+                    else putStrLn ("Commit not found: " ++ show cid)
+            else putStr (displayScheduleByStation sched)
 
     -- Stations (admin)
     StationAdd sid name -> requireAdmin st $ do
@@ -961,8 +1134,18 @@ type HelpEntry = (String, Bool, String, String)
 
 helpRegistry :: [HelpEntry]
 helpRegistry =
+    -- Calendar
+      [ ("calendar", False, "calendar view <start> <end>",            "View calendar (table)")
+    , ("calendar", False, "calendar view-by-worker <start> <end>",  "View calendar grouped by worker")
+    , ("calendar", False, "calendar view-by-station <start> <end>", "View calendar grouped by station")
+    , ("calendar", False, "calendar view-compact <start> <end>",    "View calendar (compact, 100-col)")
+    , ("calendar", False, "calendar hours <start> <end>",           "Worker hours summary")
+    , ("calendar", False, "calendar diagnose <start> <end>",        "Diagnose unfilled positions")
+    , ("calendar", True,  "calendar commit <name> <start> <end> [note]", "Commit named schedule to calendar")
+    , ("calendar", False, "calendar history",                       "List calendar commits")
+    , ("calendar", False, "calendar history <id>",                  "View historical snapshot")
     -- Schedule (user)
-    [ ("schedule", False, "schedule list",                   "List saved schedules")
+    , ("schedule", False, "schedule list",                   "List saved schedules")
     , ("schedule", False, "schedule view <name>",            "View a schedule (table)")
     , ("schedule", False, "schedule view-by-worker <name>",  "View schedule grouped by worker")
     , ("schedule", False, "schedule view-by-station <name>", "View schedule grouped by station")
@@ -1062,7 +1245,8 @@ helpRegistry =
 -- | (group, description)
 helpGroups :: [(String, String)]
 helpGroups =
-    [ ("schedule", "Schedule creation, viewing, and management")
+    [ ("calendar", "Calendar viewing, committing, and history")
+    , ("schedule", "Schedule creation, viewing, and management")
     , ("worker",   "Worker skills, hours, preferences, and pairings")
     , ("skill",    "Skill definitions and implications")
     , ("station",  "Station setup, hours, and requirements")

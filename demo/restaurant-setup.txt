@@ -227,3 +227,10 @@ schedule create week1 2026-04-06
 schedule view week1
 schedule hours week1
 schedule diagnose week1
+
+# === Calendar ===
+# Commit the generated schedule to the continuous calendar
+calendar commit week1 2026-04-06 2026-04-12 initial week 1
+calendar view 2026-04-06 2026-04-12
+calendar hours 2026-04-06 2026-04-12
+calendar history

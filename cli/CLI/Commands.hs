@@ -96,6 +96,16 @@ data Command
     | CheckpointCommit
     | CheckpointRollback (Maybe String) -- ^ optional name
     | CheckpointList
+    -- Calendar
+    | CalendarView String String              -- ^ start-date end-date
+    | CalendarViewByWorker String String
+    | CalendarViewByStation String String
+    | CalendarViewCompact String String
+    | CalendarHours String String
+    | CalendarDiagnose String String
+    | CalendarDoCommit String String String (Maybe String) -- ^ schedule-name start end [note]
+    | CalendarHistory
+    | CalendarHistoryView String              -- ^ commit-id
     -- Context
     | CmdUse String String          -- ^ entity-type name-or-id
     | ContextView
@@ -235,6 +245,20 @@ parseCommand input = case words input of
     ["checkpoint", "rollback"]      -> CheckpointRollback Nothing
     ["checkpoint", "rollback", name] -> CheckpointRollback (Just name)
     ["checkpoint", "list"]          -> CheckpointList
+
+    ["calendar", "view", s, e]          -> CalendarView s e
+    ["calendar", "view-by-worker", s, e] -> CalendarViewByWorker s e
+    ["calendar", "view-by-station", s, e] -> CalendarViewByStation s e
+    ["calendar", "view-compact", s, e]   -> CalendarViewCompact s e
+    ["calendar", "hours", s, e]          -> CalendarHours s e
+    ["calendar", "diagnose", s, e]       -> CalendarDiagnose s e
+    ["calendar", "commit", name, s, e]   -> CalendarDoCommit name s e Nothing
+    ("calendar" : "commit" : name : s : e : rest)
+        -> CalendarDoCommit name s e (Just (unwords rest))
+    ["calendar", "history"]              -> CalendarHistory
+    ["calendar", "history", cid]
+        | isDigit' cid -> CalendarHistoryView cid
+    ["calendar", "history", _]           -> Unknown "calendar history <commit-id> — id must be a number"
 
     ["use", typ, ref]              -> CmdUse typ ref
     ["context", "view"]            -> ContextView
