@@ -26,6 +26,8 @@ import qualified Domain.Scheduler as Scheduler
 import qualified Domain.Diagnosis as Diagnosis
 import qualified Domain.Calendar as Calendar
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
+import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodType,
+                         payPeriodBounds, defaultPayPeriodConfig)
 import Domain.SchedulerConfig (presetNames, configToMap)
 import Domain.Pin (expandPins, PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
@@ -132,6 +134,7 @@ isMutating cmd = case cmd of
     Quit                -> False
     Unknown _           -> False
     ConfigShow            -> False
+    ConfigShowPayPeriod   -> False
     ConfigPresetList      -> False
     PinList               -> False
     DraftList             -> False
@@ -227,7 +230,7 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, uname)
                         | u <- users, let Username uname = userName u ]
                 putStr (displayWorkerHours workerNames
-                           (wcMaxWeeklyHours workerCtx)
+                           (wcMaxPeriodHours workerCtx)
                            sched)
 
     ScheduleDiagnose name -> do
@@ -247,6 +250,10 @@ handleCommand st cmd = case cmd of
                     -- Reconstruct the slots from the schedule's assignments
                     slots = Set.toList $ Set.map assignSlot (unSchedule sched)
                     closed = stationClosedSlots skillCtx slots
+                    slotDates = map slotDate slots
+                    periodBounds = case slotDates of
+                        [] -> (toEnum 0, toEnum 0)
+                        ds -> (minimum ds, addDays 1 (maximum ds))
                     ctx = Scheduler.SchedulerContext
                         { Scheduler.schSkillCtx    = skillCtx
                         , Scheduler.schWorkerCtx   = workerCtx
@@ -257,6 +264,8 @@ handleCommand st cmd = case cmd of
                         , Scheduler.schShifts      = shifts
                         , Scheduler.schPrevWeekendWorkers = Set.empty
                         , Scheduler.schConfig      = cfg
+                        , Scheduler.schPeriodBounds = periodBounds
+                        , Scheduler.schCalendarHours = Map.empty
                         }
                     result = Scheduler.buildScheduleFrom sched ctx
                     diags = Diagnosis.diagnose result ctx
@@ -336,6 +345,10 @@ handleCommand st cmd = case cmd of
                                 ss -> ss
                             seed = expandPins activeShifts slots pins
                             closed = stationClosedSlots skillCtx slots
+                            slotDates = map slotDate slots
+                            periodBounds = case slotDates of
+                                [] -> (toEnum 0, toEnum 0)
+                                ds -> (minimum ds, addDays 1 (maximum ds))
                             ctx = Scheduler.SchedulerContext
                                 { Scheduler.schSkillCtx    = skillCtx
                                 , Scheduler.schWorkerCtx   = workerCtx
@@ -346,6 +359,8 @@ handleCommand st cmd = case cmd of
                                 , Scheduler.schShifts      = shifts
                                 , Scheduler.schPrevWeekendWorkers = Set.empty
                                 , Scheduler.schConfig      = cfg
+                                , Scheduler.schPeriodBounds = periodBounds
+                                , Scheduler.schCalendarHours = Map.empty
                                 }
                         result <- Opt.optimizeSchedule ctx seed $ \progress ->
                             let phaseStr = case opPhase progress of
@@ -545,7 +560,7 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, uname)
                                 | u <- users, let Username uname = userName u ]
                         putStr (displayWorkerHours workerNames
-                                   (wcMaxWeeklyHours workerCtx) sched)
+                                   (wcMaxPeriodHours workerCtx) sched)
 
     DraftDiagnose mDidStr -> do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -567,6 +582,10 @@ handleCommand st cmd = case cmd of
                         let workers = Set.fromList [userWorkerId u | u <- users]
                             slots = Set.toList $ Set.map assignSlot (unSchedule sched)
                             closed = stationClosedSlots skillCtx slots
+                            slotDates = map slotDate slots
+                            periodBounds = case slotDates of
+                                [] -> (toEnum 0, toEnum 0)
+                                ds -> (minimum ds, addDays 1 (maximum ds))
                             ctx = Scheduler.SchedulerContext
                                 { Scheduler.schSkillCtx    = skillCtx
                                 , Scheduler.schWorkerCtx   = workerCtx
@@ -577,6 +596,8 @@ handleCommand st cmd = case cmd of
                                 , Scheduler.schShifts      = shifts
                                 , Scheduler.schPrevWeekendWorkers = Set.empty
                                 , Scheduler.schConfig      = cfg
+                                , Scheduler.schPeriodBounds = periodBounds
+                                , Scheduler.schCalendarHours = Map.empty
                                 }
                             result = Scheduler.buildScheduleFrom sched ctx
                             diags = Diagnosis.diagnose result ctx
@@ -663,7 +684,7 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, uname)
                                 | u <- users, let Username uname = userName u ]
                         putStr (displayWorkerHours workerNames
-                                   (wcMaxWeeklyHours workerCtx) sched)
+                                   (wcMaxPeriodHours workerCtx) sched)
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
 
     CalendarDiagnose startStr endStr ->
@@ -684,6 +705,10 @@ handleCommand st cmd = case cmd of
                         let workers = Set.fromList [userWorkerId u | u <- users]
                             slots = Set.toList $ Set.map assignSlot (unSchedule sched)
                             closed = stationClosedSlots skillCtx slots
+                            slotDates = map slotDate slots
+                            periodBounds = case slotDates of
+                                [] -> (toEnum 0, toEnum 0)
+                                ds -> (minimum ds, addDays 1 (maximum ds))
                             ctx = Scheduler.SchedulerContext
                                 { Scheduler.schSkillCtx    = skillCtx
                                 , Scheduler.schWorkerCtx   = workerCtx
@@ -694,6 +719,8 @@ handleCommand st cmd = case cmd of
                                 , Scheduler.schShifts      = shifts
                                 , Scheduler.schPrevWeekendWorkers = Set.empty
                                 , Scheduler.schConfig      = cfg
+                                , Scheduler.schPeriodBounds = periodBounds
+                                , Scheduler.schCalendarHours = Map.empty
                                 }
                             result = Scheduler.buildScheduleFrom sched ctx
                             diags = Diagnosis.diagnose result ctx
@@ -874,7 +901,7 @@ handleCommand st cmd = case cmd of
     -- Worker context (admin)
     WorkerSetHours wid h -> requireAdmin st $ do
         SW.setMaxHours (asRepo st) (WorkerId wid) (fromIntegral (h * 3600))
-        putStrLn ("Set Worker " ++ show wid ++ " max hours: " ++ show h ++ "h/week")
+        putStrLn ("Set Worker " ++ show wid ++ " max hours: " ++ show h ++ "h/period")
 
     WorkerSetOvertime wid b -> requireAdmin st $ do
         mWarn <- SW.setOvertimeOptIn (asRepo st) (WorkerId wid) b
@@ -1022,6 +1049,35 @@ handleCommand st cmd = case cmd of
     ConfigReset -> requireAdmin st $ do
         _ <- SC.applyPreset (asRepo st) "balanced"
         putStrLn "Config reset to defaults (balanced preset)."
+
+    ConfigSetPayPeriod typ anchor -> requireAdmin st $
+        case parsePayPeriodType typ of
+            Nothing -> putStrLn ("Unknown pay period type: " ++ typ
+                                 ++ ". Valid types: weekly, biweekly, semi-monthly, monthly")
+            Just ppType -> case parseDay anchor of
+                Nothing -> putStrLn ("Invalid date format: " ++ anchor ++ " (expected YYYY-MM-DD)")
+                Just anchorDay -> do
+                    let ppc = PayPeriodConfig ppType anchorDay
+                    SC.savePayPeriodConfig (asRepo st) ppc
+                    let (s, e) = payPeriodBounds ppc anchorDay
+                    putStrLn ("Pay period set: " ++ showPayPeriodType ppType
+                             ++ ", anchor " ++ anchor)
+                    putStrLn ("Current period: " ++ show s ++ " to " ++ show e)
+
+    ConfigShowPayPeriod -> do
+        mPpc <- SC.loadPayPeriodConfig (asRepo st)
+        case mPpc of
+            Nothing -> do
+                let def = defaultPayPeriodConfig
+                putStrLn ("Pay period: " ++ showPayPeriodType (ppcType def)
+                         ++ " (default)")
+                putStrLn ("Anchor date: " ++ show (ppcAnchorDate def))
+            Just ppc -> do
+                today <- utctDay <$> getCurrentTime
+                let (s, e) = payPeriodBounds ppc today
+                putStrLn ("Pay period: " ++ showPayPeriodType (ppcType ppc))
+                putStrLn ("Anchor date: " ++ show (ppcAnchorDate ppc))
+                putStrLn ("Current period: " ++ show s ++ " to " ++ show e)
 
     -- Shifts (admin)
     ShiftCreate name sh eh -> requireAdmin st $ do
@@ -1556,7 +1612,7 @@ helpRegistry =
     -- Worker
     , ("worker",   True,  "worker grant-skill <wid> <sid>",  "Grant skill to worker")
     , ("worker",   True,  "worker revoke-skill <wid> <sid>", "Revoke skill from worker")
-    , ("worker",   True,  "worker set-hours <wid> <hours>",  "Set max weekly hours")
+    , ("worker",   True,  "worker set-hours <wid> <hours>",  "Set max per-period hours")
     , ("worker",   True,  "worker set-overtime <wid> <on|off>", "Toggle overtime opt-in")
     , ("worker",   True,  "worker set-prefs <wid> <sid...>", "Set station preferences")
     , ("worker",   True,  "worker set-shift-pref <wid> <shift...>", "Set shift preferences")
@@ -1594,6 +1650,8 @@ helpRegistry =
     , ("config",   True,  "config preset <name>",            "Apply a named preset")
     , ("config",   True,  "config preset-list",              "List available presets")
     , ("config",   True,  "config reset",                    "Reset config to defaults")
+    , ("config",   True,  "config set-pay-period <type> <anchor>", "Set pay period (weekly|biweekly|semi-monthly|monthly)")
+    , ("config",   False, "config show-pay-period",          "Show pay period config and current period")
     -- Pin
     , ("pin",      True,  "pin <wid> <sid> <day> <hour|shift>", "Pin worker to station/slot")
     , ("pin",      True,  "unpin <wid> <sid> <day> <hour|shift>", "Remove pin")

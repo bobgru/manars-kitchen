@@ -8,6 +8,7 @@ import Domain.Types
     ( WorkerId(..), StationId(..)
     , Slot(..), Assignment(..), Schedule(..)
     )
+import Domain.PayPeriod (PayPeriodConfig(..), PayPeriodType(..), defaultPayPeriodConfig)
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), CalendarCommit(..))
 import qualified Service.Calendar as Cal
@@ -115,6 +116,38 @@ spec = do
                     snapshot `shouldBe` Schedule Set.empty
                 _ -> expectationFailure
                         ("Expected 1 commit, got " ++ show (length commits))
+
+    describe "Pay period config save/load round-trip" $ do
+        it "returns Nothing when no config exists" $ withTestRepo $ \repo -> do
+            result <- repoLoadPayPeriodConfig repo
+            result `shouldBe` Nothing
+
+        it "saves and loads pay period config" $ withTestRepo $ \repo -> do
+            let ppc = PayPeriodConfig Biweekly (fromGregorian 2026 1 5)
+            repoSavePayPeriodConfig repo ppc
+            result <- repoLoadPayPeriodConfig repo
+            result `shouldBe` Just ppc
+
+        it "upserts pay period config" $ withTestRepo $ \repo -> do
+            let ppc1 = PayPeriodConfig Weekly (fromGregorian 2026 1 5)
+                ppc2 = PayPeriodConfig Monthly (fromGregorian 2026 3 1)
+            repoSavePayPeriodConfig repo ppc1
+            repoSavePayPeriodConfig repo ppc2
+            result <- repoLoadPayPeriodConfig repo
+            result `shouldBe` Just ppc2
+
+        it "round-trips all pay period types" $ withTestRepo $ \repo -> do
+            let types = [Weekly, Biweekly, SemiMonthly, Monthly]
+                anchor = fromGregorian 2026 1 1
+            mapM_ (\t -> do
+                let ppc = PayPeriodConfig t anchor
+                repoSavePayPeriodConfig repo ppc
+                result <- repoLoadPayPeriodConfig repo
+                result `shouldBe` Just ppc) types
+
+        it "defaultPayPeriodConfig is a valid config" $ do
+            let def = defaultPayPeriodConfig
+            ppcType def `shouldBe` Weekly
 
     describe "Date range semantics" $ do
         it "partial overlap overwrites correctly" $ withTestRepo $ \repo -> do

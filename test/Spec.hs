@@ -15,6 +15,7 @@ import qualified Domain.Shift
 import qualified Domain.SchedulerConfig
 import qualified Domain.Pin
 import qualified Domain.Optimizer
+import qualified Domain.PayPeriod
 import qualified CalendarSpec
 import qualified DraftSpec
 import qualified DraftValidationSpec
@@ -35,6 +36,7 @@ main = hspec $ do
     describe "Domain.SchedulerConfig" Domain.SchedulerConfig.spec
     describe "Domain.Pin"             Domain.Pin.spec
     describe "Domain.Optimizer"       Domain.Optimizer.spec
+    describe "Domain.PayPeriod"      Domain.PayPeriod.spec
     describe "Calendar"              CalendarSpec.spec
     describe "Draft"                 DraftSpec.spec
     describe "DraftValidation"      DraftValidationSpec.spec

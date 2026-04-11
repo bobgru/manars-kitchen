@@ -29,6 +29,7 @@ library
                      , Domain.SchedulerConfig
                      , Domain.Pin
                      , Domain.Optimizer
+                     , Domain.PayPeriod
                      , Auth.Types
                      , Auth.Password
                      , Repo.Types

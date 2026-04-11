@@ -17,6 +17,8 @@ module Domain.Scheduler
     , canAssignSlot
       -- * Constraint checks (for validation)
     , blockedByAlternateWeekend
+      -- * Calendar hours helpers
+    , filterExemptCalendarHours
       -- * Tests
     , spec
     ) where
@@ -67,6 +69,11 @@ data SchedulerContext = SchedulerContext
       -- assigned to weekend slots unless they are weekend-only.
     , schConfig :: !SchedulerConfig
       -- ^ Scoring weights and rule thresholds.
+    , schPeriodBounds :: !(Day, Day)
+      -- ^ Current pay period boundaries (start inclusive, end exclusive).
+    , schCalendarHours :: !(Map WorkerId DiffTime)
+      -- ^ Pre-computed calendar hours per worker for the current period.
+      -- Exempt workers should have 0 (or be absent from the map).
     } deriving (Show)
 
 -- | Whether a position is completely unstaffed or just short of the
@@ -442,16 +449,18 @@ canAssignSlot ctx allowOT w st slot sched =
              && not (any (\ea -> assignStation ea == st) (Set.toList existing))
     otModel = workerOvertimeModel wctx w
     ppTrack = workerPayPeriodTracking wctx w
+    bounds = schPeriodBounds ctx
+    calHrs = schCalendarHours ctx
     weeklyOk = case ppTrack of
-        PPExempt   -> True  -- no weekly hour limit enforced
+        PPExempt   -> True  -- no period hour limit enforced
         PPStandard ->
             if allowOT
             then case otModel of
                 OTExempt     -> True   -- overtime concept doesn't apply
-                OTManualOnly -> not (wouldBeOvertime wctx sched a)  -- never auto-assigned OT
-                OTEligible   -> not (wouldBeOvertime wctx sched a)
+                OTManualOnly -> not (wouldBeOvertime wctx bounds calHrs sched a)  -- never auto-assigned OT
+                OTEligible   -> not (wouldBeOvertime wctx bounds calHrs sched a)
                                 || workerOptedInOvertime wctx w
-            else not (wouldBeOvertime wctx sched a)
+            else not (wouldBeOvertime wctx bounds calHrs sched a)
     dailyOk = if allowOT
               then not (wouldExceedDailyTotal cfg a sched)
               else not (wouldExceedDailyRegular cfg a sched)
@@ -599,7 +608,10 @@ scoreShiftWorker ctx block st sched w =
     capacityScore = case workerMaxHours wctx w of
         Nothing   -> cfgNoLimitCapacity cfg
         Just maxH ->
-            let current = workerWeeklyHours w day sched
+            let (ps, pe) = schPeriodBounds ctx
+                draftHrs = workerPeriodHours w ps pe sched
+                calW = Map.findWithDefault 0 w (schCalendarHours ctx)
+                current = draftHrs + calW
                 remaining = maxH - current
                 ratio = if maxH > 0
                         then realToFrac remaining / realToFrac maxH
@@ -690,7 +702,10 @@ scoreSlotWorker ctx t st sched w =
     capacityScore = case workerMaxHours wctx w of
         Nothing   -> cfgNoLimitCapacity cfg
         Just maxH ->
-            let current = workerWeeklyHours w (slotDate t) sched
+            let (ps, pe) = schPeriodBounds ctx
+                draftHrs = workerPeriodHours w ps pe sched
+                calW = Map.findWithDefault 0 w (schCalendarHours ctx)
+                current = draftHrs + calW
                 remaining = maxH - current
                 ratio = if maxH > 0
                         then realToFrac remaining / realToFrac maxH
@@ -746,22 +761,25 @@ scoreSlotWorker ctx t st sched w =
 -- Overtime computation
 -- ---------------------------------------------------------------------
 
--- | Compute overtime hours per worker.
+-- | Compute overtime hours per worker using period bounds and calendar hours.
 computeOvertime :: SchedulerContext -> Schedule -> Map WorkerId DiffTime
 computeOvertime ctx sched =
-    Map.foldlWithKey' (\acc w maxH ->
-        let weekStarts = uniqueWeekStarts w sched
-            ot = sum [max 0 (workerWeeklyHours w ws sched - maxH) | ws <- weekStarts]
+    let (periodStart, periodEnd) = schPeriodBounds ctx
+        calHrs = schCalendarHours ctx
+    in Map.foldlWithKey' (\acc w maxH ->
+        let draftHrs = workerPeriodHours w periodStart periodEnd sched
+            calW = Map.findWithDefault 0 w calHrs
+            ot = max 0 (draftHrs + calW - maxH)
         in if ot > 0 then Map.insert w ot acc else acc)
         Map.empty
-        (wcMaxWeeklyHours (schWorkerCtx ctx))
+        (wcMaxPeriodHours (schWorkerCtx ctx))
 
--- | Find all distinct week start dates for a worker's assignments.
-uniqueWeekStarts :: WorkerId -> Schedule -> [Day]
-uniqueWeekStarts w sched =
-    let assignments = byWorker w sched
-        weeks = Set.map (slotWeek . slotDate . assignSlot) assignments
-    in Set.toList weeks
+-- | Remove exempt (per-diem) workers from a calendar hours map.
+-- Exempt workers are tracked only within the draft, so their calendar
+-- hours should not count against period limits.
+filterExemptCalendarHours :: WorkerContext -> Map WorkerId DiffTime -> Map WorkerId DiffTime
+filterExemptCalendarHours wctx =
+    Map.filterWithKey (\w _ -> workerPayPeriodTracking wctx w /= PPExempt)
 
 -- ---------------------------------------------------------------------
 -- Tests
@@ -827,7 +845,7 @@ schBasicSkillCtx = SkillContext
 -- | Worker context: everyone has generous hours, no overtime issues.
 schRelaxedWorkerCtx :: WorkerContext
 schRelaxedWorkerCtx = WorkerContext
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (schw_alice, 40 * 3600)
         , (schw_bob,   40 * 3600)
         , (schw_carol, 40 * 3600)
@@ -850,7 +868,7 @@ schRelaxedWorkerCtx = WorkerContext
 -- | Worker context where bob has very limited hours (1 hour/week).
 schTightHoursWorkerCtx :: WorkerContext
 schTightHoursWorkerCtx = schRelaxedWorkerCtx
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (schw_alice, 40 * 3600)
         , (schw_bob,   1 * 3600)
         , (schw_carol, 40 * 3600)
@@ -882,8 +900,11 @@ schVarietyWorkerCtx = schRelaxedWorkerCtx
 schAllWorkers :: Set WorkerId
 schAllWorkers = Set.fromList [schw_alice, schw_bob, schw_carol, schw_dave]
 
+schTestBounds :: (Day, Day)
+schTestBounds = (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
+
 schMkCtx :: SkillContext -> WorkerContext -> AbsenceContext -> [Slot] -> Set WorkerId -> SchedulerContext
-schMkCtx sk wk ac slots workers = SchedulerContext sk wk ac slots workers Set.empty [] Set.empty defaultConfig
+schMkCtx sk wk ac slots workers = SchedulerContext sk wk ac slots workers Set.empty [] Set.empty defaultConfig schTestBounds Map.empty
 
 spec :: Spec
 spec = do
@@ -1136,3 +1157,58 @@ spec = do
                 bobAssignments = byWorker schw_bob sched
             -- bob should be assigned to both slots despite 1h limit
             Set.size bobAssignments `shouldSatisfy` (>= 2)
+
+    describe "Calendar hours integration" $ do
+        it "scheduler respects period limits when calendar hours are pre-loaded" $ do
+            -- bob has 1h limit, 1h already in calendar -> should not get assigned
+            let wctx = schTightHoursWorkerCtx
+                calHrs = Map.singleton schw_bob (1 * 3600)
+                ctx = (schMkCtx schBasicSkillCtx wctx emptyAbsenceContext
+                        [schMondaySlot] schAllWorkers)
+                    { schCalendarHours = calHrs }
+                result = buildSchedule ctx
+                sched = srSchedule result
+                bobAssignments = byWorker schw_bob sched
+            -- bob should have NO assignments (calendar fills his limit)
+            Set.size bobAssignments `shouldBe` 0
+
+        it "calendar hours do not affect exempt workers" $ do
+            -- bob has 1h limit but PPExempt, 10h in calendar -> should still be assigned
+            let wctx = schTightHoursWorkerCtx
+                    { wcPayPeriodTracking = Map.singleton schw_bob PPExempt }
+                calHrs = Map.singleton schw_bob (10 * 3600)
+                ctx = (schMkCtx schBasicSkillCtx wctx emptyAbsenceContext
+                        [schMondaySlot] (Set.singleton schw_bob))
+                    { schCalendarHours = calHrs }
+                result = buildSchedule ctx
+                sched = srSchedule result
+                bobAssignments = byWorker schw_bob sched
+            Set.size bobAssignments `shouldSatisfy` (>= 1)
+
+        it "overtime computation includes calendar hours" $ do
+            -- bob has 1h limit, 0.5h in calendar, 1h in schedule = 0.5h overtime
+            let calHrs = Map.singleton schw_bob 1800  -- 0.5h
+                sched = assign (Assignment schw_bob schst_grill schMondaySlot) emptySchedule
+                ctx = (schMkCtx schBasicSkillCtx schTightHoursWorkerCtx emptyAbsenceContext
+                        [schMondaySlot] schAllWorkers)
+                    { schCalendarHours = calHrs }
+                ot = computeOvertime ctx sched
+            Map.lookup schw_bob ot `shouldBe` Just 1800  -- 0.5h overtime
+
+    describe "filterExemptCalendarHours" $ do
+        it "removes exempt workers from calendar hours" $ do
+            let wctx = schRelaxedWorkerCtx
+                    { wcPayPeriodTracking = Map.fromList
+                        [ (schw_bob, PPExempt)
+                        , (schw_alice, PPStandard)
+                        ]
+                    }
+                calHrs = Map.fromList
+                    [ (schw_alice, 10 * 3600)
+                    , (schw_bob,    5 * 3600)
+                    , (schw_carol, 20 * 3600)
+                    ]
+                filtered = filterExemptCalendarHours wctx calHrs
+            Map.member schw_alice filtered `shouldBe` True
+            Map.member schw_bob filtered `shouldBe` False
+            Map.member schw_carol filtered `shouldBe` True

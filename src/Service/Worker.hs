@@ -152,7 +152,7 @@ setStationRequiredSkills repo sid skills = do
 setMaxHours :: Repository -> WorkerId -> DiffTime -> IO ()
 setMaxHours repo wid hours = do
     ctx <- repoLoadWorkerCtx repo
-    let ctx' = ctx { wcMaxWeeklyHours = Map.insert wid hours (wcMaxWeeklyHours ctx) }
+    let ctx' = ctx { wcMaxPeriodHours = Map.insert wid hours (wcMaxPeriodHours ctx) }
     repoSaveWorkerCtx repo ctx'
 
 -- | Set whether a worker opts in to overtime.
@@ -312,7 +312,7 @@ setEmploymentStatus repo wid status = case status of
         repoSaveEmployment repo wid OTExempt PPExempt False
         -- Remove hour limit
         ctx <- repoLoadWorkerCtx repo
-        let ctx' = ctx { wcMaxWeeklyHours = Map.delete wid (wcMaxWeeklyHours ctx) }
+        let ctx' = ctx { wcMaxPeriodHours = Map.delete wid (wcMaxPeriodHours ctx) }
         repoSaveWorkerCtx repo ctx'
         return "Set per-diem: overtime=exempt, tracking=exempt, hour limit removed"
     _ -> return ("Unknown status: " ++ status ++ ". Use salaried|full-time|part-time|per-diem.")

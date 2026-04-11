@@ -507,9 +507,9 @@ showSkillSet s
 
 displayWorkerCtx :: WorkerContext -> String
 displayWorkerCtx ctx = unlines $ concat
-    [ ["Max weekly hours:"]
+    [ ["Max per-period hours:"]
     , [ "  " ++ showWorker wid ++ ": " ++ show (round (toRational dt / 3600) :: Int) ++ "h"
-      | (wid, dt) <- Map.toList (wcMaxWeeklyHours ctx) ]
+      | (wid, dt) <- Map.toList (wcMaxPeriodHours ctx) ]
     , ["Overtime opt-in:"]
     , [ "  " ++ showWorker wid | wid <- Set.toList (wcOvertimeOptIn ctx) ]
     , if Map.null (wcStationPrefs ctx) then [] else

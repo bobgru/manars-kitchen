@@ -4,12 +4,15 @@ module Service.Config
     , applyPreset
     , setConfigParam
     , listConfigParams
+    , loadPayPeriodConfig
+    , savePayPeriodConfig
     ) where
 
 import Domain.SchedulerConfig
     ( SchedulerConfig, configToMap, configKeys
     , presetConfig
     )
+import Domain.PayPeriod (PayPeriodConfig)
 import qualified Data.Map.Strict as Map
 import Repo.Types (Repository(..))
 
@@ -47,3 +50,11 @@ listConfigParams :: Repository -> IO [(String, Double)]
 listConfigParams repo = do
     cfg <- repoLoadSchedulerConfig repo
     return $ Map.toList (configToMap cfg)
+
+-- | Load the pay period config (Nothing if not yet configured).
+loadPayPeriodConfig :: Repository -> IO (Maybe PayPeriodConfig)
+loadPayPeriodConfig = repoLoadPayPeriodConfig
+
+-- | Save (upsert) the pay period config.
+savePayPeriodConfig :: Repository -> PayPeriodConfig -> IO ()
+savePayPeriodConfig = repoSavePayPeriodConfig

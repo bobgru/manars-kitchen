@@ -7,6 +7,7 @@ module Service.DraftValidation
     , validateDraftAgainstCalendar
     ) where
 
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time (DayOfWeek(..), addDays, dayOfWeek)
 
@@ -44,8 +45,8 @@ validateAssignment ctx a sched
     | blockedByAlternateWeekend ctx w slot =
         Just (DraftViolation a "alternating weekends"
             "worked previous weekend in calendar")
-    | wouldBeOvertime (schWorkerCtx ctx) sched a =
-        Just (DraftViolation a "weekly hours" "would exceed weekly hour limit")
+    | wouldBeOvertime (schWorkerCtx ctx) (schPeriodBounds ctx) (schCalendarHours ctx) sched a =
+        Just (DraftViolation a "period hours" "would exceed per-period hour limit")
     | wouldExceedDailyRegular (schConfig ctx) a sched =
         Just (DraftViolation a "daily hours" "would exceed daily hour limit")
     | violatesRestPeriod (schConfig ctx) w slot sched =
@@ -122,6 +123,8 @@ validateDraftAgainstCalendar repo draftId = do
                                     , schShifts      = []
                                     , schPrevWeekendWorkers = prevWeekendWorkers
                                     , schConfig      = cfg
+                                    , schPeriodBounds = (diDateFrom draft, diDateTo draft)
+                                    , schCalendarHours = Map.empty
                                     }
 
                             -- Build combined schedule: look-back + draft assignments

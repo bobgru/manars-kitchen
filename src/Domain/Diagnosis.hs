@@ -96,9 +96,11 @@ diagnoseOne ctx sched (Unfilled st t _kind) =
                 present = filter (\w -> isWorkerAvailable w (slotDate t) actx) qs
                 busy    = filter (\w -> not (Set.null (byWorkerSlot w t sched))) present
                 free    = filter (\w -> Set.null (byWorkerSlot w t sched)) present
+                bounds = schPeriodBounds ctx
+                calHrs = schCalendarHours ctx
                 overtimeBlocked = filter (\w ->
                     let a = Assignment w st t
-                    in wouldBeOvertime wctx sched a
+                    in wouldBeOvertime wctx bounds calHrs sched a
                        && not (workerOptedInOvertime wctx w)) free
             in if not (null absent) && null present
                then AllQualifiedAbsent st t absent
@@ -160,7 +162,7 @@ suggestTrainings ctx sched unfilled =
             , let missingSk = Set.findMin missing
             -- Worker must have available hours for this slot
             , let hypothetical = Assignment w st slot
-            , not (wouldBeOvertime wctx sched hypothetical)
+            , not (wouldBeOvertime wctx (schPeriodBounds ctx) (schCalendarHours ctx) sched hypothetical)
             ]
         -- Group by (worker, skill) and count how many positions each training helps
         grouped = [(k, length g) | g@((k, _):_) <- group (sort pairs)]
@@ -231,7 +233,7 @@ dSkillCtx = SkillContext
 
 dWorkerCtx :: WorkerContext
 dWorkerCtx = WorkerContext
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (dw_alice, 40 * 3600)
         , (dw_bob,   40 * 3600)
         , (dw_carol, 40 * 3600)
@@ -253,7 +255,7 @@ dWorkerCtx = WorkerContext
 -- | Worker context where bob has very tight hours.
 dTightWorkerCtx :: WorkerContext
 dTightWorkerCtx = dWorkerCtx
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (dw_alice, 40 * 3600)
         , (dw_bob,   1 * 3600)
         , (dw_carol, 40 * 3600)
@@ -263,6 +265,7 @@ dTightWorkerCtx = dWorkerCtx
 dBaseCtx :: SchedulerContext
 dBaseCtx = SchedulerContext dSkillCtx dWorkerCtx emptyAbsenceContext
     [dMondaySlot] (Set.fromList [dw_alice, dw_bob, dw_carol]) Set.empty [] Set.empty defaultConfig
+    (fromGregorian 2026 5 4, fromGregorian 2026 5 11) Map.empty
 
 spec :: Spec
 spec = do

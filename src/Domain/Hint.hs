@@ -133,7 +133,7 @@ applyOne (ctx, seed) hint = case hint of
                 { scWorkerSkills = Map.insertWith Set.union w skills (scWorkerSkills sctx) }
             wctx' = case maxH of
                 Nothing -> wctx
-                Just h  -> wctx { wcMaxWeeklyHours = Map.insert w h (wcMaxWeeklyHours wctx) }
+                Just h  -> wctx { wcMaxPeriodHours = Map.insert w h (wcMaxPeriodHours wctx) }
         in ( ctx { schSkillCtx  = sctx'
                  , schWorkerCtx = wctx'
                  , schWorkers   = Set.insert w (schWorkers ctx)
@@ -215,7 +215,7 @@ hSkillCtx = SkillContext
 
 hWorkerCtx :: WorkerContext
 hWorkerCtx = WorkerContext
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (hw_alice, 40 * 3600)
         , (hw_bob,   1 * 3600)   -- bob limited to 1 hour
         , (hw_carol, 40 * 3600)
@@ -242,6 +242,8 @@ hBaseCtx = SchedulerContext hSkillCtx hWorkerCtx emptyAbsenceContext
     []
     Set.empty
     defaultConfig
+    (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
+    Map.empty
 
 spec :: Spec
 spec = do

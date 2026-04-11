@@ -249,7 +249,7 @@ optBasicSkillCtx = SkillContext
 
 optWorkerCtx :: WorkerContext
 optWorkerCtx = WorkerContext
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (optw_alice, 40 * 3600)
         , (optw_bob,   40 * 3600)
         , (optw_carol, 40 * 3600)
@@ -272,6 +272,7 @@ optMkCtx :: [Slot] -> Set WorkerId -> SchedulerContext
 optMkCtx slots workers = SchedulerContext
     optBasicSkillCtx optWorkerCtx emptyAbsenceContext
     slots workers Set.empty [] Set.empty defaultConfig
+    (fromGregorian 2026 5 4, fromGregorian 2026 5 11) Map.empty
 
 spec :: Spec
 spec = do

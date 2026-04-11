@@ -91,7 +91,7 @@ testSkillCtx = SkillContext
 -- | Worker context: generous hours.
 testWorkerCtx :: WorkerContext
 testWorkerCtx = WorkerContext
-    { wcMaxWeeklyHours = Map.fromList
+    { wcMaxPeriodHours = Map.fromList
         [ (w_marco, 40 * 3600)
         , (w_lucia, 40 * 3600)
         , (w_carol, 40 * 3600)
@@ -122,6 +122,8 @@ mkValidationCtx prevWeekendWorkers = SchedulerContext
     , schShifts      = []
     , schPrevWeekendWorkers = prevWeekendWorkers
     , schConfig      = defaultConfig
+    , schPeriodBounds = (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
+    , schCalendarHours = Map.empty
     }
 
 spec :: Spec

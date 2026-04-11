@@ -74,7 +74,7 @@ statements =
 
     , "CREATE TABLE IF NOT EXISTS worker_hours (\
       \  worker_id INTEGER PRIMARY KEY,\
-      \  max_weekly_seconds INTEGER NOT NULL\
+      \  max_period_seconds INTEGER NOT NULL\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_overtime_optin (\
@@ -256,6 +256,12 @@ statements =
       \  pay_period_tracking TEXT NOT NULL DEFAULT 'standard' CHECK (pay_period_tracking IN ('standard', 'exempt')),\
       \  is_temp BOOLEAN NOT NULL DEFAULT 0\
       \)"
+
+      -- Pay period configuration (restaurant-wide, single row)
+    , "CREATE TABLE IF NOT EXISTS pay_period_config (\
+      \  period_type TEXT NOT NULL,\
+      \  anchor_date TEXT NOT NULL\
+      \)"
     ]
 
 -- | Idempotent migrations for schema evolution.
@@ -264,6 +270,7 @@ statements =
 migrations :: [Query]
 migrations =
     [ "ALTER TABLE drafts ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    , "ALTER TABLE worker_hours RENAME COLUMN max_weekly_seconds TO max_period_seconds"
     ]
 
 -- | Try to execute a statement, silently ignoring errors (for idempotent migrations).

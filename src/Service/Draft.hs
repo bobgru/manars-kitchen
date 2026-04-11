@@ -9,24 +9,28 @@ module Service.Draft
       -- * Seeding
     , seedDraft
     , mergePinCalendar
+      -- * Calendar hours
+    , computeCalendarHours
     ) where
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import Data.Time (Day)
+import Data.Time (Day, DiffTime)
 
 import Domain.Types
     ( WorkerId, Slot(..), Assignment(..), Schedule(..)
     )
 import Domain.Scheduler
     ( SchedulerContext(..), ScheduleResult(..)
-    , buildScheduleFrom
+    , buildScheduleFrom, filterExemptCalendarHours
     )
+import Domain.Worker (WorkerContext(..))
 import Domain.Shift (defaultShifts)
 import Domain.Skill (stationClosedSlots)
 import Domain.Pin (expandPins)
 import Domain.Calendar (generateDateRangeSlots, defaultHours)
+import Domain.PayPeriod (defaultPayPeriodConfig, payPeriodBounds)
 import Repo.Types (Repository(..), DraftInfo(..))
 import qualified Service.Calendar as Cal
 
@@ -76,6 +80,22 @@ mergePinCalendar (Schedule calAssigns) (Schedule pinAssigns) =
         let s = assignSlot a
         in (assignWorker a, slotDate s, slotStart s)
 
+-- | Pre-compute calendar hours per worker for a date range.
+-- Loads calendar assignments and sums unique slot durations per worker,
+-- filtering out exempt (per-diem) workers.
+computeCalendarHours :: Repository -> WorkerContext -> Day -> Day
+                     -> IO (Map.Map WorkerId DiffTime)
+computeCalendarHours repo wctx periodStart periodEnd = do
+    calSched <- Cal.loadCalendarSlice repo periodStart periodEnd
+    let assignments = Set.toList (unSchedule calSched)
+        -- Group by (worker, slot) to avoid counting multi-station duplicates
+        uniqueSlots = Set.fromList [(assignWorker a, assignSlot a) | a <- assignments]
+        -- Sum durations per worker
+        raw = Set.foldl' (\acc (w, s) ->
+            Map.insertWith (+) w (slotDuration s) acc)
+            Map.empty uniqueSlots
+    return (filterExemptCalendarHours wctx raw)
+
 -- | Run the scheduler within a draft: load draft assignments as seed,
 -- build slot list for date range, run buildScheduleFrom, save result.
 generateDraft :: Repository -> Int -> Set.Set WorkerId -> IO (Either String ScheduleResult)
@@ -93,6 +113,12 @@ generateDraft repo draftId workers = do
             absenceCtx <- repoLoadAbsenceCtx repo
             cfg        <- repoLoadSchedulerConfig repo
             shifts     <- repoLoadShifts repo
+            -- Load pay period config to determine period bounds
+            mPpc <- repoLoadPayPeriodConfig repo
+            let ppc = maybe defaultPayPeriodConfig id mPpc
+                periodBounds = payPeriodBounds ppc dateFrom
+            -- Pre-compute calendar hours for the period
+            calHrs <- computeCalendarHours repo workerCtx (fst periodBounds) (snd periodBounds)
             let closed = stationClosedSlots skillCtx slots
                 ctx = SchedulerContext
                     { schSkillCtx    = skillCtx
@@ -104,6 +130,8 @@ generateDraft repo draftId workers = do
                     , schShifts      = shifts
                     , schPrevWeekendWorkers = Set.empty
                     , schConfig      = cfg
+                    , schPeriodBounds = periodBounds
+                    , schCalendarHours = calHrs
                     }
                 result = buildScheduleFrom seed ctx
             repoSaveDraftAssignments repo draftId (srSchedule result)

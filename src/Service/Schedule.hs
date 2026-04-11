@@ -5,9 +5,12 @@ module Service.Schedule
     , deleteSchedule
     ) where
 
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import Domain.Types (WorkerId, Slot, Schedule)
+import Data.Time (addDays)
+
+import Domain.Types (WorkerId, Slot(..), Schedule)
 import Domain.Scheduler
     ( SchedulerContext(..), ScheduleResult(..)
     , buildScheduleFrom
@@ -31,6 +34,10 @@ createSchedule repo name slots workers = do
             [] -> defaultShifts
             ss -> ss
         seed = expandPins activeShifts slots pins
+        slotDates = map slotDate slots
+        periodBounds = case slotDates of
+            [] -> (toEnum 0, toEnum 0)
+            ds -> (minimum ds, addDays 1 (maximum ds))
         ctx = SchedulerContext
             { schSkillCtx    = skillCtx
             , schWorkerCtx   = workerCtx
@@ -41,6 +48,8 @@ createSchedule repo name slots workers = do
             , schShifts      = shifts
             , schPrevWeekendWorkers = Set.empty
             , schConfig      = cfg
+            , schPeriodBounds = periodBounds
+            , schCalendarHours = Map.empty
             }
         result = buildScheduleFrom seed ctx
     repoSaveSchedule repo name (srSchedule result)

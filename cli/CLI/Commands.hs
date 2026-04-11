@@ -66,6 +66,8 @@ data Command
     | ConfigPreset String           -- ^ preset name
     | ConfigPresetList
     | ConfigReset
+    | ConfigSetPayPeriod String String  -- ^ type anchor-date
+    | ConfigShowPayPeriod
     -- Seniority
     | WorkerSetSeniority Int Int    -- ^ worker-id level
     -- Cross-training goals
@@ -229,6 +231,8 @@ parseCommand input = case words input of
     ["config", "preset", name]       -> ConfigPreset name
     ["config", "preset-list"]        -> ConfigPresetList
     ["config", "reset"]              -> ConfigReset
+    ["config", "set-pay-period", typ, anchor] -> ConfigSetPayPeriod typ anchor
+    ["config", "show-pay-period"]    -> ConfigShowPayPeriod
 
     ["worker", "set-status", wid, status]
         | isDigit' wid -> WorkerSetStatus (read wid) status

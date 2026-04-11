@@ -15,6 +15,7 @@ import Domain.Worker (WorkerContext, OvertimeModel, PayPeriodTracking)
 import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Pin (PinnedAssignment)
+import Domain.PayPeriod (PayPeriodConfig)
 
 -- | Metadata for a draft session.
 data DraftInfo = DraftInfo
@@ -116,6 +117,14 @@ data Repository = Repository
       -- ---------------------------------------------------------------
     , repoSaveSchedulerConfig :: SchedulerConfig -> IO ()
     , repoLoadSchedulerConfig :: IO SchedulerConfig
+
+      -- ---------------------------------------------------------------
+      -- Pay period config
+      -- ---------------------------------------------------------------
+    , repoLoadPayPeriodConfig :: IO (Maybe PayPeriodConfig)
+      -- ^ Load pay period config; Nothing if not configured
+    , repoSavePayPeriodConfig :: PayPeriodConfig -> IO ()
+      -- ^ Upsert the single pay period config row
 
       -- ---------------------------------------------------------------
       -- Pinned assignments

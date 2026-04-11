@@ -20,6 +20,7 @@ import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.SchedulerConfig (SchedulerConfig, configToMap, configFromMap)
 import Domain.Pin (PinnedAssignment(..), PinSpec(..))
+import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodType)
 import Domain.Absence
     ( AbsenceType(..)
     , AbsenceRequest(..), AbsenceContext(..)
@@ -67,6 +68,8 @@ mkSQLiteRepo path = do
         , repoDeleteSchedule = sqlDeleteSchedule conn
         , repoSaveSchedulerConfig = sqlSaveSchedulerConfig conn
         , repoLoadSchedulerConfig = sqlLoadSchedulerConfig conn
+        , repoLoadPayPeriodConfig = sqlLoadPayPeriodConfig conn
+        , repoSavePayPeriodConfig = sqlSavePayPeriodConfig conn
         , repoSavePins       = sqlSavePins conn
         , repoLoadPins       = sqlLoadPins conn
         , repoLogCommand     = sqlLogCommand conn
@@ -321,9 +324,9 @@ sqlSaveWorkerCtx conn ctx = withTransaction conn $ do
 
     -- Max weekly hours
     mapM_ (\(WorkerId wid, dt) ->
-        execute conn "INSERT INTO worker_hours (worker_id, max_weekly_seconds) VALUES (?, ?)"
+        execute conn "INSERT INTO worker_hours (worker_id, max_period_seconds) VALUES (?, ?)"
             (wid, diffTimeToSeconds dt)
-        ) (Map.toList (wcMaxWeeklyHours ctx))
+        ) (Map.toList (wcMaxPeriodHours ctx))
 
     -- Overtime opt-in
     mapM_ (\(WorkerId wid) ->
@@ -374,7 +377,7 @@ sqlSaveWorkerCtx conn ctx = withTransaction conn $ do
 sqlLoadWorkerCtx :: Connection -> IO WorkerContext
 sqlLoadWorkerCtx conn = do
     -- Max weekly hours
-    hRows <- query_ conn "SELECT worker_id, max_weekly_seconds FROM worker_hours"
+    hRows <- query_ conn "SELECT worker_id, max_period_seconds FROM worker_hours"
         :: IO [(Int, Int)]
     let maxHours = Map.fromList
             [(WorkerId w, secondsToDiffTime s) | (w, s) <- hRows]
@@ -421,7 +424,7 @@ sqlLoadWorkerCtx conn = do
     (otModels, ppTracking, tempSet) <- sqlLoadEmployment conn
 
     return WorkerContext
-        { wcMaxWeeklyHours = maxHours
+        { wcMaxPeriodHours = maxHours
         , wcOvertimeOptIn  = overtime
         , wcStationPrefs   = prefs
         , wcPrefersVariety = variety
@@ -667,6 +670,29 @@ sqlLoadSchedulerConfig conn = do
     return $ configFromMap (Map.fromList rows)
 
 -- =====================================================================
+-- Pay period config
+-- =====================================================================
+
+-- | Load the single pay period config row, if present.
+sqlLoadPayPeriodConfig :: Connection -> IO (Maybe PayPeriodConfig)
+sqlLoadPayPeriodConfig conn = do
+    rows <- query_ conn "SELECT period_type, anchor_date FROM pay_period_config LIMIT 1"
+        :: IO [(String, String)]
+    return $ case rows of
+        [(pt, ad)] -> case parsePayPeriodType pt of
+            Just ptype -> Just (PayPeriodConfig ptype (textToDay ad))
+            Nothing    -> Nothing
+        _ -> Nothing
+
+-- | Upsert the single pay period config row.
+sqlSavePayPeriodConfig :: Connection -> PayPeriodConfig -> IO ()
+sqlSavePayPeriodConfig conn cfg = do
+    execute_ conn "DELETE FROM pay_period_config"
+    execute conn
+        "INSERT INTO pay_period_config (period_type, anchor_date) VALUES (?, ?)"
+        (showPayPeriodType (ppcType cfg), dayToText (ppcAnchorDate cfg))
+
+-- =====================================================================
 -- Worker seniority
 -- =====================================================================
 
@@ -789,6 +815,7 @@ sqlWipeAll conn = withTransaction conn $ do
     execute_ conn "DELETE FROM worker_cross_training"
     execute_ conn "DELETE FROM worker_avoid_pairing"
     execute_ conn "DELETE FROM worker_prefer_pairing"
+    execute_ conn "DELETE FROM pay_period_config"
     execute_ conn "DELETE FROM worker_employment"
     execute_ conn "DELETE FROM station_multi_hours"
     execute_ conn "DELETE FROM worker_weekend_only"

@@ -241,7 +241,7 @@ gatherExport repo mSchedName = do
                     (map (\(SkillId s) -> s) $ Set.toList $
                         Map.findWithDefault Set.empty (WorkerId wid) (scWorkerSkills skillCtx))
                     (fmap (\dt -> round (toRational dt / 3600)) $
-                        Map.lookup (WorkerId wid) (wcMaxWeeklyHours workerCtx))
+                        Map.lookup (WorkerId wid) (wcMaxPeriodHours workerCtx))
                     (Set.member (WorkerId wid) (wcOvertimeOptIn workerCtx))
                     (map (\(StationId s) -> s) $
                         Map.findWithDefault [] (WorkerId wid) (wcStationPrefs workerCtx))
@@ -359,10 +359,10 @@ applyImport repo dat = do
             -- Set worker context attributes
             workerCtx <- repoLoadWorkerCtx repo
             let wctx' = workerCtx
-                    { wcMaxWeeklyHours = case ewMaxWeeklyHours ew of
-                        Nothing -> Map.delete wid (wcMaxWeeklyHours workerCtx)
+                    { wcMaxPeriodHours = case ewMaxWeeklyHours ew of
+                        Nothing -> Map.delete wid (wcMaxPeriodHours workerCtx)
                         Just h  -> Map.insert wid (fromIntegral h * 3600)
-                                   (wcMaxWeeklyHours workerCtx)
+                                   (wcMaxPeriodHours workerCtx)
                     , wcOvertimeOptIn = if ewOvertimeOptIn ew
                         then Set.insert wid (wcOvertimeOptIn workerCtx)
                         else Set.delete wid (wcOvertimeOptIn workerCtx)
