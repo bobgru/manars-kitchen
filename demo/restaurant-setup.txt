@@ -353,3 +353,39 @@ draft commit 5 corrected week 1 (unfrozen)
 
 # Auto-refreeze clears all unfreezes after committing historical dates
 calendar freeze-status
+
+# === What-If Exploration ===
+# Demonstrates the hint system for exploring schedule changes
+# within a draft session without modifying any real data.
+#
+# Scenario: We create a draft for week 4 and generate a schedule.
+# Then we explore hypothetical changes:
+#   - What if Nina (W9) could work the grill? (grant-skill)
+#   - What if we closed the pizza station on Monday? (close-station)
+# Each hint shows a diff of the schedule impact. We can list,
+# revert, and re-explore freely — nothing is persisted.
+
+# Create and generate a draft for week 4
+draft create 2026-04-27 2026-05-03
+draft generate 6
+
+# Explore: what if Nina (beverage/register/sandwich) could also do grill?
+what-if grant-skill nina grill
+
+# Explore: what if we close the pizza station on Monday at 11:00?
+what-if close-station pizza 2026-04-27 11
+
+# Review all active hints
+what-if list
+
+# Undo the station closure (keep the skill grant)
+what-if revert
+
+# Check the list again — only the skill grant remains
+what-if list
+
+# Clear all remaining hints to restore the original schedule
+what-if revert-all
+
+# Discard the draft — we were just exploring
+draft discard 6

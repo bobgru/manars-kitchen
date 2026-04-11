@@ -14,7 +14,7 @@ import qualified Data.Set as Set
 import qualified Data.ByteString.Lazy as BL
 import Data.Time
     ( Day, DayOfWeek(..), TimeOfDay(..), parseTimeM, defaultTimeLocale
-    , addDays, fromGregorian, toGregorian, gregorianMonthLength
+    , addDays, fromGregorian, toGregorian, gregorianMonthLength, dayOfWeek
     )
 import Data.Time.Clock (getCurrentTime, utctDay)
 
@@ -28,6 +28,7 @@ import qualified Domain.Calendar as Calendar
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodType,
                          payPeriodBounds, defaultPayPeriodConfig)
+import Domain.Hint (Hint(..), Session(..), newSession, addHint, revertHint, revertTo, sessionStep)
 import Domain.SchedulerConfig (presetNames, configToMap)
 import Domain.Pin (expandPins, PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
@@ -59,6 +60,7 @@ data AppState = AppState
     , asContext    :: !(IORef SessionContext)
     , asCheckpoints :: !(IORef [String])
     , asUnfreezes  :: !(IORef (Set.Set (Day, Day)))
+    , asHintSession :: !(IORef (Maybe Session))
     }
 
 -- | Create an AppState with initialized IORefs.
@@ -67,7 +69,8 @@ mkAppState repo user = do
     ctxRef <- newIORef emptyContext
     cpRef  <- newIORef []
     ufRef  <- newIORef Set.empty
-    return (AppState repo user ctxRef cpRef ufRef)
+    hsRef  <- newIORef Nothing
+    return (AppState repo user ctxRef cpRef ufRef hsRef)
 
 runRepl :: AppState -> IO ()
 runRepl st = do
@@ -99,6 +102,14 @@ runRepl st = do
                     when (isMutating cmd) $
                         repoLogCommand (asRepo st) uname line  -- log original input
                     handleCommand st cmd
+                    -- Clear hint session if a mutating command ran
+                    when (isMutating cmd) $ do
+                        mSess <- readIORef (asHintSession st)
+                        case mSess of
+                            Nothing -> return ()
+                            Just _  -> do
+                                writeIORef (asHintSession st) Nothing
+                                putStrLn "Hint session cleared due to data change. Use what-if commands to start a new exploration."
                     runRepl st
 
 -- | Commands that modify state and should be logged.
@@ -152,6 +163,16 @@ isMutating cmd = case cmd of
     CalendarHistory          -> False
     CalendarHistoryView _    -> False
     CalendarFreezeStatus     -> False
+    WhatIfCloseStation {}  -> False
+    WhatIfPin {}           -> False
+    WhatIfAddWorker {}     -> False
+    WhatIfWaiveOvertime _  -> False
+    WhatIfGrantSkill _ _   -> False
+    WhatIfOverridePrefs {} -> False
+    WhatIfRevert           -> False
+    WhatIfRevertAll        -> False
+    WhatIfList             -> False
+    -- WhatIfApply is mutating (persists changes)
     CmdExport _           -> False
     CmdExportSchedule _ _ -> False
     CmdAuditLog           -> False
@@ -831,6 +852,174 @@ handleCommand st cmd = case cmd of
                         else putStrLn ("Unfrozen ranges: " ++ show s ++ " to " ++ show e)
                     ) ranges
 
+    -- What-if (hint session)
+    WhatIfCloseStation sid dateStr hr -> requireAdmin st $ requireDraft st $
+        case parseDay dateStr of
+            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+            Just day -> do
+                result <- getOrInitSession st
+                case result of
+                    Left err -> putStrLn err
+                    Right sess -> do
+                        let slot = Slot day (TimeOfDay hr 0 0) 3600
+                            hint = CloseStation (StationId sid) slot
+                            oldResult = sessResult sess
+                            sess' = addHint hint sess
+                        writeIORef (asHintSession st) (Just sess')
+                        (wNames, sNames, _) <- loadNameMaps st
+                        putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+
+    WhatIfPin wid sid dateStr hr -> requireAdmin st $ requireDraft st $
+        case parseDay dateStr of
+            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+            Just day -> do
+                result <- getOrInitSession st
+                case result of
+                    Left err -> putStrLn err
+                    Right sess -> do
+                        let slot = Slot day (TimeOfDay hr 0 0) 3600
+                            hint = PinAssignment (WorkerId wid) (StationId sid) slot
+                            oldResult = sessResult sess
+                            sess' = addHint hint sess
+                        writeIORef (asHintSession st) (Just sess')
+                        (wNames, sNames, _) <- loadNameMaps st
+                        putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+
+    WhatIfAddWorker name skillStrs mHours -> requireAdmin st $ requireDraft st $ do
+        -- Resolve skill names to SkillIds
+        resolvedSkills <- mapM (lookupByName (asRepo st) ESkill) skillStrs
+        case sequence resolvedSkills of
+            Left err -> putStrLn err
+            Right sidStrs -> do
+                result <- getOrInitSession st
+                case result of
+                    Left err -> putStrLn err
+                    Right sess -> do
+                        let sids = Set.fromList [SkillId (read s) | s <- sidStrs]
+                            tempWid = WorkerId (9000 + sessionStep sess)
+                            diffHours = fmap (\h -> fromIntegral (h * 3600)) mHours
+                            hint = AddWorker tempWid sids diffHours
+                            oldResult = sessResult sess
+                            sess' = addHint hint sess
+                        writeIORef (asHintSession st) (Just sess')
+                        (wNames, sNames, _) <- loadNameMaps st
+                        let wNames' = Map.insert tempWid name wNames
+                        putStr (displayHintDiff wNames' sNames oldResult (sessResult sess'))
+
+    WhatIfWaiveOvertime wid -> requireAdmin st $ requireDraft st $ do
+        result <- getOrInitSession st
+        case result of
+            Left err -> putStrLn err
+            Right sess -> do
+                let hint = WaiveOvertime (WorkerId wid)
+                    oldResult = sessResult sess
+                    sess' = addHint hint sess
+                writeIORef (asHintSession st) (Just sess')
+                (wNames, sNames, _) <- loadNameMaps st
+                putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+
+    WhatIfGrantSkill wid sid -> requireAdmin st $ requireDraft st $ do
+        result <- getOrInitSession st
+        case result of
+            Left err -> putStrLn err
+            Right sess -> do
+                let hint = GrantSkill (WorkerId wid) (SkillId sid)
+                    oldResult = sessResult sess
+                    sess' = addHint hint sess
+                writeIORef (asHintSession st) (Just sess')
+                (wNames, sNames, _) <- loadNameMaps st
+                putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+
+    WhatIfOverridePrefs wid sids -> requireAdmin st $ requireDraft st $ do
+        result <- getOrInitSession st
+        case result of
+            Left err -> putStrLn err
+            Right sess -> do
+                let hint = OverridePreference (WorkerId wid) (map StationId sids)
+                    oldResult = sessResult sess
+                    sess' = addHint hint sess
+                writeIORef (asHintSession st) (Just sess')
+                (wNames, sNames, _) <- loadNameMaps st
+                putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+
+    WhatIfRevert -> requireDraft st $ do
+        mSess <- readIORef (asHintSession st)
+        case mSess of
+            Nothing -> putStrLn "No hints to revert."
+            Just sess | null (sessHints sess) -> putStrLn "No hints to revert."
+            Just sess -> do
+                let n = sessionStep sess
+                    oldResult = sessResult sess
+                    sess' = revertHint sess
+                writeIORef (asHintSession st) (Just sess')
+                (wNames, sNames, _) <- loadNameMaps st
+                putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+                putStrLn ("Reverted hint " ++ show n ++ ". "
+                         ++ show (sessionStep sess') ++ " hint"
+                         ++ (if sessionStep sess' == 1 then "" else "s")
+                         ++ " remaining.")
+
+    WhatIfRevertAll -> requireDraft st $ do
+        mSess <- readIORef (asHintSession st)
+        case mSess of
+            Nothing -> putStrLn "No hints to revert."
+            Just sess | null (sessHints sess) -> putStrLn "No hints to revert."
+            Just sess -> do
+                let n = sessionStep sess
+                    oldResult = sessResult sess
+                    sess' = revertTo 0 sess
+                writeIORef (asHintSession st) (Just sess')
+                (wNames, sNames, _) <- loadNameMaps st
+                putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+                putStrLn ("Reverted all " ++ show n ++ " hints.")
+
+    WhatIfList -> requireDraft st $ do
+        mSess <- readIORef (asHintSession st)
+        case mSess of
+            Nothing -> putStrLn "No active hints."
+            Just sess -> do
+                (wNames, sNames, skNames) <- loadNameMaps st
+                putStr (displayHintList wNames sNames skNames sess)
+
+    WhatIfApply -> requireAdmin st $ requireDraft st $ do
+        mSess <- readIORef (asHintSession st)
+        case mSess of
+            Nothing -> putStrLn "No hints to apply."
+            Just sess | null (sessHints sess) -> putStrLn "No hints to apply."
+            Just sess -> do
+                let lastHint = last (sessHints sess)
+                (wNames, sNames, skNames) <- loadNameMaps st
+                case lastHint of
+                    GrantSkill (WorkerId w) (SkillId sk) -> do
+                        SW.grantWorkerSkill (asRepo st) (WorkerId w) (SkillId sk)
+                        putStrLn ("Applied: grant skill "
+                                 ++ Map.findWithDefault ("Skill " ++ show sk) (SkillId sk) skNames
+                                 ++ " to " ++ lookupWorker wNames (WorkerId w))
+                        rebuildSessionAfterApply st sess
+                    WaiveOvertime (WorkerId w) -> do
+                        _ <- SW.setOvertimeOptIn (asRepo st) (WorkerId w) True
+                        putStrLn ("Applied: waive overtime for "
+                                 ++ lookupWorker wNames (WorkerId w))
+                        rebuildSessionAfterApply st sess
+                    OverridePreference (WorkerId w) sids -> do
+                        SW.setStationPreferences (asRepo st) (WorkerId w) sids
+                        putStrLn ("Applied: override preferences for "
+                                 ++ lookupWorker wNames (WorkerId w))
+                        rebuildSessionAfterApply st sess
+                    PinAssignment (WorkerId w) (StationId s) slot -> do
+                        let day = slotDate slot
+                            dow = dayOfWeek day
+                            hr  = let TimeOfDay h _ _ = slotStart slot in h
+                        SW.addPin (asRepo st) (PinnedAssignment (WorkerId w) (StationId s) dow (PinSlot hr))
+                        putStrLn ("Applied: pin " ++ lookupWorker wNames (WorkerId w)
+                                 ++ " at " ++ lookupStation sNames (StationId s)
+                                 ++ " on " ++ showDayOfWeek dow ++ " " ++ show hr ++ ":00")
+                        rebuildSessionAfterApply st sess
+                    AddWorker {} ->
+                        putStrLn "Cannot apply AddWorker hints automatically. Create the worker manually with 'user create' and 'worker grant-skill', then regenerate the schedule."
+                    CloseStation {} ->
+                        putStrLn "Cannot apply CloseStation hints automatically. Use 'station close-day' for day-level closures, or adjust station hours with 'station set-hours'."
+
     -- Stations (admin)
     StationAdd sid name -> requireAdmin st $ do
         SW.addStation (asRepo st) (StationId sid) name
@@ -1281,6 +1470,99 @@ requireAdmin st action
     | userRole (asUser st) == Admin = action
     | otherwise = putStrLn "Permission denied. Admin required."
 
+-- | Guard: require at least one active draft.
+requireDraft :: AppState -> IO () -> IO ()
+requireDraft st action = do
+    drafts <- Draft.listDrafts (asRepo st)
+    if null drafts
+        then putStrLn "No active draft. Start a draft session first."
+        else action
+
+-- | Get or lazily initialize the hint session.
+getOrInitSession :: AppState -> IO (Either String Session)
+getOrInitSession st = do
+    mSess <- readIORef (asHintSession st)
+    case mSess of
+        Just sess -> return (Right sess)
+        Nothing -> do
+            result <- initHintSession st
+            case result of
+                Left err -> return (Left err)
+                Right sess -> do
+                    writeIORef (asHintSession st) (Just sess)
+                    return (Right sess)
+
+-- | Build a SchedulerContext from the current draft and create a new hint session.
+initHintSession :: AppState -> IO (Either String Session)
+initHintSession st = do
+    resolved <- resolveDraftId (asRepo st) Nothing
+    case resolved of
+        Left err -> return (Left err)
+        Right did -> do
+            mDraft <- Draft.loadDraft (asRepo st) did
+            case mDraft of
+                Nothing -> return (Left "Draft not found.")
+                Just draft -> do
+                    let dateFrom = diDateFrom draft
+                        dateTo   = diDateTo draft
+                    users <- repoListUsers (asRepo st)
+                    let workers = Set.fromList [userWorkerId u | u <- users]
+                    let slots = Calendar.generateDateRangeSlots Calendar.defaultHours dateFrom dateTo Set.empty
+                    skillCtx   <- repoLoadSkillCtx (asRepo st)
+                    workerCtx  <- repoLoadWorkerCtx (asRepo st)
+                    absenceCtx <- repoLoadAbsenceCtx (asRepo st)
+                    cfg        <- repoLoadSchedulerConfig (asRepo st)
+                    shifts     <- repoLoadShifts (asRepo st)
+                    mPpc       <- SC.loadPayPeriodConfig (asRepo st)
+                    let ppc = maybe defaultPayPeriodConfig id mPpc
+                        periodBounds = payPeriodBounds ppc dateFrom
+                    calHrs <- Draft.computeCalendarHours (asRepo st) workerCtx
+                                  (fst periodBounds) (snd periodBounds)
+                    let closed = stationClosedSlots skillCtx slots
+                        ctx = Scheduler.SchedulerContext
+                            { Scheduler.schSkillCtx    = skillCtx
+                            , Scheduler.schWorkerCtx   = workerCtx
+                            , Scheduler.schAbsenceCtx  = absenceCtx
+                            , Scheduler.schSlots       = slots
+                            , Scheduler.schWorkers     = workers
+                            , Scheduler.schClosedSlots = closed
+                            , Scheduler.schShifts      = shifts
+                            , Scheduler.schPrevWeekendWorkers = Set.empty
+                            , Scheduler.schConfig      = cfg
+                            , Scheduler.schPeriodBounds = periodBounds
+                            , Scheduler.schCalendarHours = calHrs
+                            }
+                    return (Right (newSession ctx))
+
+-- | Load worker/station/skill name maps for display.
+loadNameMaps :: AppState -> IO (Map.Map WorkerId String, Map.Map StationId String, Map.Map SkillId String)
+loadNameMaps st = do
+    users <- repoListUsers (asRepo st)
+    stations <- SW.listStations (asRepo st)
+    skills <- SW.listSkills (asRepo st)
+    let workerNames = Map.fromList
+            [ (userWorkerId u, uname)
+            | u <- users, let Username uname = userName u ]
+        stationNames = Map.fromList
+            [ (StationId sid, sname)
+            | (StationId sid, sname) <- stations ]
+        skillNames = Map.fromList
+            [ (sid, skillName sk)
+            | (sid, sk) <- skills ]
+    return (workerNames, stationNames, skillNames)
+
+-- | After applying a hint permanently, remove it from the session and rebuild.
+rebuildSessionAfterApply :: AppState -> Session -> IO ()
+rebuildSessionAfterApply st sess = do
+    let remaining = init (sessHints sess)  -- remove the last hint (just applied)
+    result <- initHintSession st
+    case result of
+        Left _ -> writeIORef (asHintSession st) Nothing
+        Right freshSess -> do
+            -- Re-apply remaining hints on the fresh context
+            let sess' = foldl (flip addHint) freshSess remaining
+            writeIORef (asHintSession st) (Just sess')
+
 parseDay :: String -> Maybe Day
 parseDay = parseTimeM True defaultTimeLocale "%Y-%m-%d"
 
@@ -1347,7 +1629,12 @@ replayCommands opts st entries = do
                     then "admin> "
                     else if null ts then "" else "[" ++ ts ++ " " ++ user ++ "] "
             putStrLn (label ++ cmdStr)
-            let cmd = parseCommand cmdStr
+            -- Resolve entity names before parsing
+            resolved <- resolveInput (asRepo st) (asContext st) cmdStr
+            let cmdStr' = case resolved of
+                    Left _    -> cmdStr   -- fallback to original on resolution error
+                    Right res -> res
+                cmd = parseCommand cmdStr'
             case cmd of
                 CmdAuditLog       -> putStrLn "  (skipped: audit)"
                 CmdReplay         -> putStrLn "  (skipped: replay)"
@@ -1656,6 +1943,17 @@ helpRegistry =
     , ("pin",      True,  "pin <wid> <sid> <day> <hour|shift>", "Pin worker to station/slot")
     , ("pin",      True,  "unpin <wid> <sid> <day> <hour|shift>", "Remove pin")
     , ("pin",      True,  "pin list",                        "List pinned assignments")
+    -- What-if
+    , ("what-if",  True,  "what-if close-station <sid> <date> <hour>",      "What if we close a station at a slot?")
+    , ("what-if",  True,  "what-if pin <wid> <sid> <date> <hour>",         "What if we pin a worker to a slot?")
+    , ("what-if",  True,  "what-if add-worker <name> <skills...> [hours]", "What if we bring in a temp worker?")
+    , ("what-if",  True,  "what-if waive-overtime <wid>",                  "What if we waive overtime for a worker?")
+    , ("what-if",  True,  "what-if grant-skill <wid> <sid>",              "What if a worker had this skill?")
+    , ("what-if",  True,  "what-if override-prefs <wid> <sid...>",        "What if we change preferences?")
+    , ("what-if",  True,  "what-if revert",                                "Undo the last hint")
+    , ("what-if",  True,  "what-if revert-all",                            "Undo all hints")
+    , ("what-if",  True,  "what-if list",                                  "List all applied hints")
+    , ("what-if",  True,  "what-if apply",                                 "Apply last hint permanently")
     -- Export
     , ("export",   True,  "export <file>",                   "Export all data to JSON")
     , ("export",   True,  "export <schedule> <file>",        "Export one schedule to JSON")
@@ -1699,6 +1997,7 @@ helpGroups =
     , ("absence",  "Absence types, requests, and approvals")
     , ("config",   "Scheduler configuration and presets")
     , ("pin",      "Pinned assignments")
+    , ("what-if",  "What-if hint exploration within drafts")
     , ("context",  "Session context (use, view, clear)")
     , ("checkpoint", "Checkpoint, commit, and rollback")
     , ("export",   "JSON import and export")

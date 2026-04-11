@@ -14,6 +14,10 @@ module CLI.Display
     , displayWorkerCtx
     , displayAbsenceTypes
     , displayConfig
+    , displayHintDiff
+    , displayHintList
+    , lookupWorker
+    , lookupStation
     , padRight
     ) where
 
@@ -36,6 +40,7 @@ import Domain.Absence
     )
 import Domain.Diagnosis (Diagnosis(..))
 import Domain.Scheduler (Unfilled(..), UnfilledKind(..), ScheduleResult(..))
+import Domain.Hint (Hint(..), Session(..))
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
 
 -- -----------------------------------------------------------------
@@ -571,6 +576,84 @@ displayAbsenceTypes ctx
         [ "  " ++ show tid ++ ". " ++ atName at
           ++ if atYearlyLimit at then " (yearly limit)" else " (no limit)"
         | (AbsenceTypeId tid, at) <- Map.toList (acTypes ctx) ]
+
+-- -----------------------------------------------------------------
+-- Hint diff and list display
+-- -----------------------------------------------------------------
+
+-- | Display the difference between two schedule results after a hint operation.
+displayHintDiff :: Map.Map WorkerId String
+                -> Map.Map StationId String
+                -> ScheduleResult -> ScheduleResult -> String
+displayHintDiff wNames sNames oldResult newResult =
+    let oldAssigns = unSchedule (srSchedule oldResult)
+        newAssigns = unSchedule (srSchedule newResult)
+        added   = Set.difference newAssigns oldAssigns
+        removed = Set.difference oldAssigns newAssigns
+        oldUf = srUnfilled oldResult
+        newUf = srUnfilled newResult
+        addedUf   = filter (`notElem` oldUf) newUf
+        removedUf = filter (`notElem` newUf) oldUf
+    in if Set.null added && Set.null removed && null addedUf && null removedUf
+       then "No schedule changes.\n"
+       else unlines $ concat
+           [ if Set.null removed then [] else
+               [ "  - " ++ lookupWorker wNames (assignWorker a)
+                 ++ " @ " ++ lookupStation sNames (assignStation a)
+                 ++ " on " ++ showSlot (assignSlot a)
+               | a <- Set.toList removed ]
+           , if Set.null added then [] else
+               [ "  + " ++ lookupWorker wNames (assignWorker a)
+                 ++ " @ " ++ lookupStation sNames (assignStation a)
+                 ++ " on " ++ showSlot (assignSlot a)
+               | a <- Set.toList added ]
+           , if null removedUf then [] else
+               [ "  Resolved: " ++ lookupStation sNames (unfilledStation u)
+                 ++ " at " ++ showSlot (unfilledSlot u)
+               | u <- removedUf ]
+           , if null addedUf then [] else
+               [ "  Unfilled: " ++ lookupStation sNames (unfilledStation u)
+                 ++ " at " ++ showSlot (unfilledSlot u)
+               | u <- addedUf ]
+           , [ show (Set.size newAssigns) ++ " assignments, "
+               ++ show (length newUf) ++ " unfilled"
+               ++ " (was " ++ show (Set.size oldAssigns) ++ " / "
+               ++ show (length oldUf) ++ ")" ]
+           ]
+
+-- | Display active hints in a session as a numbered list.
+displayHintList :: Map.Map WorkerId String
+                -> Map.Map StationId String
+                -> Map.Map SkillId String
+                -> Session -> String
+displayHintList wNames sNames skNames sess =
+    let hints = sessHints sess
+    in if null hints
+       then "No active hints.\n"
+       else unlines $
+           ("Active hints:")
+           : zipWith (\i h -> "  " ++ show i ++ ". " ++ showHint wNames sNames skNames h)
+                     [1::Int ..] hints
+
+showHint :: Map.Map WorkerId String
+         -> Map.Map StationId String
+         -> Map.Map SkillId String
+         -> Hint -> String
+showHint _wNames sNames _skNames (CloseStation sid slot) =
+    "Close station: " ++ lookupStation sNames sid ++ " on " ++ showSlot slot
+showHint wNames sNames _skNames (PinAssignment wid sid slot) =
+    "Pin: " ++ lookupWorker wNames wid ++ " @ " ++ lookupStation sNames sid
+    ++ " on " ++ showSlot slot
+showHint wNames _sNames _skNames (AddWorker wid _skills mHours) =
+    "Add worker: " ++ lookupWorker wNames wid
+    ++ maybe "" (\h -> " (" ++ show (round (toRational h / 3600) :: Int) ++ "h)") mHours
+showHint wNames _sNames _skNames (WaiveOvertime wid) =
+    "Waive overtime: " ++ lookupWorker wNames wid
+showHint wNames _sNames skNames (GrantSkill wid skid) =
+    "Grant skill: " ++ lookupWorker wNames wid ++ " -> " ++ lookupSkill skNames skid
+showHint wNames sNames _skNames (OverridePreference wid sids) =
+    "Override prefs: " ++ lookupWorker wNames wid
+    ++ " -> " ++ intercalate ", " (map (lookupStation sNames) sids)
 
 -- -----------------------------------------------------------------
 -- Config display

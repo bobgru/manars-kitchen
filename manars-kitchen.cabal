@@ -98,11 +98,17 @@ executable manars-cli
 test-suite manars-kitchen-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
+                     , cli
   main-is:             Spec.hs
   other-modules:       CalendarSpec
                      , DraftSpec
                      , DraftValidationSpec
                      , FreezeLineSpec
+                     , HintIntegrationSpec
+                     , CLI.Commands
+                     , CLI.Display
+                     , CLI.Resolve
+                     , CLI.App
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
@@ -110,6 +116,8 @@ test-suite manars-kitchen-test
                      , containers
                      , time
                      , directory
+                     , bytestring
+                     , aeson
   ghc-options:         -Wall
                        -Wcompat
 

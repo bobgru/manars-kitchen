@@ -129,6 +129,17 @@ data Command
     | DraftDiscard (Maybe String)       -- ^ optional draft-id
     | DraftHours (Maybe String)         -- ^ optional draft-id
     | DraftDiagnose (Maybe String)      -- ^ optional draft-id
+    -- What-if (hint session)
+    | WhatIfCloseStation Int String Int       -- ^ station-id date hour
+    | WhatIfPin Int Int String Int            -- ^ worker-id station-id date hour
+    | WhatIfAddWorker String [String] (Maybe Int)  -- ^ name skills [hours]
+    | WhatIfWaiveOvertime Int                 -- ^ worker-id
+    | WhatIfGrantSkill Int Int                -- ^ worker-id skill-id
+    | WhatIfOverridePrefs Int [Int]           -- ^ worker-id station-ids
+    | WhatIfRevert
+    | WhatIfRevertAll
+    | WhatIfList
+    | WhatIfApply
     -- Context
     | CmdUse String String          -- ^ entity-type name-or-id
     | ContextView
@@ -138,7 +149,7 @@ data Command
     | HelpGroup String
     | Quit
     | Unknown String
-    deriving (Show)
+    deriving (Eq, Show)
 
 parseCommand :: String -> Command
 parseCommand input = case words input of
@@ -310,6 +321,25 @@ parseCommand input = case words input of
     ["draft", "diagnose", did]
         | isDigit' did                   -> DraftDiagnose (Just did)
 
+    -- What-if
+    ["what-if", "close-station", sid, date, hr]
+        | all isDigit' [sid, hr] -> WhatIfCloseStation (read sid) date (read hr)
+    ["what-if", "pin", wid, sid, date, hr]
+        | all isDigit' [wid, sid, hr] -> WhatIfPin (read wid) (read sid) date (read hr)
+    ("what-if" : "add-worker" : rest)
+        | length rest >= 2 -> parseAddWorker rest
+    ["what-if", "waive-overtime", wid]
+        | isDigit' wid -> WhatIfWaiveOvertime (read wid)
+    ["what-if", "grant-skill", wid, sid]
+        | all isDigit' [wid, sid] -> WhatIfGrantSkill (read wid) (read sid)
+    ("what-if" : "override-prefs" : wid : sids)
+        | isDigit' wid, not (null sids), all isDigit' sids
+            -> WhatIfOverridePrefs (read wid) (map read sids)
+    ["what-if", "revert"]       -> WhatIfRevert
+    ["what-if", "revert-all"]   -> WhatIfRevertAll
+    ["what-if", "list"]         -> WhatIfList
+    ["what-if", "apply"]        -> WhatIfApply
+
     ["calendar", "view", s, e]          -> CalendarView s e
     ["calendar", "view-by-worker", s, e] -> CalendarViewByWorker s e
     ["calendar", "view-by-station", s, e] -> CalendarViewByStation s e
@@ -348,3 +378,15 @@ parseBool "on"   = True
 parseBool "yes"  = True
 parseBool "true" = True
 parseBool _      = False
+
+-- | Parse "what-if add-worker <name> <skills...> [hours]"
+-- If the last token is numeric, treat it as hours; rest are skill names.
+parseAddWorker :: [String] -> Command
+parseAddWorker [] = Unknown "what-if add-worker requires <name> <skills...>"
+parseAddWorker [name] = Unknown ("what-if add-worker " ++ name ++ " requires at least one skill")
+parseAddWorker (name : rest) =
+    let lastTok  = last rest
+        initToks = init rest
+    in if isDigit' lastTok && not (null initToks)
+       then WhatIfAddWorker name initToks (Just (read lastTok))
+       else WhatIfAddWorker name rest Nothing

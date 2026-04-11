@@ -71,6 +71,12 @@ commandEntityMap =
     , (["vacation", "remaining"],          [Resolve EAbsenceType])
     , (["pin"],                            [Resolve EWorker, Resolve EStation, Skip, Skip])
     , (["unpin"],                          [Resolve EWorker, Resolve EStation, Skip, Skip])
+    -- What-if (add-worker omitted: handler resolves skills due to complex arg structure)
+    , (["what-if", "close-station"],       [Resolve EStation, Skip, Skip])
+    , (["what-if", "pin"],                 [Resolve EWorker, Resolve EStation, Skip, Skip])
+    , (["what-if", "waive-overtime"],      [Resolve EWorker])
+    , (["what-if", "grant-skill"],         [Resolve EWorker, Resolve ESkill])
+    , (["what-if", "override-prefs"],      [Resolve EWorker, ResolveRest EStation])
     ]
 
 -- | Find the matching command prefix and its resolution specs.
