@@ -224,4 +224,23 @@ statements =
       \  slot_duration_seconds INTEGER NOT NULL,\
       \  PRIMARY KEY (commit_id, worker_id, station_id, slot_date, slot_start)\
       \)"
+
+      -- Draft sessions (staging area for schedule work)
+    , "CREATE TABLE IF NOT EXISTS drafts (\
+      \  draft_id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      \  date_from TEXT NOT NULL,\
+      \  date_to TEXT NOT NULL,\
+      \  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
+      \)"
+
+      -- Draft assignments (working copy, same shape as calendar_assignments + draft_id)
+    , "CREATE TABLE IF NOT EXISTS draft_assignments (\
+      \  draft_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL,\
+      \  station_id INTEGER NOT NULL,\
+      \  slot_date TEXT NOT NULL,\
+      \  slot_start TEXT NOT NULL,\
+      \  slot_duration_seconds INTEGER NOT NULL,\
+      \  PRIMARY KEY (draft_id, worker_id, station_id, slot_date, slot_start)\
+      \)"
     ]

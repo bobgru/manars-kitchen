@@ -106,6 +106,19 @@ data Command
     | CalendarDoCommit String String String (Maybe String) -- ^ schedule-name start end [note]
     | CalendarHistory
     | CalendarHistoryView String              -- ^ commit-id
+    -- Draft
+    | DraftCreate String String         -- ^ start-date end-date
+    | DraftThisMonth
+    | DraftNextMonth
+    | DraftList
+    | DraftOpen String                  -- ^ draft-id
+    | DraftView (Maybe String)          -- ^ optional draft-id
+    | DraftViewCompact (Maybe String)   -- ^ optional draft-id
+    | DraftGenerate (Maybe String)      -- ^ optional draft-id
+    | DraftCommit (Maybe String) (Maybe String)  -- ^ optional draft-id, optional note
+    | DraftDiscard (Maybe String)       -- ^ optional draft-id
+    | DraftHours (Maybe String)         -- ^ optional draft-id
+    | DraftDiagnose (Maybe String)      -- ^ optional draft-id
     -- Context
     | CmdUse String String          -- ^ entity-type name-or-id
     | ContextView
@@ -245,6 +258,36 @@ parseCommand input = case words input of
     ["checkpoint", "rollback"]      -> CheckpointRollback Nothing
     ["checkpoint", "rollback", name] -> CheckpointRollback (Just name)
     ["checkpoint", "list"]          -> CheckpointList
+
+    ["draft", "create", s, e]            -> DraftCreate s e
+    ["draft", "this-month"]              -> DraftThisMonth
+    ["draft", "next-month"]              -> DraftNextMonth
+    ["draft", "list"]                    -> DraftList
+    ["draft", "open", did]
+        | isDigit' did                   -> DraftOpen did
+    ["draft", "view"]                    -> DraftView Nothing
+    ["draft", "view", did]
+        | isDigit' did                   -> DraftView (Just did)
+    ["draft", "view-compact"]            -> DraftViewCompact Nothing
+    ["draft", "view-compact", did]
+        | isDigit' did                   -> DraftViewCompact (Just did)
+    ["draft", "generate"]                -> DraftGenerate Nothing
+    ["draft", "generate", did]
+        | isDigit' did                   -> DraftGenerate (Just did)
+    ["draft", "commit"]                  -> DraftCommit Nothing Nothing
+    ["draft", "commit", did]
+        | isDigit' did                   -> DraftCommit (Just did) Nothing
+    ("draft" : "commit" : did : rest)
+        | isDigit' did                   -> DraftCommit (Just did) (Just (unwords rest))
+    ["draft", "discard"]                 -> DraftDiscard Nothing
+    ["draft", "discard", did]
+        | isDigit' did                   -> DraftDiscard (Just did)
+    ["draft", "hours"]                   -> DraftHours Nothing
+    ["draft", "hours", did]
+        | isDigit' did                   -> DraftHours (Just did)
+    ["draft", "diagnose"]                -> DraftDiagnose Nothing
+    ["draft", "diagnose", did]
+        | isDigit' did                   -> DraftDiagnose (Just did)
 
     ["calendar", "view", s, e]          -> CalendarView s e
     ["calendar", "view-by-worker", s, e] -> CalendarViewByWorker s e

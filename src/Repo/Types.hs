@@ -1,6 +1,7 @@
 module Repo.Types
     ( Repository(..)
     , CalendarCommit(..)
+    , DraftInfo(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
@@ -12,6 +13,14 @@ import Domain.Worker (WorkerContext)
 import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Pin (PinnedAssignment)
+
+-- | Metadata for a draft session.
+data DraftInfo = DraftInfo
+    { diId        :: !Int
+    , diDateFrom  :: !Day
+    , diDateTo    :: !Day
+    , diCreatedAt :: !String
+    } deriving (Show, Eq)
 
 -- | Metadata for a calendar history commit.
 data CalendarCommit = CalendarCommit
@@ -124,6 +133,24 @@ data Repository = Repository
       -- ^ List calendar commits in reverse chronological order
     , repoLoadCommitAssignments :: Int -> IO Schedule
       -- ^ Load snapshot assignments for a commit id
+
+      -- ---------------------------------------------------------------
+      -- Drafts (staging area for schedule work)
+      -- ---------------------------------------------------------------
+    , repoCreateDraft    :: Day -> Day -> IO Int
+      -- ^ Create a draft for a date range, return draft_id
+    , repoDeleteDraft    :: Int -> IO ()
+      -- ^ Delete a draft and its assignments
+    , repoListDrafts     :: IO [DraftInfo]
+      -- ^ List all active drafts
+    , repoGetDraft       :: Int -> IO (Maybe DraftInfo)
+      -- ^ Get draft metadata by id
+    , repoCheckDraftOverlap :: Day -> Day -> IO Bool
+      -- ^ Check if a date range overlaps any existing draft
+    , repoSaveDraftAssignments :: Int -> Schedule -> IO ()
+      -- ^ Save assignments for a draft (replace existing)
+    , repoLoadDraftAssignments :: Int -> IO Schedule
+      -- ^ Load assignments for a draft
 
       -- ---------------------------------------------------------------
       -- Checkpoint (SQLite savepoints)

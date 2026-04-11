@@ -234,3 +234,22 @@ calendar commit week1 2026-04-06 2026-04-12 initial week 1
 calendar view 2026-04-06 2026-04-12
 calendar hours 2026-04-06 2026-04-12
 calendar history
+
+# === Draft ===
+# Pin Marco to grill on Monday mornings before drafting next week
+pin 2 1 monday morning
+
+# Create a draft for the following week (Apr 13-19)
+draft create 2026-04-13 2026-04-19
+draft list
+
+# Generate the schedule within the draft
+draft generate 1
+
+# Review the draft before committing
+draft view-compact 1
+draft hours 1
+
+# Commit the draft to the live calendar
+draft commit 1 week 2 via draft
+calendar history

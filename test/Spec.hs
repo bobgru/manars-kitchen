@@ -16,6 +16,7 @@ import qualified Domain.SchedulerConfig
 import qualified Domain.Pin
 import qualified Domain.Optimizer
 import qualified CalendarSpec
+import qualified DraftSpec
 
 main :: IO ()
 main = hspec $ do
@@ -33,3 +34,4 @@ main = hspec $ do
     describe "Domain.Pin"             Domain.Pin.spec
     describe "Domain.Optimizer"       Domain.Optimizer.spec
     describe "Calendar"              CalendarSpec.spec
+    describe "Draft"                 DraftSpec.spec

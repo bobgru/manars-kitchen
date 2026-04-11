@@ -12,7 +12,11 @@ import Data.IORef
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.ByteString.Lazy as BL
-import Data.Time (Day, DayOfWeek(..), TimeOfDay(..), parseTimeM, defaultTimeLocale)
+import Data.Time
+    ( Day, DayOfWeek(..), TimeOfDay(..), parseTimeM, defaultTimeLocale
+    , addDays, fromGregorian, toGregorian, gregorianMonthLength
+    )
+import Data.Time.Clock (getCurrentTime, utctDay)
 
 import Domain.Types
 import qualified Domain.Shift
@@ -28,13 +32,14 @@ import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
-import Repo.Types (Repository(..), CalendarCommit(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..))
 import Service.Auth (AuthError(..), register, changePassword)
 import qualified Service.Worker as SW
 import qualified Service.Absence as SA
 import qualified Service.Config as SC
 import qualified Service.Optimize as Opt
 import qualified Service.Calendar as Cal
+import qualified Service.Draft as Draft
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
 import CLI.Commands (Command(..), parseCommand)
@@ -125,6 +130,12 @@ isMutating cmd = case cmd of
     ConfigShow            -> False
     ConfigPresetList      -> False
     PinList               -> False
+    DraftList             -> False
+    DraftOpen _           -> False
+    DraftView _           -> False
+    DraftViewCompact _    -> False
+    DraftHours _          -> False
+    DraftDiagnose _       -> False
     CalendarView _ _         -> False
     CalendarViewByWorker _ _ -> False
     CalendarViewByStation _ _ -> False
@@ -349,6 +360,213 @@ handleCommand st cmd = case cmd of
                         putStrLn ("Saved. " ++ show (Set.size (unSchedule sched)) ++ " assignments, "
                                  ++ show truly ++ " unfilled, "
                                  ++ show under ++ " understaffed positions.")
+
+    -- Draft
+    DraftCreate startStr endStr -> requireAdmin st $
+        case (parseDay startStr, parseDay endStr) of
+            (Just s, Just e) -> do
+                result <- Draft.createDraft (asRepo st) s e
+                case result of
+                    Right did -> putStrLn ("Created draft #" ++ show did
+                                          ++ " for " ++ startStr ++ " to " ++ endStr)
+                    Left err  -> putStrLn ("Error: " ++ err)
+            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+
+    DraftThisMonth -> requireAdmin st $ do
+        today <- utctDay <$> getCurrentTime
+        let (y, m, _) = toGregorian today
+            lastDay = fromGregorian y m (gregorianMonthLength y m)
+            dateFrom = addDays 1 today
+        if dateFrom > lastDay
+            then putStrLn "Error: no remaining days in the current month."
+            else do
+                result <- Draft.createDraft (asRepo st) dateFrom lastDay
+                case result of
+                    Right did -> putStrLn ("Created draft #" ++ show did
+                                          ++ " for " ++ show dateFrom ++ " to " ++ show lastDay)
+                    Left err  -> putStrLn ("Error: " ++ err)
+
+    DraftNextMonth -> requireAdmin st $ do
+        today <- utctDay <$> getCurrentTime
+        let (y, m, _) = toGregorian today
+            (ny, nm) = if m == 12 then (y + 1, 1) else (y, m + 1)
+            dateFrom = fromGregorian ny nm 1
+            dateTo   = fromGregorian ny nm (gregorianMonthLength ny nm)
+        result <- Draft.createDraft (asRepo st) dateFrom dateTo
+        case result of
+            Right did -> putStrLn ("Created draft #" ++ show did
+                                  ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
+            Left err  -> putStrLn ("Error: " ++ err)
+
+    DraftList -> do
+        drafts <- Draft.listDrafts (asRepo st)
+        if null drafts
+            then putStrLn "  (no active drafts)"
+            else do
+                putStrLn (padRight 6 "ID" ++ padRight 26 "Date Range"
+                         ++ "Created At")
+                putStrLn (replicate 60 '-')
+                mapM_ (\d ->
+                    let dateRange = show (diDateFrom d) ++ " to " ++ show (diDateTo d)
+                    in putStrLn (padRight 6 (show (diId d))
+                                ++ padRight 26 dateRange
+                                ++ diCreatedAt d)
+                    ) drafts
+
+    DraftOpen didStr -> do
+        let did = read didStr :: Int
+        mDraft <- Draft.loadDraft (asRepo st) did
+        case mDraft of
+            Nothing -> putStrLn "Draft not found."
+            Just d  -> do
+                sched <- repoLoadDraftAssignments (asRepo st) did
+                putStrLn ("Draft #" ++ show (diId d))
+                putStrLn ("  Date range: " ++ show (diDateFrom d) ++ " to " ++ show (diDateTo d))
+                putStrLn ("  Created at: " ++ diCreatedAt d)
+                putStrLn ("  Assignments: " ++ show (Set.size (unSchedule sched)))
+
+    DraftView mDidStr -> do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                sched <- repoLoadDraftAssignments (asRepo st) did
+                if Set.null (unSchedule sched)
+                    then putStrLn "No assignments in this draft."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        skillCtx <- repoLoadSkillCtx (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList
+                                [ (StationId sid, sname)
+                                | (StationId sid, sname) <- stations ]
+                        putStr (displayScheduleTable workerNames stationNames
+                                   Calendar.defaultHours (scStationHours skillCtx) sched)
+
+    DraftViewCompact mDidStr -> do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                sched <- repoLoadDraftAssignments (asRepo st) did
+                if Set.null (unSchedule sched)
+                    then putStrLn "No assignments in this draft."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        skillCtx <- repoLoadSkillCtx (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList
+                                [ (StationId sid, sname)
+                                | (StationId sid, sname) <- stations ]
+                        putStr (displayScheduleCompact workerNames stationNames
+                                   Calendar.defaultHours (scStationHours skillCtx) sched)
+
+    DraftGenerate mDidStr -> requireAdmin st $ do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                users <- repoListUsers (asRepo st)
+                let workers = Set.fromList [userWorkerId u | u <- users]
+                result <- Draft.generateDraft (asRepo st) did workers
+                case result of
+                    Left err -> putStrLn ("Error: " ++ err)
+                    Right sr -> do
+                        let sched = Scheduler.srSchedule sr
+                            unfilled = Scheduler.srUnfilled sr
+                            truly = length [u | u <- unfilled, Scheduler.unfilledKind u == Scheduler.TrulyUnfilled]
+                            under = length unfilled - truly
+                        putStrLn ("Generated. " ++ show (Set.size (unSchedule sched)) ++ " assignments, "
+                                 ++ show truly ++ " unfilled, "
+                                 ++ show under ++ " understaffed positions.")
+
+    DraftCommit mDidStr mNote -> requireAdmin st $ do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                let note = maybe "" id mNote
+                result <- Draft.commitDraft (asRepo st) did note
+                case result of
+                    Left err  -> putStrLn ("Error: " ++ err)
+                    Right ()  -> putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
+
+    DraftDiscard mDidStr -> requireAdmin st $ do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                result <- Draft.discardDraft (asRepo st) did
+                case result of
+                    Left err  -> putStrLn ("Error: " ++ err)
+                    Right ()  -> putStrLn ("Draft #" ++ show did ++ " discarded.")
+
+    DraftHours mDidStr -> do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                sched <- repoLoadDraftAssignments (asRepo st) did
+                if Set.null (unSchedule sched)
+                    then putStrLn "No assignments in this draft."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        workerCtx <- repoLoadWorkerCtx (asRepo st)
+                        let workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                        putStr (displayWorkerHours workerNames
+                                   (wcMaxWeeklyHours workerCtx) sched)
+
+    DraftDiagnose mDidStr -> do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                sched <- repoLoadDraftAssignments (asRepo st) did
+                if Set.null (unSchedule sched)
+                    then putStrLn "No assignments in this draft."
+                    else do
+                        users <- repoListUsers (asRepo st)
+                        stations <- SW.listStations (asRepo st)
+                        skills <- SW.listSkills (asRepo st)
+                        skillCtx   <- repoLoadSkillCtx (asRepo st)
+                        workerCtx  <- repoLoadWorkerCtx (asRepo st)
+                        absenceCtx <- repoLoadAbsenceCtx (asRepo st)
+                        shifts     <- repoLoadShifts (asRepo st)
+                        cfg        <- repoLoadSchedulerConfig (asRepo st)
+                        let workers = Set.fromList [userWorkerId u | u <- users]
+                            slots = Set.toList $ Set.map assignSlot (unSchedule sched)
+                            closed = stationClosedSlots skillCtx slots
+                            ctx = Scheduler.SchedulerContext
+                                { Scheduler.schSkillCtx    = skillCtx
+                                , Scheduler.schWorkerCtx   = workerCtx
+                                , Scheduler.schAbsenceCtx  = absenceCtx
+                                , Scheduler.schSlots       = slots
+                                , Scheduler.schWorkers     = workers
+                                , Scheduler.schClosedSlots = closed
+                                , Scheduler.schShifts      = shifts
+                                , Scheduler.schPrevWeekendWorkers = Set.empty
+                                , Scheduler.schConfig      = cfg
+                                }
+                            result = Scheduler.buildScheduleFrom sched ctx
+                            diags = Diagnosis.diagnose result ctx
+                            workerNames = Map.fromList
+                                [ (userWorkerId u, uname)
+                                | u <- users, let Username uname = userName u ]
+                            stationNames = Map.fromList
+                                [ (StationId sid, sname)
+                                | (StationId sid, sname) <- stations ]
+                            skillNames = Map.fromList
+                                [ (sid, skillName sk)
+                                | (sid, sk) <- skills ]
+                        putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
     -- Calendar
     CalendarView startStr endStr ->
@@ -1126,6 +1344,26 @@ handleCheckpointList st = do
                 ) (zip [(1::Int)..] (reverse stack))
 
 -- -----------------------------------------------------------------
+-- Draft-id resolution
+-- -----------------------------------------------------------------
+
+-- | Resolve an optional draft-id string. If omitted, auto-select the
+-- sole active draft. Error if 0 or 2+ drafts exist without an id.
+resolveDraftId :: Repository -> Maybe String -> IO (Either String Int)
+resolveDraftId repo Nothing = do
+    drafts <- repoListDrafts repo
+    case drafts of
+        []  -> return (Left "No active drafts.")
+        [d] -> return (Right (diId d))
+        _   -> do
+            let listing = unlines
+                    [ "  #" ++ show (diId d) ++ ": "
+                      ++ show (diDateFrom d) ++ " to " ++ show (diDateTo d)
+                    | d <- drafts ]
+            return (Left ("Multiple active drafts. Specify a draft-id:\n" ++ listing))
+resolveDraftId _ (Just didStr) = return (Right (read didStr))
+
+-- -----------------------------------------------------------------
 -- Help registry
 -- -----------------------------------------------------------------
 
@@ -1134,8 +1372,21 @@ type HelpEntry = (String, Bool, String, String)
 
 helpRegistry :: [HelpEntry]
 helpRegistry =
+    -- Draft
+      [ ("draft",    True,  "draft create <start> <end>",             "Create a draft for date range")
+    , ("draft",    True,  "draft this-month",                        "Create draft for rest of month")
+    , ("draft",    True,  "draft next-month",                        "Create draft for next month")
+    , ("draft",    False, "draft list",                              "List active drafts")
+    , ("draft",    False, "draft open <id>",                         "Show draft info")
+    , ("draft",    False, "draft view [id]",                         "View draft assignments (table)")
+    , ("draft",    False, "draft view-compact [id]",                 "View draft assignments (compact)")
+    , ("draft",    True,  "draft generate [id]",                     "Run scheduler within draft")
+    , ("draft",    True,  "draft commit [id] [note]",                "Commit draft to calendar")
+    , ("draft",    True,  "draft discard [id]",                      "Discard draft")
+    , ("draft",    False, "draft hours [id]",                        "Worker hours summary for draft")
+    , ("draft",    False, "draft diagnose [id]",                     "Diagnose draft")
     -- Calendar
-      [ ("calendar", False, "calendar view <start> <end>",            "View calendar (table)")
+    , ("calendar", False, "calendar view <start> <end>",            "View calendar (table)")
     , ("calendar", False, "calendar view-by-worker <start> <end>",  "View calendar grouped by worker")
     , ("calendar", False, "calendar view-by-station <start> <end>", "View calendar grouped by station")
     , ("calendar", False, "calendar view-compact <start> <end>",    "View calendar (compact, 100-col)")
@@ -1245,7 +1496,8 @@ helpRegistry =
 -- | (group, description)
 helpGroups :: [(String, String)]
 helpGroups =
-    [ ("calendar", "Calendar viewing, committing, and history")
+    [ ("draft",    "Draft scheduling sessions (staging area)")
+    , ("calendar", "Calendar viewing, committing, and history")
     , ("schedule", "Schedule creation, viewing, and management")
     , ("worker",   "Worker skills, hours, preferences, and pairings")
     , ("skill",    "Skill definitions and implications")

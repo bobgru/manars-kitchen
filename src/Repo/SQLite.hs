@@ -25,7 +25,7 @@ import Domain.Absence
     , AbsenceRequest(..), AbsenceContext(..)
     )
 import Data.Time (Day)
-import Repo.Types (Repository(..), CalendarCommit(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..))
 import Repo.Schema (initSchema)
 import Repo.Serialize
 
@@ -75,6 +75,13 @@ mkSQLiteRepo path = do
         , repoSaveCommit     = sqlSaveCommit conn
         , repoListCommits    = sqlListCommits conn
         , repoLoadCommitAssignments = sqlLoadCommitAssignments conn
+        , repoCreateDraft    = sqlCreateDraft conn
+        , repoDeleteDraft    = sqlDeleteDraft conn
+        , repoListDrafts     = sqlListDrafts conn
+        , repoGetDraft       = sqlGetDraft conn
+        , repoCheckDraftOverlap = sqlCheckDraftOverlap conn
+        , repoSaveDraftAssignments = sqlSaveDraftAssignments conn
+        , repoLoadDraftAssignments = sqlLoadDraftAssignments conn
         , repoSavepoint      = sqlSavepoint conn
         , repoRelease        = sqlRelease conn
         , repoRollbackTo     = sqlRollbackTo conn
@@ -708,6 +715,8 @@ sqlWipeAll :: Connection -> IO ()
 sqlWipeAll conn = withTransaction conn $ do
     -- Order matters for foreign key safety, but we have no FK constraints
     -- in the schema, so just delete everything.
+    execute_ conn "DELETE FROM draft_assignments"
+    execute_ conn "DELETE FROM drafts"
     execute_ conn "DELETE FROM calendar_commit_assignments"
     execute_ conn "DELETE FROM calendar_commits"
     execute_ conn "DELETE FROM calendar_assignments"
@@ -828,6 +837,83 @@ showDow Thursday  = "thursday"
 showDow Friday    = "friday"
 showDow Saturday  = "saturday"
 showDow Sunday    = "sunday"
+
+-- =====================================================================
+-- Drafts (staging area for schedule work)
+-- =====================================================================
+
+-- | Create a draft for a date range, return the draft_id.
+sqlCreateDraft :: Connection -> Day -> Day -> IO Int
+sqlCreateDraft conn dateFrom dateTo = do
+    execute conn
+        "INSERT INTO drafts (date_from, date_to) VALUES (?, ?)"
+        (dayToText dateFrom, dayToText dateTo)
+    fromIntegral <$> lastInsertRowId conn
+
+-- | Delete a draft and all its assignments.
+sqlDeleteDraft :: Connection -> Int -> IO ()
+sqlDeleteDraft conn draftId = do
+    execute conn "DELETE FROM draft_assignments WHERE draft_id = ?" (Only draftId)
+    execute conn "DELETE FROM drafts WHERE draft_id = ?" (Only draftId)
+
+-- | List all drafts ordered by created_at.
+sqlListDrafts :: Connection -> IO [DraftInfo]
+sqlListDrafts conn = do
+    rows <- query_ conn
+        "SELECT draft_id, date_from, date_to, created_at FROM drafts ORDER BY created_at"
+        :: IO [(Int, String, String, String)]
+    return [DraftInfo did (textToDay df) (textToDay dt) ts
+           | (did, df, dt, ts) <- rows]
+
+-- | Get a single draft by id.
+sqlGetDraft :: Connection -> Int -> IO (Maybe DraftInfo)
+sqlGetDraft conn draftId = do
+    rows <- query conn
+        "SELECT draft_id, date_from, date_to, created_at FROM drafts WHERE draft_id = ?"
+        (Only draftId)
+        :: IO [(Int, String, String, String)]
+    return $ case rows of
+        [(did, df, dt, ts)] -> Just (DraftInfo did (textToDay df) (textToDay dt) ts)
+        _                   -> Nothing
+
+-- | Check if a date range overlaps any existing draft.
+sqlCheckDraftOverlap :: Connection -> Day -> Day -> IO Bool
+sqlCheckDraftOverlap conn dateFrom dateTo = do
+    rows <- query conn
+        "SELECT 1 FROM drafts WHERE date_from <= ? AND date_to >= ?"
+        (dayToText dateTo, dayToText dateFrom)
+        :: IO [Only Int]
+    return (not (null rows))
+
+-- | Save assignments for a draft (delete existing, insert new).
+sqlSaveDraftAssignments :: Connection -> Int -> Schedule -> IO ()
+sqlSaveDraftAssignments conn draftId (Schedule assignments) = withTransaction conn $ do
+    execute conn "DELETE FROM draft_assignments WHERE draft_id = ?" (Only draftId)
+    mapM_ (\a -> do
+        let WorkerId wid = assignWorker a
+            StationId sid = assignStation a
+            s = assignSlot a
+        execute conn
+            "INSERT INTO draft_assignments \
+            \(draft_id, worker_id, station_id, slot_date, slot_start, slot_duration_seconds) \
+            \VALUES (?, ?, ?, ?, ?, ?)"
+            (draftId, wid, sid, dayToText (slotDate s), todToText (slotStart s),
+             diffTimeToSeconds (slotDuration s))
+        ) (Set.toList assignments)
+
+-- | Load assignments for a draft as a Schedule.
+sqlLoadDraftAssignments :: Connection -> Int -> IO Schedule
+sqlLoadDraftAssignments conn draftId = do
+    rows <- query conn
+        "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
+        \FROM draft_assignments WHERE draft_id = ?"
+        (Only draftId)
+        :: IO [(Int, Int, String, String, Int)]
+    let as = Set.fromList
+            [Assignment (WorkerId w) (StationId st)
+                (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
+            | (w, st, d, t, dur) <- rows]
+    return (Schedule as)
 
 -- =====================================================================
 -- Checkpoint (SQLite savepoints)
