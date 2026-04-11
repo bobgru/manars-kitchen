@@ -231,6 +231,13 @@ absence approve 1
 # === Scheduler Config ===
 config show
 
+# === Pay Periods ===
+# Configure biweekly pay periods anchored to the first demo week.
+# The scheduler uses this to compute per-period hour limits:
+#   Period 1: Apr 6–19 (weeks 1–2), Period 2: Apr 20–May 3 (weeks 3–4)
+config set-pay-period biweekly 2026-04-06
+config show-pay-period
+
 # === Seniority ===
 # Marco (W2) and Alex (W12) are experienced: seniority level 2
 worker set-seniority 2 2
