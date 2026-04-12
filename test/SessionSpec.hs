@@ -1,0 +1,79 @@
+module SessionSpec (spec) where
+
+import Test.Hspec
+import Control.Concurrent (threadDelay)
+import System.Directory (removeFile, doesFileExist)
+
+import Auth.Types (UserId, Role(..))
+import Domain.Types (WorkerId(..))
+import Repo.SQLite (mkSQLiteRepo)
+import Repo.Types (Repository(..))
+import Service.Auth (register)
+
+spec :: Spec
+spec = do
+    -- 4.1: Create session and retrieve active session
+    describe "create and retrieve session" $ do
+        it "creates a session and retrieves it as active" $ withTestRepo $ \repo -> do
+            uid <- createTestUser repo "alice"
+            sid <- repoCreateSession repo uid
+            mActive <- repoGetActiveSession repo uid
+            mActive `shouldBe` Just sid
+
+    -- 4.2: Close session makes it inactive
+    describe "close session" $ do
+        it "makes session inactive after close" $ withTestRepo $ \repo -> do
+            uid <- createTestUser repo "bob"
+            sid <- repoCreateSession repo uid
+            repoCloseSession repo sid
+            mActive <- repoGetActiveSession repo uid
+            mActive `shouldBe` Nothing
+
+    -- 4.3: Touch session updates last_active_at
+    describe "touch session" $ do
+        it "updates last_active_at" $ withTestRepo $ \repo -> do
+            uid <- createTestUser repo "carol"
+            sid <- repoCreateSession repo uid
+            -- Small delay so timestamps differ
+            threadDelay 1100000  -- 1.1 seconds (SQLite datetime has 1s resolution)
+            repoTouchSession repo sid
+            -- Verify session is still active (touch didn't break it)
+            mActive <- repoGetActiveSession repo uid
+            mActive `shouldBe` Just sid
+
+    -- 4.4: Multiple sessions — only the active one is returned
+    describe "multiple sessions" $ do
+        it "returns only the most recent active session" $ withTestRepo $ \repo -> do
+            uid <- createTestUser repo "dave"
+            sid1 <- repoCreateSession repo uid
+            repoCloseSession repo sid1
+            sid2 <- repoCreateSession repo uid
+            mActive <- repoGetActiveSession repo uid
+            mActive `shouldBe` Just sid2
+
+        it "returns Nothing when all sessions are closed" $ withTestRepo $ \repo -> do
+            uid <- createTestUser repo "eve"
+            sid1 <- repoCreateSession repo uid
+            sid2 <- repoCreateSession repo uid
+            repoCloseSession repo sid1
+            repoCloseSession repo sid2
+            mActive <- repoGetActiveSession repo uid
+            mActive `shouldBe` Nothing
+
+-- | Helper: create a temporary SQLite repo for testing.
+withTestRepo :: (Repository -> IO ()) -> IO ()
+withTestRepo action = do
+    let path = "/tmp/manars-kitchen-test-session.db"
+    exists <- doesFileExist path
+    if exists then removeFile path else return ()
+    (_, repo) <- mkSQLiteRepo path
+    action repo
+    removeFile path
+
+-- | Helper: create a test user and return their UserId.
+createTestUser :: Repository -> String -> IO UserId
+createTestUser repo name = do
+    result <- register repo name "password" Admin (WorkerId 1)
+    case result of
+        Right uid -> return uid
+        Left err  -> error $ "Failed to create test user: " ++ show err

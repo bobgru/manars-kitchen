@@ -3,6 +3,7 @@ module Repo.Types
     , CalendarCommit(..)
     , DraftInfo(..)
     , AuditEntry(..)
+    , SessionId(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
@@ -17,6 +18,10 @@ import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Pin (PinnedAssignment)
 import Domain.PayPeriod (PayPeriodConfig)
+
+-- | Opaque session identifier.
+newtype SessionId = SessionId Int
+    deriving (Eq, Ord, Show)
 
 -- | Metadata for a draft session.
 data DraftInfo = DraftInfo
@@ -205,4 +210,16 @@ data Repository = Repository
       -- ^ Release (commit) a savepoint
     , repoRollbackTo     :: String -> IO ()
       -- ^ Rollback to a savepoint (savepoint remains active)
+
+      -- ---------------------------------------------------------------
+      -- Sessions
+      -- ---------------------------------------------------------------
+    , repoCreateSession     :: UserId -> IO SessionId
+      -- ^ Create a new active session for a user
+    , repoGetActiveSession  :: UserId -> IO (Maybe SessionId)
+      -- ^ Get the active session for a user, if any
+    , repoTouchSession      :: SessionId -> IO ()
+      -- ^ Update last_active_at to current time
+    , repoCloseSession      :: SessionId -> IO ()
+      -- ^ Mark a session as inactive
     }

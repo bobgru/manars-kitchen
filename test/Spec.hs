@@ -22,6 +22,7 @@ import qualified DraftValidationSpec
 import qualified FreezeLineSpec
 import qualified HintIntegrationSpec
 import qualified AuditSpec
+import qualified SessionSpec
 
 main :: IO ()
 main = hspec $ do
@@ -45,3 +46,4 @@ main = hspec $ do
     describe "FreezeLine"           FreezeLineSpec.spec
     describe "HintIntegration"     HintIntegrationSpec.spec
     describe "Audit"               AuditSpec.spec
+    describe "Session"             SessionSpec.spec

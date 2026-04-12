@@ -36,7 +36,7 @@ import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..))
 import qualified Audit.CommandMeta as Meta
 import Service.Auth (AuthError(..), register, changePassword)
 import qualified Service.Worker as SW
@@ -59,6 +59,7 @@ import CLI.Resolve
 data AppState = AppState
     { asRepo       :: !Repository
     , asUser       :: !User
+    , asSessionId  :: !SessionId
     , asContext    :: !(IORef SessionContext)
     , asCheckpoints :: !(IORef [String])
     , asUnfreezes  :: !(IORef (Set.Set (Day, Day)))
@@ -66,13 +67,13 @@ data AppState = AppState
     }
 
 -- | Create an AppState with initialized IORefs.
-mkAppState :: Repository -> User -> IO AppState
-mkAppState repo user = do
+mkAppState :: Repository -> User -> SessionId -> IO AppState
+mkAppState repo user sid = do
     ctxRef <- newIORef emptyContext
     cpRef  <- newIORef []
     ufRef  <- newIORef Set.empty
     hsRef  <- newIORef Nothing
-    return (AppState repo user ctxRef cpRef ufRef hsRef)
+    return (AppState repo user sid ctxRef cpRef ufRef hsRef)
 
 runRepl :: AppState -> IO ()
 runRepl st = do
@@ -83,7 +84,9 @@ runRepl st = do
     line <- getLine
     -- Quick-parse for commands that don't need resolution
     case parseCommand line of
-        Quit -> putStrLn "Goodbye."
+        Quit -> do
+            repoCloseSession (asRepo st) (asSessionId st)
+            putStrLn "Goodbye."
         Help -> printHelpSummary (userRole (asUser st)) >> runRepl st
         HelpGroup g -> printHelpGroup (userRole (asUser st)) g >> runRepl st
         CmdUse typ ref -> handleUse st typ ref >> runRepl st
@@ -101,8 +104,9 @@ runRepl st = do
                 Left err -> putStrLn err >> runRepl st
                 Right resolvedLine -> do
                     let cmd = parseCommand resolvedLine
-                    when (isMutating cmd) $
+                    when (isMutating cmd) $ do
                         repoLogCommand (asRepo st) uname line  -- log original input
+                        repoTouchSession (asRepo st) (asSessionId st)
                     handleCommand st cmd
                     -- Clear hint session if a mutating command ran
                     when (isMutating cmd) $ do
@@ -1689,7 +1693,8 @@ runDemo repo delayUs cmdLines = do
     case mUser of
         Nothing -> putStrLn "ERROR: admin user not found after creation"
         Just adminUser -> do
-            st <- mkAppState repo adminUser
+            demoSid <- repoCreateSession repo (userId adminUser)
+            st <- mkAppState repo adminUser demoSid
             let entries = [("", "", c) | c <- cmdLines]
                 opts = ReplayOpts delayUs (delayUs > 0)
             replayCommands opts st entries

@@ -107,6 +107,7 @@ test-suite manars-kitchen-test
                      , FreezeLineSpec
                      , HintIntegrationSpec
                      , AuditSpec
+                     , SessionSpec
                      , CLI.Commands
                      , CLI.Display
                      , CLI.Resolve

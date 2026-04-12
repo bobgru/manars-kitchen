@@ -9,7 +9,7 @@ import Data.Time.Format (formatTime, defaultTimeLocale)
 import Auth.Types (User(..), Username(..), Role(..))
 import Domain.Types (WorkerId(..))
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..))
+import Repo.Types (Repository(..), SessionId(..))
 import Service.Auth (register, login)
 import CLI.App (mkAppState, runRepl, runDemo)
 
@@ -30,7 +30,8 @@ main = do
             (_conn, repo) <- mkSQLiteRepo dbPath
             ensureAdminExists repo
             user <- loginLoop repo
-            st <- mkAppState repo user
+            sid <- resolveSession repo user
+            st <- mkAppState repo user sid
             runRepl st
 
 -- | Parse all flags from args in any order.
@@ -87,6 +88,25 @@ printUsage = do
     putStrLn "  DATABASE            SQLite database path (default: run-db/manars-kitchen.db)"
     putStrLn ""
     putStrLn "Type 'help' at the REPL prompt for available commands."
+
+-- | Check for an existing active session and let the user resume or start fresh.
+resolveSession :: Repository -> User -> IO SessionId
+resolveSession repo user = do
+    let uid = userId user
+    mExisting <- repoGetActiveSession repo uid
+    case mExisting of
+        Nothing -> repoCreateSession repo uid
+        Just existingSid -> do
+            putStr "Active session found. Resume? [Y/n] "
+            hFlush stdout
+            answer <- getLine
+            if answer `elem` ["n", "N", "no", "No"]
+                then do
+                    repoCloseSession repo existingSid
+                    repoCreateSession repo uid
+                else do
+                    repoTouchSession repo existingSid
+                    return existingSid
 
 loginLoop :: Repository -> IO User
 loginLoop repo = do

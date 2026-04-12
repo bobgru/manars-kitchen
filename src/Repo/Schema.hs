@@ -271,6 +271,15 @@ statements =
       \  period_type TEXT NOT NULL,\
       \  anchor_date TEXT NOT NULL\
       \)"
+
+      -- Sessions (server-side session lifecycle)
+    , "CREATE TABLE IF NOT EXISTS sessions (\
+      \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      \  user_id INTEGER NOT NULL,\
+      \  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
+      \  last_active_at TEXT NOT NULL DEFAULT (datetime('now')),\
+      \  is_active INTEGER NOT NULL DEFAULT 1\
+      \)"
     ]
 
 -- | Idempotent migrations for schema evolution.

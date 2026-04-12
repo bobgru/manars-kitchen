@@ -27,7 +27,7 @@ import Domain.Absence
     , AbsenceRequest(..), AbsenceContext(..)
     )
 import Data.Time (Day)
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..))
 import Repo.Schema (initSchema)
 import Repo.Serialize
 import Audit.CommandMeta (classify, CommandMeta(..))
@@ -94,6 +94,10 @@ mkSQLiteRepo path = do
         , repoSavepoint      = sqlSavepoint conn
         , repoRelease        = sqlRelease conn
         , repoRollbackTo     = sqlRollbackTo conn
+        , repoCreateSession    = sqlCreateSession conn
+        , repoGetActiveSession = sqlGetActiveSession conn
+        , repoTouchSession     = sqlTouchSession conn
+        , repoCloseSession     = sqlCloseSession conn
         })
 
 -- =====================================================================
@@ -1070,6 +1074,39 @@ sqlRollbackTo conn name =
 -- | Basic sanitization: remove quotes to prevent SQL injection.
 sanitize :: String -> String
 sanitize = filter (/= '"')
+
+-- =====================================================================
+-- Sessions
+-- =====================================================================
+
+sqlCreateSession :: Connection -> UserId -> IO SessionId
+sqlCreateSession conn (UserId uid) = do
+    execute conn "INSERT INTO sessions (user_id) VALUES (?)" (Only uid)
+    sid <- lastInsertRowId conn
+    return (SessionId (fromIntegral sid))
+
+sqlGetActiveSession :: Connection -> UserId -> IO (Maybe SessionId)
+sqlGetActiveSession conn (UserId uid) = do
+    rows <- query conn
+        "SELECT id FROM sessions WHERE user_id = ? AND is_active = 1 \
+        \ORDER BY id DESC LIMIT 1"
+        (Only uid)
+        :: IO [Only Int]
+    return $ case rows of
+        [Only sid] -> Just (SessionId sid)
+        _          -> Nothing
+
+sqlTouchSession :: Connection -> SessionId -> IO ()
+sqlTouchSession conn (SessionId sid) =
+    execute conn
+        "UPDATE sessions SET last_active_at = datetime('now') WHERE id = ?"
+        (Only sid)
+
+sqlCloseSession :: Connection -> SessionId -> IO ()
+sqlCloseSession conn (SessionId sid) =
+    execute conn
+        "UPDATE sessions SET is_active = 0 WHERE id = ?"
+        (Only sid)
 
 parseDow :: String -> DayOfWeek
 parseDow "monday"    = Monday
