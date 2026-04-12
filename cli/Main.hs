@@ -6,12 +6,14 @@ import System.Exit (exitFailure)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 
-import Auth.Types (User(..), Username(..), Role(..))
+import Auth.Types (User(..), UserId(..), Username(..), Role(..))
 import Domain.Types (WorkerId(..))
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), SessionId(..))
 import Service.Auth (register, login)
 import CLI.App (mkAppState, runRepl, runDemo)
+import CLI.Commands (Command(..), parseCommand)
+import CLI.RpcClient (RpcEnv(..), mkRpcEnv, dispatchCommand)
 
 main :: IO ()
 main = do
@@ -22,8 +24,9 @@ main = do
         ["-h"]           -> printUsage
         ["--demo", file] -> demoFromFile demoDelay file
         ["--demo"]       -> demoFromFile demoDelay "demo/restaurant-setup.txt"
+        ("--remote" : url : remoteRest) -> runRemoteMode url remoteRest
         _ -> do
-            let dbPath = case args of
+            let dbPath = case rest of
                     [p] -> p
                     _   -> "run-db/manars-kitchen.db"
             putStrLn $ "Using database: " ++ dbPath
@@ -74,12 +77,43 @@ ensureAdminExists repo = do
                     exitFailure
         _ -> return ()
 
+-- | Remote mode: authenticate locally, then dispatch commands via RPC.
+runRemoteMode :: String -> [String] -> IO ()
+runRemoteMode url rest = do
+    let dbPath = case rest of
+            [p] -> p
+            _   -> "run-db/manars-kitchen.db"
+    putStrLn $ "Remote mode: " ++ url
+    putStrLn $ "Using local database for login: " ++ dbPath
+    (_conn, repo) <- mkSQLiteRepo dbPath
+    ensureAdminExists repo
+    user <- loginLoop repo
+    let UserId uid = userId user
+    rpcEnv <- mkRpcEnv url uid 0 (userRole user)
+    remoteRepl rpcEnv user
+
+-- | REPL loop in remote mode: read command, dispatch via RPC.
+remoteRepl :: RpcEnv -> User -> IO ()
+remoteRepl env user = do
+    let Username uname = userName user
+        role = if userRole user == Admin then "admin" else "user"
+    putStr (uname ++ " [" ++ role ++ " remote]> ")
+    hFlush stdout
+    line <- getLine
+    let cmd = parseCommand line
+    case cmd of
+        Quit -> putStrLn "Goodbye."
+        _    -> do
+            dispatchCommand env cmd
+            remoteRepl env user
+
 printUsage :: IO ()
 printUsage = do
     putStrLn "Usage: manars-cli [OPTIONS] [DATABASE]"
     putStrLn ""
     putStrLn "Options:"
     putStrLn "  --help, -h          Show this help message"
+    putStrLn "  --remote <url>      Connect to a remote server (e.g., http://localhost:8080)"
     putStrLn "  --demo [FILE]       Run demo (default: demo/restaurant-setup.txt)"
     putStrLn "  --no-delay          Skip delay between demo commands"
     putStrLn "  --delay <ms>        Set demo delay in milliseconds (default: 500)"

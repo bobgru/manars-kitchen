@@ -15,6 +15,7 @@ extra-source-files:  README.md
 
 library
   hs-source-dirs:      src
+                     , server
   exposed-modules:     Domain.Types
                      , Domain.Schedule
                      , Domain.Transaction
@@ -50,6 +51,11 @@ library
                      , Service.HintRebase
                      , Audit.CommandMeta
                      , Export.JSON
+                     , Server.Api
+                     , Server.Error
+                     , Server.Handlers
+                     , Server.Json
+                     , Server.Rpc
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , containers
@@ -64,6 +70,10 @@ library
                      , aeson
                      , aeson-pretty
                      , text
+                     , servant
+                     , servant-server
+                     , wai
+                     , http-types
   ghc-options:         -Wall
                        -Wcompat
                        -Widentities
@@ -88,6 +98,7 @@ executable manars-cli
                      , CLI.Commands
                      , CLI.Display
                      , CLI.Resolve
+                     , CLI.RpcClient
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
@@ -95,6 +106,11 @@ executable manars-cli
                      , time
                      , bytestring
                      , aeson
+                     , servant
+                     , servant-client
+                     , http-client
+                     , http-types
+                     , text
   ghc-options:         -Wall
                        -Wcompat
 
@@ -102,7 +118,6 @@ test-suite manars-kitchen-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
                      , cli
-                     , server
   main-is:             Spec.hs
   other-modules:       CalendarSpec
                      , DraftSpec
@@ -119,10 +134,7 @@ test-suite manars-kitchen-test
                      , CLI.Display
                      , CLI.Resolve
                      , CLI.App
-                     , Server.Api
-                     , Server.Json
-                     , Server.Handlers
-                     , Server.Error
+                     , CLI.RpcClient
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
@@ -143,25 +155,13 @@ test-suite manars-kitchen-test
                        -Wcompat
 
 executable manars-server
-  hs-source-dirs:      server
+  hs-source-dirs:      server-app
   main-is:             Main.hs
-  other-modules:       Server.Api
-                     , Server.Json
-                     , Server.Handlers
-                     , Server.Error
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
-                     , servant
                      , servant-server
                      , warp
-                     , wai
-                     , aeson
-                     , text
-                     , containers
-                     , time
-                     , bytestring
-                     , http-types
   ghc-options:         -Wall
                        -Wcompat
 

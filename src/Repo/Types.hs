@@ -167,7 +167,9 @@ data Repository = Repository
       -- Audit log
       -- ---------------------------------------------------------------
     , repoLogCommand     :: String -> String -> IO ()
-      -- ^ username, command string
+      -- ^ username, command string (source='cli')
+    , repoLogRpcCommand  :: String -> String -> IO ()
+      -- ^ username, command string (source='rpc')
     , repoGetAuditLog    :: IO [AuditEntry]
       -- ^ returns structured audit entries
     , repoWipeAll        :: IO ()

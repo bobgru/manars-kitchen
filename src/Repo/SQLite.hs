@@ -79,6 +79,7 @@ mkSQLiteRepo path = do
         , repoSavePins       = sqlSavePins conn
         , repoLoadPins       = sqlLoadPins conn
         , repoLogCommand     = sqlLogCommand conn
+        , repoLogRpcCommand  = sqlLogRpcCommand conn
         , repoGetAuditLog    = sqlGetAuditLog conn
         , repoWipeAll        = sqlWipeAll conn
         , repoSaveCalendar   = sqlSaveCalendar conn
@@ -662,6 +663,21 @@ sqlLogCommand conn username command =
         "INSERT INTO audit_log (username, command, entity_type, operation, \
         \entity_id, target_id, date_from, date_to, is_mutation, params, source) \
         \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cli')"
+        ( username, command
+        , cmEntityType meta, cmOperation meta
+        , cmEntityId meta, cmTargetId meta
+        , cmDateFrom meta, cmDateTo meta
+        , mut, cmParams meta
+        )
+
+sqlLogRpcCommand :: Connection -> String -> String -> IO ()
+sqlLogRpcCommand conn username command =
+    let meta = classify command
+        mut  = if cmIsMutation meta then (1 :: Int) else 0
+    in execute conn
+        "INSERT INTO audit_log (username, command, entity_type, operation, \
+        \entity_id, target_id, date_from, date_to, is_mutation, params, source) \
+        \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rpc')"
         ( username, command
         , cmEntityType meta, cmOperation meta
         , cmEntityId meta, cmTargetId meta

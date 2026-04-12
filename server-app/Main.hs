@@ -5,8 +5,9 @@ import Servant (serve)
 import System.Environment (getArgs)
 
 import Repo.SQLite (mkSQLiteRepo)
-import Server.Api (api)
-import Server.Handlers (server)
+import Server.Api (fullApi)
+import Server.Handlers (fullServer)
+import Server.Rpc (sessionMiddleware)
 
 main :: IO ()
 main = do
@@ -15,7 +16,7 @@ main = do
     putStrLn $ "Database: " ++ dbPath
     putStrLn $ "Listening on port " ++ show port
     (_conn, repo) <- mkSQLiteRepo dbPath
-    run port (serve api (server repo))
+    run port (sessionMiddleware repo $ serve fullApi (fullServer repo))
 
 parseArgs :: [String] -> (String, Int)
 parseArgs []     = ("run-db/manars-kitchen.db", 8080)
