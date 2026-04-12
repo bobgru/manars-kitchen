@@ -396,6 +396,7 @@ classifyWhatIf op rest = case op of
     "revert"     -> nonMutating etWhatIf "revert"
     "revert-all" -> nonMutating etWhatIf "revert-all"
     "list"       -> nonMutating etWhatIf "list"
+    "rebase"     -> nonMutating etWhatIf "rebase"
     _ -> nonMutating etWhatIf op
 
 -- =====================================================================

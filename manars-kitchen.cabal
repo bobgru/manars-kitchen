@@ -47,6 +47,7 @@ library
                      , Service.DraftValidation
                      , Service.FreezeLine
                      , Service.PubSub
+                     , Service.HintRebase
                      , Audit.CommandMeta
                      , Export.JSON
   default-language:    Haskell2010
@@ -107,6 +108,8 @@ test-suite manars-kitchen-test
                      , DraftValidationSpec
                      , FreezeLineSpec
                      , HintIntegrationSpec
+                     , HintSessionSpec
+                     , HintE2ESpec
                      , AuditSpec
                      , SessionSpec
                      , PubSubSpec

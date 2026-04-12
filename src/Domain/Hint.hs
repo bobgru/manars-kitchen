@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Domain.Hint
     ( -- * Types
       Hint(..)
@@ -10,6 +11,9 @@ module Domain.Hint
     , sessionStep
       -- * Hint application
     , applyHints
+      -- * JSON
+    , encodeHints
+    , decodeHints
       -- * Tests
     , spec
     ) where
@@ -17,8 +21,13 @@ module Domain.Hint
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Time (Day, TimeOfDay(..), fromGregorian)
+import Data.Time (Day, TimeOfDay(..), fromGregorian, toGregorian, fromGregorianValid)
+import Data.Time.Clock (secondsToDiffTime)
 import Test.Hspec
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
+import Data.Aeson.Types (Parser)
+import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Lazy as BL
 
 import Domain.Types
 import Domain.Schedule (assign, byWorker, byWorkerSlot)
@@ -52,6 +61,113 @@ data Hint
     | OverridePreference !WorkerId ![StationId]
       -- ^ Replace a worker's station preferences.
     deriving (Eq, Ord, Show)
+
+-- ---------------------------------------------------------------------
+-- JSON serialization
+-- ---------------------------------------------------------------------
+
+instance ToJSON Hint where
+    toJSON (CloseStation (StationId sid) slot) = object
+        [ "tag" .= ("CloseStation" :: String)
+        , "stationId" .= sid
+        , "day" .= formatDay (slotDate slot)
+        , "hour" .= let TimeOfDay h _ _ = slotStart slot in h
+        , "duration" .= diffTimeToInt (slotDuration slot)
+        ]
+    toJSON (PinAssignment (WorkerId wid) (StationId sid) slot) = object
+        [ "tag" .= ("PinAssignment" :: String)
+        , "workerId" .= wid
+        , "stationId" .= sid
+        , "day" .= formatDay (slotDate slot)
+        , "hour" .= let TimeOfDay h _ _ = slotStart slot in h
+        , "duration" .= diffTimeToInt (slotDuration slot)
+        ]
+    toJSON (AddWorker (WorkerId wid) skills mLimit) = object $
+        [ "tag" .= ("AddWorker" :: String)
+        , "workerId" .= wid
+        , "skillIds" .= [s | SkillId s <- Set.toList skills]
+        ] ++ maybe [] (\d -> ["hourLimit" .= diffTimeToInt d]) mLimit
+    toJSON (WaiveOvertime (WorkerId wid)) = object
+        [ "tag" .= ("WaiveOvertime" :: String)
+        , "workerId" .= wid
+        ]
+    toJSON (GrantSkill (WorkerId wid) (SkillId sid)) = object
+        [ "tag" .= ("GrantSkill" :: String)
+        , "workerId" .= wid
+        , "skillId" .= sid
+        ]
+    toJSON (OverridePreference (WorkerId wid) sids) = object
+        [ "tag" .= ("OverridePreference" :: String)
+        , "workerId" .= wid
+        , "stationIds" .= [s | StationId s <- sids]
+        ]
+
+instance FromJSON Hint where
+    parseJSON = withObject "Hint" $ \v -> do
+        tag <- v .: "tag" :: Parser String
+        case tag of
+            "CloseStation" -> do
+                sid <- v .: "stationId"
+                dayStr <- v .: "day"
+                hr <- v .: "hour"
+                dur <- v .: "duration"
+                day <- parseDay' dayStr
+                return $ CloseStation (StationId sid) (Slot day (TimeOfDay hr 0 0) (secondsToDiffTime dur))
+            "PinAssignment" -> do
+                wid <- v .: "workerId"
+                sid <- v .: "stationId"
+                dayStr <- v .: "day"
+                hr <- v .: "hour"
+                dur <- v .: "duration"
+                day <- parseDay' dayStr
+                return $ PinAssignment (WorkerId wid) (StationId sid) (Slot day (TimeOfDay hr 0 0) (secondsToDiffTime dur))
+            "AddWorker" -> do
+                wid <- v .: "workerId"
+                sids <- v .: "skillIds"
+                mLimit <- v .:? "hourLimit"
+                return $ AddWorker (WorkerId wid) (Set.fromList (map SkillId sids)) (fmap secondsToDiffTime mLimit)
+            "WaiveOvertime" -> do
+                wid <- v .: "workerId"
+                return $ WaiveOvertime (WorkerId wid)
+            "GrantSkill" -> do
+                wid <- v .: "workerId"
+                sid <- v .: "skillId"
+                return $ GrantSkill (WorkerId wid) (SkillId sid)
+            "OverridePreference" -> do
+                wid <- v .: "workerId"
+                sids <- v .: "stationIds"
+                return $ OverridePreference (WorkerId wid) (map StationId sids)
+            _ -> fail ("Unknown hint tag: " ++ tag)
+
+-- | Parse a YYYY-MM-DD string into a Day.
+parseDay' :: MonadFail m => String -> m Day
+parseDay' s = case splitDate s of
+    Just (y, m, d) -> case fromGregorianValid y m d of
+        Just day -> return day
+        Nothing  -> fail ("Invalid date: " ++ s)
+    Nothing -> fail ("Invalid date format: " ++ s)
+  where
+    splitDate str = case break (== '-') str of
+        (yy, '-':rest) -> case break (== '-') rest of
+            (mm, '-':dd) -> Just (read yy, read mm, read dd)
+            _            -> Nothing
+        _ -> Nothing
+
+formatDay :: Day -> String
+formatDay d = let (y, m, dd) = toGregorian d
+              in show y ++ "-" ++ pad2 m ++ "-" ++ pad2 dd
+  where pad2 n = if n < 10 then "0" ++ show n else show n
+
+diffTimeToInt :: DiffTime -> Integer
+diffTimeToInt dt = round (realToFrac dt :: Double)
+
+-- | Encode a hint list to JSON bytes.
+encodeHints :: [Hint] -> BL.ByteString
+encodeHints = Aeson.encode
+
+-- | Decode a hint list from JSON bytes. Returns Nothing on parse failure.
+decodeHints :: BL.ByteString -> Maybe [Hint]
+decodeHints = Aeson.decode
 
 -- | An interactive scheduling session.
 -- The original context is preserved; hints are accumulated and
@@ -396,3 +512,41 @@ spec = do
                                           && assignSlot a == hTuesdaySlot) (unSchedule sched)
             Set.size grillMon `shouldBe` 0
             Set.size grillTue `shouldSatisfy` (>= 1)
+
+    describe "JSON round-trip" $ do
+        let roundTrip hints =
+                let encoded = encodeHints hints
+                in decodeHints encoded `shouldBe` Just hints
+
+        it "CloseStation round-trips" $
+            roundTrip [CloseStation hst_grill hMondaySlot]
+
+        it "PinAssignment round-trips" $
+            roundTrip [PinAssignment hw_alice hst_grill hMondaySlot]
+
+        it "AddWorker round-trips (with hour limit)" $
+            roundTrip [AddWorker hw_temp (Set.fromList [hsk_cooking, hsk_prep]) (Just (40 * 3600))]
+
+        it "AddWorker round-trips (no hour limit)" $
+            roundTrip [AddWorker hw_temp (Set.singleton hsk_cooking) Nothing]
+
+        it "WaiveOvertime round-trips" $
+            roundTrip [WaiveOvertime hw_bob]
+
+        it "GrantSkill round-trips" $
+            roundTrip [GrantSkill hw_carol hsk_cooking]
+
+        it "OverridePreference round-trips" $
+            roundTrip [OverridePreference hw_alice [hst_grill, hst_prep_table]]
+
+        it "mixed hint list round-trips" $
+            roundTrip [ CloseStation hst_grill hMondaySlot
+                      , PinAssignment hw_bob hst_prep_table hTuesdaySlot
+                      , AddWorker hw_temp (Set.singleton hsk_cooking) (Just (20 * 3600))
+                      , WaiveOvertime hw_alice
+                      , GrantSkill hw_carol hsk_management
+                      , OverridePreference hw_bob [hst_grill]
+                      ]
+
+        it "empty list round-trips" $
+            roundTrip []

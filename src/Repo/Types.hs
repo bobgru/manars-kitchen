@@ -4,6 +4,7 @@ module Repo.Types
     , DraftInfo(..)
     , AuditEntry(..)
     , SessionId(..)
+    , HintSessionRecord(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
@@ -18,6 +19,7 @@ import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Pin (PinnedAssignment)
 import Domain.PayPeriod (PayPeriodConfig)
+import Domain.Hint (Hint)
 
 -- | Opaque session identifier.
 newtype SessionId = SessionId Int
@@ -56,6 +58,12 @@ data AuditEntry = AuditEntry
     , aeIsMutation :: !Bool
     , aeParams     :: !(Maybe String)
     , aeSource     :: !String
+    } deriving (Show, Eq)
+
+-- | Persisted hint session (hints + audit checkpoint).
+data HintSessionRecord = HintSessionRecord
+    { hsHints      :: ![Hint]
+    , hsCheckpoint :: !Int        -- ^ audit_log.id of last-seen entry
     } deriving (Show, Eq)
 
 -- | Record-of-functions abstracting over storage backend.
@@ -222,4 +230,20 @@ data Repository = Repository
       -- ^ Update last_active_at to current time
     , repoCloseSession      :: SessionId -> IO ()
       -- ^ Mark a session as inactive
+
+      -- ---------------------------------------------------------------
+      -- Hint sessions (persistent what-if)
+      -- ---------------------------------------------------------------
+    , repoSaveHintSession   :: SessionId -> Int -> [Hint] -> Int -> IO ()
+      -- ^ session_id, draft_id, hints, checkpoint — upsert
+    , repoLoadHintSession   :: SessionId -> Int -> IO (Maybe HintSessionRecord)
+      -- ^ session_id, draft_id -> Maybe (hints, checkpoint)
+    , repoDeleteHintSession :: SessionId -> Int -> IO ()
+      -- ^ session_id, draft_id — delete (no-op if absent)
+
+      -- ---------------------------------------------------------------
+      -- Audit log (extended queries)
+      -- ---------------------------------------------------------------
+    , repoAuditSince        :: Int -> IO [AuditEntry]
+      -- ^ Return mutating audit entries with id > checkpoint, ordered by id asc
     }

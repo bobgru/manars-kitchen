@@ -27,7 +27,11 @@ import Domain.Absence
     , AbsenceRequest(..), AbsenceContext(..)
     )
 import Data.Time (Day)
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
+import Domain.Hint (Hint, encodeHints, decodeHints)
+import qualified Data.ByteString.Lazy as BL
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import qualified Data.Text as T
 import Repo.Schema (initSchema)
 import Repo.Serialize
 import Audit.CommandMeta (classify, CommandMeta(..))
@@ -98,6 +102,10 @@ mkSQLiteRepo path = do
         , repoGetActiveSession = sqlGetActiveSession conn
         , repoTouchSession     = sqlTouchSession conn
         , repoCloseSession     = sqlCloseSession conn
+        , repoSaveHintSession   = sqlSaveHintSession conn
+        , repoLoadHintSession   = sqlLoadHintSession conn
+        , repoDeleteHintSession = sqlDeleteHintSession conn
+        , repoAuditSince        = sqlAuditSince conn
         })
 
 -- =====================================================================
@@ -1107,6 +1115,75 @@ sqlCloseSession conn (SessionId sid) =
     execute conn
         "UPDATE sessions SET is_active = 0 WHERE id = ?"
         (Only sid)
+
+-- =====================================================================
+-- Hint sessions
+-- =====================================================================
+
+sqlSaveHintSession :: Connection -> SessionId -> Int -> [Hint] -> Int -> IO ()
+sqlSaveHintSession conn (SessionId sid) draftId hints checkpoint =
+    execute conn
+        "INSERT INTO hint_sessions (session_id, draft_id, hints_json, checkpoint, updated_at) \
+        \VALUES (?, ?, ?, ?, datetime('now')) \
+        \ON CONFLICT (session_id, draft_id) DO UPDATE SET \
+        \  hints_json = excluded.hints_json, \
+        \  checkpoint = excluded.checkpoint, \
+        \  updated_at = datetime('now')"
+        (sid, draftId, hintsText, checkpoint)
+  where
+    hintsText = T.unpack (decodeUtf8 (BL.toStrict (encodeHints hints)))
+
+sqlLoadHintSession :: Connection -> SessionId -> Int -> IO (Maybe HintSessionRecord)
+sqlLoadHintSession conn (SessionId sid) draftId = do
+    rows <- query conn
+        "SELECT hints_json, checkpoint FROM hint_sessions \
+        \WHERE session_id = ? AND draft_id = ?"
+        (sid, draftId)
+        :: IO [(String, Int)]
+    case rows of
+        [(json, cp)] -> case decodeHints (BL.fromStrict (encodeUtf8 (T.pack json))) of
+            Just hints -> return (Just (HintSessionRecord hints cp))
+            Nothing    -> return Nothing  -- deserialization failure
+        _ -> return Nothing
+
+sqlDeleteHintSession :: Connection -> SessionId -> Int -> IO ()
+sqlDeleteHintSession conn (SessionId sid) draftId =
+    execute conn
+        "DELETE FROM hint_sessions WHERE session_id = ? AND draft_id = ?"
+        (sid, draftId)
+
+-- =====================================================================
+-- Audit log (extended queries)
+-- =====================================================================
+
+sqlAuditSince :: Connection -> Int -> IO [AuditEntry]
+sqlAuditSince conn checkpoint = do
+    rows <- query conn
+        "SELECT id, timestamp, username, command, entity_type, operation, \
+        \entity_id, target_id, date_from, date_to, is_mutation, params, source \
+        \FROM audit_log WHERE id > ? AND is_mutation = 1 ORDER BY id ASC"
+        (Only checkpoint)
+        :: IO [(Int, String, String, Maybe String, Maybe String, Maybe String,
+                Maybe Int) :. (Maybe Int, Maybe String, Maybe String, Int, Maybe String, String)]
+    return [AuditEntry
+        { aeId         = i
+        , aeTimestamp  = ts
+        , aeUsername   = user
+        , aeCommand    = cmd
+        , aeEntityType = et
+        , aeOperation  = op
+        , aeEntityId   = eid
+        , aeTargetId   = tid
+        , aeDateFrom   = df
+        , aeDateTo     = dt
+        , aeIsMutation = mut /= (0 :: Int)
+        , aeParams     = ps
+        , aeSource     = src
+        } | (i, ts, user, cmd, et, op, eid) :. (tid, df, dt, mut, ps, src) <- rows]
+
+-- =====================================================================
+-- Helpers
+-- =====================================================================
 
 parseDow :: String -> DayOfWeek
 parseDow "monday"    = Monday

@@ -36,7 +36,8 @@ import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
+import Service.HintRebase (ChangeCategory(..), RebaseResult(..), classifyChange, rebaseSession)
 import qualified Audit.CommandMeta as Meta
 import Service.Auth (AuthError(..), register, changePassword)
 import qualified Service.Worker as SW
@@ -57,6 +58,14 @@ import CLI.Resolve
     , emptyContext, resolveInput, lookupByName, entityKindName
     )
 
+-- | Tracks hint session with persistence metadata.
+data HintState = HintState
+    { hstSess       :: !Session     -- ^ The live hint session
+    , hstDraftId    :: !Int         -- ^ Draft this session is tied to
+    , hstCheckpoint :: !Int         -- ^ Last-seen audit_log.id
+    , hstIsStale    :: !Bool        -- ^ True if a mutation happened since last rebase
+    } deriving (Show)
+
 data AppState = AppState
     { asRepo       :: !Repository
     , asUser       :: !User
@@ -64,7 +73,7 @@ data AppState = AppState
     , asContext    :: !(IORef SessionContext)
     , asCheckpoints :: !(IORef [String])
     , asUnfreezes  :: !(IORef (Set.Set (Day, Day)))
-    , asHintSession :: !(IORef (Maybe Session))
+    , asHintSession :: !(IORef (Maybe HintState))
     }
 
 -- | Create an AppState with initialized IORefs.
@@ -109,14 +118,18 @@ runRepl st = do
                         repoLogCommand (asRepo st) uname line  -- log original input
                         repoTouchSession (asRepo st) (asSessionId st)
                     handleCommand st cmd
-                    -- Clear hint session if a mutating command ran
+                    -- Mark hint session as stale if a mutating command ran
                     when (isMutating cmd) $ do
-                        mSess <- readIORef (asHintSession st)
-                        case mSess of
+                        mHs <- readIORef (asHintSession st)
+                        case mHs of
                             Nothing -> return ()
-                            Just _  -> do
-                                writeIORef (asHintSession st) Nothing
-                                putStrLn "Hint session cleared due to data change. Use what-if commands to start a new exploration."
+                            Just hs -> do
+                                cp <- getCurrentCheckpoint (asRepo st)
+                                let hs' = hs { hstCheckpoint = cp, hstIsStale = True }
+                                repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs)
+                                    (sessHints (hstSess hs)) cp
+                                writeIORef (asHintSession st) (Just hs')
+                                putStrLn "Hint session is stale due to data change. Run 'what-if rebase' to reconcile, or continue adding hints (rebase will run automatically)."
                     runRepl st
 
 -- | Commands that modify state and should be logged.
@@ -179,6 +192,7 @@ isMutating cmd = case cmd of
     WhatIfRevert           -> False
     WhatIfRevertAll        -> False
     WhatIfList             -> False
+    WhatIfRebase           -> False
     -- WhatIfApply is mutating (persists changes)
     CmdExport _           -> False
     CmdExportSchedule _ _ -> False
@@ -478,6 +492,37 @@ handleCommand st cmd = case cmd of
                 putStrLn ("  Date range: " ++ show (diDateFrom d) ++ " to " ++ show (diDateTo d))
                 putStrLn ("  Created at: " ++ diCreatedAt d)
                 putStrLn ("  Assignments: " ++ show (Set.size (unSchedule sched)))
+                -- Check for persisted hint session
+                mPersistedHs <- repoLoadHintSession (asRepo st) (asSessionId st) did
+                case mPersistedHs of
+                    Nothing -> return ()
+                    Just (HintSessionRecord hints cp) -> do
+                        let n = length hints
+                        putStr ("Found saved hint session (" ++ show n ++ " hints). Resume? [Y/n] ")
+                        hFlush stdout
+                        answer <- getLine
+                        if map toLower answer `elem` ["", "y", "yes"]
+                            then do
+                                -- Rebuild session with persisted hints
+                                rebuildResult <- buildSessionForDraft st did hints
+                                case rebuildResult of
+                                    Left err -> putStrLn ("Could not resume: " ++ err)
+                                    Right sess -> do
+                                        -- Check for stale entries
+                                        entries <- repoAuditSince (asRepo st) cp
+                                        let isStale = not (null entries)
+                                        let hs = HintState sess did cp isStale
+                                        writeIORef (asHintSession st) (Just hs)
+                                        if isStale
+                                            then do
+                                                putStrLn ("Resumed hint session with " ++ show n ++ " hints.")
+                                                putStrLn (show (length entries) ++ " changes since last save. Running rebase...")
+                                                _ <- runRebase st hs
+                                                return ()
+                                            else putStrLn ("Resumed hint session with " ++ show n ++ " hints.")
+                            else do
+                                repoDeleteHintSession (asRepo st) (asSessionId st) did
+                                putStrLn "Persisted hint session discarded."
 
     DraftView mDidStr -> do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -553,6 +598,12 @@ handleCommand st cmd = case cmd of
                     Left err  -> putStrLn ("Error: " ++ err)
                     Right ()  -> do
                         putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
+                        -- Clean up hint session for this draft
+                        repoDeleteHintSession (asRepo st) (asSessionId st) did
+                        mHs <- readIORef (asHintSession st)
+                        case mHs of
+                            Just hs | hstDraftId hs == did -> writeIORef (asHintSession st) Nothing
+                            _ -> return ()
                         -- Auto-refreeze: check if committed dates included historical dates
                         case mDraft of
                             Nothing -> return ()
@@ -575,7 +626,14 @@ handleCommand st cmd = case cmd of
                 result <- Draft.discardDraft (asRepo st) did
                 case result of
                     Left err  -> putStrLn ("Error: " ++ err)
-                    Right ()  -> putStrLn ("Draft #" ++ show did ++ " discarded.")
+                    Right ()  -> do
+                        putStrLn ("Draft #" ++ show did ++ " discarded.")
+                        -- Clean up hint session for this draft
+                        repoDeleteHintSession (asRepo st) (asSessionId st) did
+                        mHs <- readIORef (asHintSession st)
+                        case mHs of
+                            Just hs | hstDraftId hs == did -> writeIORef (asHintSession st) Nothing
+                            _ -> return ()
 
     DraftHours mDidStr -> do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -871,12 +929,14 @@ handleCommand st cmd = case cmd of
                 result <- getOrInitSession st
                 case result of
                     Left err -> putStrLn err
-                    Right sess -> do
+                    Right hs -> do
                         let slot = Slot day (TimeOfDay hr 0 0) 3600
                             hint = CloseStation (StationId sid) slot
+                            sess = hstSess hs
                             oldResult = sessResult sess
                             sess' = addHint hint sess
-                        writeIORef (asHintSession st) (Just sess')
+                            hs' = hs { hstSess = sess' }
+                        autoSaveHintSession st hs'
                         (wNames, sNames, _) <- loadNameMaps st
                         putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
@@ -887,12 +947,14 @@ handleCommand st cmd = case cmd of
                 result <- getOrInitSession st
                 case result of
                     Left err -> putStrLn err
-                    Right sess -> do
+                    Right hs -> do
                         let slot = Slot day (TimeOfDay hr 0 0) 3600
                             hint = PinAssignment (WorkerId wid) (StationId sid) slot
+                            sess = hstSess hs
                             oldResult = sessResult sess
                             sess' = addHint hint sess
-                        writeIORef (asHintSession st) (Just sess')
+                            hs' = hs { hstSess = sess' }
+                        autoSaveHintSession st hs'
                         (wNames, sNames, _) <- loadNameMaps st
                         putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
@@ -905,14 +967,16 @@ handleCommand st cmd = case cmd of
                 result <- getOrInitSession st
                 case result of
                     Left err -> putStrLn err
-                    Right sess -> do
-                        let sids = Set.fromList [SkillId (read s) | s <- sidStrs]
+                    Right hs -> do
+                        let sess = hstSess hs
+                            sids = Set.fromList [SkillId (read s) | s <- sidStrs]
                             tempWid = WorkerId (9000 + sessionStep sess)
                             diffHours = fmap (\h -> fromIntegral (h * 3600)) mHours
                             hint = AddWorker tempWid sids diffHours
                             oldResult = sessResult sess
                             sess' = addHint hint sess
-                        writeIORef (asHintSession st) (Just sess')
+                            hs' = hs { hstSess = sess' }
+                        autoSaveHintSession st hs'
                         (wNames, sNames, _) <- loadNameMaps st
                         let wNames' = Map.insert tempWid name wNames
                         putStr (displayHintDiff wNames' sNames oldResult (sessResult sess'))
@@ -921,11 +985,13 @@ handleCommand st cmd = case cmd of
         result <- getOrInitSession st
         case result of
             Left err -> putStrLn err
-            Right sess -> do
+            Right hs -> do
                 let hint = WaiveOvertime (WorkerId wid)
+                    sess = hstSess hs
                     oldResult = sessResult sess
                     sess' = addHint hint sess
-                writeIORef (asHintSession st) (Just sess')
+                    hs' = hs { hstSess = sess' }
+                autoSaveHintSession st hs'
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
@@ -933,11 +999,13 @@ handleCommand st cmd = case cmd of
         result <- getOrInitSession st
         case result of
             Left err -> putStrLn err
-            Right sess -> do
+            Right hs -> do
                 let hint = GrantSkill (WorkerId wid) (SkillId sid)
+                    sess = hstSess hs
                     oldResult = sessResult sess
                     sess' = addHint hint sess
-                writeIORef (asHintSession st) (Just sess')
+                    hs' = hs { hstSess = sess' }
+                autoSaveHintSession st hs'
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
@@ -945,24 +1013,28 @@ handleCommand st cmd = case cmd of
         result <- getOrInitSession st
         case result of
             Left err -> putStrLn err
-            Right sess -> do
+            Right hs -> do
                 let hint = OverridePreference (WorkerId wid) (map StationId sids)
+                    sess = hstSess hs
                     oldResult = sessResult sess
                     sess' = addHint hint sess
-                writeIORef (asHintSession st) (Just sess')
+                    hs' = hs { hstSess = sess' }
+                autoSaveHintSession st hs'
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
     WhatIfRevert -> requireDraft st $ do
-        mSess <- readIORef (asHintSession st)
-        case mSess of
+        mHs <- readIORef (asHintSession st)
+        case mHs of
             Nothing -> putStrLn "No hints to revert."
-            Just sess | null (sessHints sess) -> putStrLn "No hints to revert."
-            Just sess -> do
-                let n = sessionStep sess
+            Just hs | null (sessHints (hstSess hs)) -> putStrLn "No hints to revert."
+            Just hs -> do
+                let sess = hstSess hs
+                    n = sessionStep sess
                     oldResult = sessResult sess
                     sess' = revertHint sess
-                writeIORef (asHintSession st) (Just sess')
+                    hs' = hs { hstSess = sess' }
+                autoSaveHintSession st hs'
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
                 putStrLn ("Reverted hint " ++ show n ++ ". "
@@ -971,34 +1043,37 @@ handleCommand st cmd = case cmd of
                          ++ " remaining.")
 
     WhatIfRevertAll -> requireDraft st $ do
-        mSess <- readIORef (asHintSession st)
-        case mSess of
+        mHs <- readIORef (asHintSession st)
+        case mHs of
             Nothing -> putStrLn "No hints to revert."
-            Just sess | null (sessHints sess) -> putStrLn "No hints to revert."
-            Just sess -> do
-                let n = sessionStep sess
+            Just hs | null (sessHints (hstSess hs)) -> putStrLn "No hints to revert."
+            Just hs -> do
+                let sess = hstSess hs
+                    n = sessionStep sess
                     oldResult = sessResult sess
                     sess' = revertTo 0 sess
-                writeIORef (asHintSession st) (Just sess')
+                    hs' = hs { hstSess = sess' }
+                autoSaveHintSession st hs'
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
                 putStrLn ("Reverted all " ++ show n ++ " hints.")
 
     WhatIfList -> requireDraft st $ do
-        mSess <- readIORef (asHintSession st)
-        case mSess of
+        mHs <- readIORef (asHintSession st)
+        case mHs of
             Nothing -> putStrLn "No active hints."
-            Just sess -> do
+            Just hs -> do
                 (wNames, sNames, skNames) <- loadNameMaps st
-                putStr (displayHintList wNames sNames skNames sess)
+                putStr (displayHintList wNames sNames skNames (hstSess hs))
 
     WhatIfApply -> requireAdmin st $ requireDraft st $ do
-        mSess <- readIORef (asHintSession st)
-        case mSess of
+        mHs <- readIORef (asHintSession st)
+        case mHs of
             Nothing -> putStrLn "No hints to apply."
-            Just sess | null (sessHints sess) -> putStrLn "No hints to apply."
-            Just sess -> do
-                let lastHint = last (sessHints sess)
+            Just hs | null (sessHints (hstSess hs)) -> putStrLn "No hints to apply."
+            Just hs -> do
+                let sess = hstSess hs
+                    lastHint = last (sessHints sess)
                 (wNames, sNames, skNames) <- loadNameMaps st
                 case lastHint of
                     GrantSkill (WorkerId w) (SkillId sk) -> do
@@ -1006,17 +1081,17 @@ handleCommand st cmd = case cmd of
                         putStrLn ("Applied: grant skill "
                                  ++ Map.findWithDefault ("Skill " ++ show sk) (SkillId sk) skNames
                                  ++ " to " ++ lookupWorker wNames (WorkerId w))
-                        rebuildSessionAfterApply st sess
+                        rebuildSessionAfterApply st hs
                     WaiveOvertime (WorkerId w) -> do
                         _ <- SW.setOvertimeOptIn (asRepo st) (WorkerId w) True
                         putStrLn ("Applied: waive overtime for "
                                  ++ lookupWorker wNames (WorkerId w))
-                        rebuildSessionAfterApply st sess
+                        rebuildSessionAfterApply st hs
                     OverridePreference (WorkerId w) sids -> do
                         SW.setStationPreferences (asRepo st) (WorkerId w) sids
                         putStrLn ("Applied: override preferences for "
                                  ++ lookupWorker wNames (WorkerId w))
-                        rebuildSessionAfterApply st sess
+                        rebuildSessionAfterApply st hs
                     PinAssignment (WorkerId w) (StationId s) slot -> do
                         let day = slotDate slot
                             dow = dayOfWeek day
@@ -1025,11 +1100,19 @@ handleCommand st cmd = case cmd of
                         putStrLn ("Applied: pin " ++ lookupWorker wNames (WorkerId w)
                                  ++ " at " ++ lookupStation sNames (StationId s)
                                  ++ " on " ++ showDayOfWeek dow ++ " " ++ show hr ++ ":00")
-                        rebuildSessionAfterApply st sess
+                        rebuildSessionAfterApply st hs
                     AddWorker {} ->
                         putStrLn "Cannot apply AddWorker hints automatically. Create the worker manually with 'user create' and 'worker grant-skill', then regenerate the schedule."
                     CloseStation {} ->
                         putStrLn "Cannot apply CloseStation hints automatically. Use 'station close-day' for day-level closures, or adjust station hours with 'station set-hours'."
+
+    WhatIfRebase -> requireDraft st $ do
+        mHs <- readIORef (asHintSession st)
+        case mHs of
+            Nothing -> putStrLn "No active hint session to rebase."
+            Just hs -> do
+                _ <- runRebase st hs
+                return ()
 
     -- Stations (admin)
     StationAdd sid name -> requireAdmin st $ do
@@ -1492,61 +1575,199 @@ requireDraft st action = do
         then putStrLn "No active draft. Start a draft session first."
         else action
 
--- | Get or lazily initialize the hint session.
-getOrInitSession :: AppState -> IO (Either String Session)
+-- | Get the current audit checkpoint (max audit_log.id).
+getCurrentCheckpoint :: Repository -> IO Int
+getCurrentCheckpoint repo = do
+    entries <- repoGetAuditLog repo
+    return $ case entries of
+        [] -> 0
+        _  -> aeId (last entries)
+
+-- | Auto-save the hint session to the database.
+autoSaveHintSession :: AppState -> HintState -> IO ()
+autoSaveHintSession st hs = do
+    cp <- getCurrentCheckpoint (asRepo st)
+    let hs' = hs { hstCheckpoint = cp, hstIsStale = False }
+    repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs') (sessHints (hstSess hs')) cp
+    writeIORef (asHintSession st) (Just hs')
+
+-- | Get or lazily initialize the hint session. Handles stale sessions
+-- by triggering auto-rebase when needed.
+getOrInitSession :: AppState -> IO (Either String HintState)
 getOrInitSession st = do
-    mSess <- readIORef (asHintSession st)
-    case mSess of
-        Just sess -> return (Right sess)
+    mHs <- readIORef (asHintSession st)
+    case mHs of
+        Just hs | hstIsStale hs -> do
+            -- Stale session: run auto-rebase
+            putStrLn "Session is stale. Running rebase..."
+            rebaseResult <- runRebase st hs
+            case rebaseResult of
+                Left err -> return (Left err)
+                Right hs' -> return (Right hs')
+        Just hs -> return (Right hs)
         Nothing -> do
             result <- initHintSession st
             case result of
                 Left err -> return (Left err)
-                Right sess -> do
-                    writeIORef (asHintSession st) (Just sess)
-                    return (Right sess)
+                Right hs -> do
+                    writeIORef (asHintSession st) (Just hs)
+                    return (Right hs)
 
 -- | Build a SchedulerContext from the current draft and create a new hint session.
-initHintSession :: AppState -> IO (Either String Session)
+initHintSession :: AppState -> IO (Either String HintState)
 initHintSession st = do
     resolved <- resolveDraftId (asRepo st) Nothing
     case resolved of
         Left err -> return (Left err)
         Right did -> do
-            mDraft <- Draft.loadDraft (asRepo st) did
-            case mDraft of
-                Nothing -> return (Left "Draft not found.")
-                Just draft -> do
-                    let dateFrom = diDateFrom draft
-                        dateTo   = diDateTo draft
-                    users <- repoListUsers (asRepo st)
-                    let workers = Set.fromList [userWorkerId u | u <- users]
-                    let slots = Calendar.generateDateRangeSlots Calendar.defaultHours dateFrom dateTo Set.empty
-                    skillCtx   <- repoLoadSkillCtx (asRepo st)
-                    workerCtx  <- repoLoadWorkerCtx (asRepo st)
-                    absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-                    cfg        <- repoLoadSchedulerConfig (asRepo st)
-                    shifts     <- repoLoadShifts (asRepo st)
-                    mPpc       <- SC.loadPayPeriodConfig (asRepo st)
-                    let ppc = maybe defaultPayPeriodConfig id mPpc
-                        periodBounds = payPeriodBounds ppc dateFrom
-                    calHrs <- Draft.computeCalendarHours (asRepo st) workerCtx
-                                  (fst periodBounds) (snd periodBounds)
-                    let closed = stationClosedSlots skillCtx slots
-                        ctx = Scheduler.SchedulerContext
-                            { Scheduler.schSkillCtx    = skillCtx
-                            , Scheduler.schWorkerCtx   = workerCtx
-                            , Scheduler.schAbsenceCtx  = absenceCtx
-                            , Scheduler.schSlots       = slots
-                            , Scheduler.schWorkers     = workers
-                            , Scheduler.schClosedSlots = closed
-                            , Scheduler.schShifts      = shifts
-                            , Scheduler.schPrevWeekendWorkers = Set.empty
-                            , Scheduler.schConfig      = cfg
-                            , Scheduler.schPeriodBounds = periodBounds
-                            , Scheduler.schCalendarHours = calHrs
-                            }
-                    return (Right (newSession ctx))
+            result <- buildSessionForDraft st did []
+            case result of
+                Left err -> return (Left err)
+                Right sess -> do
+                    cp <- getCurrentCheckpoint (asRepo st)
+                    let hs = HintState sess did cp False
+                    return (Right hs)
+
+-- | Build a Session for a given draft, optionally applying existing hints.
+buildSessionForDraft :: AppState -> Int -> [Hint] -> IO (Either String Session)
+buildSessionForDraft st did hints = do
+    mDraft <- Draft.loadDraft (asRepo st) did
+    case mDraft of
+        Nothing -> return (Left "Draft not found.")
+        Just draft -> do
+            let dateFrom = diDateFrom draft
+                dateTo   = diDateTo draft
+            users <- repoListUsers (asRepo st)
+            let workers = Set.fromList [userWorkerId u | u <- users]
+            let slots = Calendar.generateDateRangeSlots Calendar.defaultHours dateFrom dateTo Set.empty
+            skillCtx   <- repoLoadSkillCtx (asRepo st)
+            workerCtx  <- repoLoadWorkerCtx (asRepo st)
+            absenceCtx <- repoLoadAbsenceCtx (asRepo st)
+            cfg        <- repoLoadSchedulerConfig (asRepo st)
+            shifts     <- repoLoadShifts (asRepo st)
+            mPpc       <- SC.loadPayPeriodConfig (asRepo st)
+            let ppc = maybe defaultPayPeriodConfig id mPpc
+                periodBounds = payPeriodBounds ppc dateFrom
+            calHrs <- Draft.computeCalendarHours (asRepo st) workerCtx
+                          (fst periodBounds) (snd periodBounds)
+            let closed = stationClosedSlots skillCtx slots
+                ctx = Scheduler.SchedulerContext
+                    { Scheduler.schSkillCtx    = skillCtx
+                    , Scheduler.schWorkerCtx   = workerCtx
+                    , Scheduler.schAbsenceCtx  = absenceCtx
+                    , Scheduler.schSlots       = slots
+                    , Scheduler.schWorkers     = workers
+                    , Scheduler.schClosedSlots = closed
+                    , Scheduler.schShifts      = shifts
+                    , Scheduler.schPrevWeekendWorkers = Set.empty
+                    , Scheduler.schConfig      = cfg
+                    , Scheduler.schPeriodBounds = periodBounds
+                    , Scheduler.schCalendarHours = calHrs
+                    }
+                baseSess = newSession ctx
+                sess = foldl (flip addHint) baseSess hints
+            return (Right sess)
+
+-- | Run the rebase flow for a stale hint session.
+runRebase :: AppState -> HintState -> IO (Either String HintState)
+runRebase st hs = do
+    entries <- repoAuditSince (asRepo st) (hstCheckpoint hs)
+    let hints = sessHints (hstSess hs)
+    -- Large gap detection
+    if length entries > 50
+        then handleLargeGap st hs hints
+        else handleNormalRebase st hs entries hints
+
+handleLargeGap :: AppState -> HintState -> [Hint] -> IO (Either String HintState)
+handleLargeGap st hs hints = do
+    putStrLn ("Significant changes since last save (" ++ "many mutations). [D]iscard / [F]orce resume?")
+    putStr "> "
+    hFlush stdout
+    choice <- getLine
+    case map toLower choice of
+        "f" -> do
+            rebuildResult <- buildSessionForDraft st (hstDraftId hs) hints
+            case rebuildResult of
+                Left err -> return (Left err)
+                Right sess' -> do
+                    cp <- getCurrentCheckpoint (asRepo st)
+                    let hs' = HintState sess' (hstDraftId hs) cp False
+                    repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) hints cp
+                    writeIORef (asHintSession st) (Just hs')
+                    putStrLn "Force resumed. Session rebuilt from current context."
+                    return (Right hs')
+        _ -> do
+            repoDeleteHintSession (asRepo st) (asSessionId st) (hstDraftId hs)
+            writeIORef (asHintSession st) Nothing
+            putStrLn "Hint session discarded."
+            return (Left "Hint session discarded.")
+
+handleNormalRebase :: AppState -> HintState -> [AuditEntry] -> [Hint] -> IO (Either String HintState)
+handleNormalRebase st hs entries hints = do
+    let result = rebaseSession (hstDraftId hs) entries hints
+    case result of
+        UpToDate -> do
+            putStrLn "Hint session is up to date. No rebase needed."
+            let hs' = hs { hstIsStale = False }
+            writeIORef (asHintSession st) (Just hs')
+            return (Right hs')
+        AutoRebase n -> do
+            -- Rebuild session from current context with existing hints
+            rebuildResult <- buildSessionForDraft st (hstDraftId hs) hints
+            case rebuildResult of
+                Left err -> return (Left err)
+                Right sess' -> do
+                    cp <- getCurrentCheckpoint (asRepo st)
+                    let hs' = HintState sess' (hstDraftId hs) cp False
+                    repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) hints cp
+                    writeIORef (asHintSession st) (Just hs')
+                    putStrLn ("Rebased over " ++ show n ++ " changes. All hints preserved.")
+                    return (Right hs')
+        HasConflicts classified -> do
+            -- Show conflicts
+            let conflicts = [(e, c) | (e, c) <- classified, c == Conflicting]
+            putStrLn "Conflicts detected during rebase:"
+            mapM_ (\(e, _) -> putStrLn ("  - " ++ maybe "?" id (aeCommand e))) conflicts
+            putStrLn "[D]rop conflicting hints / [K]eep all (force) / [A]bort"
+            putStr "> "
+            hFlush stdout
+            choice <- getLine
+            case map toLower choice of
+                "d" -> do
+                    -- Drop hints that conflict
+                    let conflictingEntries = [e | (e, Conflicting) <- classified]
+                        safeHints = filter (\h -> not (any (\e -> classifyChange (hstDraftId hs) e [h] == Conflicting) conflictingEntries)) hints
+                    rebuildResult <- buildSessionForDraft st (hstDraftId hs) safeHints
+                    case rebuildResult of
+                        Left err -> return (Left err)
+                        Right sess' -> do
+                            cp <- getCurrentCheckpoint (asRepo st)
+                            let hs' = HintState sess' (hstDraftId hs) cp False
+                            repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) safeHints cp
+                            writeIORef (asHintSession st) (Just hs')
+                            let dropped = length hints - length safeHints
+                            putStrLn ("Dropped " ++ show dropped ++ " conflicting hint(s). " ++ show (length safeHints) ++ " remaining.")
+                            return (Right hs')
+                "k" -> do
+                    -- Force: keep all hints, rebuild from current context
+                    rebuildResult <- buildSessionForDraft st (hstDraftId hs) hints
+                    case rebuildResult of
+                        Left err -> return (Left err)
+                        Right sess' -> do
+                            cp <- getCurrentCheckpoint (asRepo st)
+                            let hs' = HintState sess' (hstDraftId hs) cp False
+                            repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) hints cp
+                            writeIORef (asHintSession st) (Just hs')
+                            putStrLn "Kept all hints. Session rebuilt from current context."
+                            return (Right hs')
+                _ -> do
+                    putStrLn "Rebase aborted. Session unchanged."
+                    return (Right hs)
+        SessionInvalid msg -> do
+            putStrLn msg
+            repoDeleteHintSession (asRepo st) (asSessionId st) (hstDraftId hs)
+            writeIORef (asHintSession st) Nothing
+            return (Left "Hint session invalidated.")
 
 -- | Load worker/station/skill name maps for display.
 loadNameMaps :: AppState -> IO (Map.Map WorkerId String, Map.Map StationId String, Map.Map SkillId String)
@@ -1566,16 +1787,17 @@ loadNameMaps st = do
     return (workerNames, stationNames, skillNames)
 
 -- | After applying a hint permanently, remove it from the session and rebuild.
-rebuildSessionAfterApply :: AppState -> Session -> IO ()
-rebuildSessionAfterApply st sess = do
-    let remaining = init (sessHints sess)  -- remove the last hint (just applied)
-    result <- initHintSession st
-    case result of
+rebuildSessionAfterApply :: AppState -> HintState -> IO ()
+rebuildSessionAfterApply st hs = do
+    let remaining = init (sessHints (hstSess hs))  -- remove the last hint (just applied)
+    rebuildResult <- buildSessionForDraft st (hstDraftId hs) remaining
+    case rebuildResult of
         Left _ -> writeIORef (asHintSession st) Nothing
-        Right freshSess -> do
-            -- Re-apply remaining hints on the fresh context
-            let sess' = foldl (flip addHint) freshSess remaining
-            writeIORef (asHintSession st) (Just sess')
+        Right sess' -> do
+            cp <- getCurrentCheckpoint (asRepo st)
+            let hs' = HintState sess' (hstDraftId hs) cp False
+            repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) remaining cp
+            writeIORef (asHintSession st) (Just hs')
 
 parseDay :: String -> Maybe Day
 parseDay = parseTimeM True defaultTimeLocale "%Y-%m-%d"
@@ -1991,6 +2213,7 @@ helpRegistry =
     , ("what-if",  True,  "what-if revert-all",                            "Undo all hints")
     , ("what-if",  True,  "what-if list",                                  "List all applied hints")
     , ("what-if",  True,  "what-if apply",                                 "Apply last hint permanently")
+    , ("what-if",  True,  "what-if rebase",                                "Reconcile hints with data changes")
     -- Export
     , ("export",   True,  "export <file>",                   "Export all data to JSON")
     , ("export",   True,  "export <schedule> <file>",        "Export one schedule to JSON")

@@ -140,6 +140,7 @@ data Command
     | WhatIfRevertAll
     | WhatIfList
     | WhatIfApply
+    | WhatIfRebase
     -- Context
     | CmdUse String String          -- ^ entity-type name-or-id
     | ContextView
@@ -339,6 +340,7 @@ parseCommand input = case words input of
     ["what-if", "revert-all"]   -> WhatIfRevertAll
     ["what-if", "list"]         -> WhatIfList
     ["what-if", "apply"]        -> WhatIfApply
+    ["what-if", "rebase"]       -> WhatIfRebase
 
     ["calendar", "view", s, e]          -> CalendarView s e
     ["calendar", "view-by-worker", s, e] -> CalendarViewByWorker s e

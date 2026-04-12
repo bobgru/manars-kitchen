@@ -280,6 +280,17 @@ statements =
       \  last_active_at TEXT NOT NULL DEFAULT (datetime('now')),\
       \  is_active INTEGER NOT NULL DEFAULT 1\
       \)"
+
+      -- Hint sessions (persistent what-if sessions)
+    , "CREATE TABLE IF NOT EXISTS hint_sessions (\
+      \  session_id INTEGER NOT NULL,\
+      \  draft_id INTEGER NOT NULL,\
+      \  hints_json TEXT NOT NULL,\
+      \  checkpoint INTEGER NOT NULL,\
+      \  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
+      \  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
+      \  PRIMARY KEY (session_id, draft_id)\
+      \)"
     ]
 
 -- | Idempotent migrations for schema evolution.
