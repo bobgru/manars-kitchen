@@ -26,6 +26,7 @@ import qualified HintE2ESpec
 import qualified AuditSpec
 import qualified SessionSpec
 import qualified PubSubSpec
+import qualified ApiSpec
 import qualified Service.HintRebase
 
 main :: IO ()
@@ -55,3 +56,4 @@ main = hspec $ do
     describe "Session"             SessionSpec.spec
     describe "PubSub"              PubSubSpec.spec
     describe "Service.HintRebase"  Service.HintRebase.spec
+    describe "REST API"            ApiSpec.spec
