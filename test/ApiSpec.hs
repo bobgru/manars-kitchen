@@ -6,10 +6,13 @@ import Test.Hspec
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time (Day, fromGregorian)
-import Network.HTTP.Client (newManager, defaultManagerSettings)
+import Data.Proxy (Proxy(..))
+import qualified Data.ByteString.Char8 as BS8
+import Network.HTTP.Client (ManagerSettings, newManager, defaultManagerSettings, managerModifyRequest, requestHeaders)
 import Network.Wai.Handler.Warp (testWithApplication)
+import Database.SQLite.Simple (execute, Only(..))
 import Servant.API ((:<|>)(..))
-import Servant.Server (serve)
+import Servant (serveWithContext, Context(..))
 import Servant.Client
     ( ClientM, ClientEnv, mkClientEnv, runClientM, client, baseUrlPort
     , parseBaseUrl, ClientError(..), responseStatusCode
@@ -17,7 +20,7 @@ import Servant.Client
 import Network.HTTP.Types.Status (statusCode)
 import System.Directory (removeFile, doesFileExist)
 
-import Auth.Types (Role(..), User)
+import Auth.Types (Role(..), User(..))
 import Domain.Types (WorkerId(..), StationId(..), SkillId(..), AbsenceTypeId(..), Schedule(..))
 import Domain.Skill (Skill)
 import Domain.Shift (ShiftDef)
@@ -30,16 +33,27 @@ import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..))
 import Service.Auth (register)
 import qualified Service.Worker as SW
 import Servant.API (NoContent)
-import Server.Api (api, fullApi)
+import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
+import Server.Auth (LoginReq(..), LoginResp(..), authHandler)
 import Server.Handlers (fullServer)
 import Server.Rpc
 import CLI.Commands (Command(..))
 import CLI.RpcClient (RpcEnv(..), dispatchCommand)
 
 -- -----------------------------------------------------------------
--- Client functions derived from the API type
+-- Login client (derived from PublicAPI)
 -- -----------------------------------------------------------------
+
+loginC :: LoginReq -> ClientM LoginResp
+loginC = client (Proxy :: Proxy PublicAPI)
+
+-- -----------------------------------------------------------------
+-- Client functions derived from the API type (RawAPI)
+-- -----------------------------------------------------------------
+
+-- Logout (first endpoint in RawAPI)
+logoutC          :: ClientM NoContent
 
 -- Original endpoints
 listSkillsC      :: ClientM [(SkillId, Skill)]
@@ -141,7 +155,8 @@ _revertHintC :: HintSessionRef -> ClientM [Hint]
 _applyHintsC :: HintSessionRef -> ClientM NoContent
 _rebaseHintsC :: HintSessionRef -> ClientM RebaseResultResp
 
-listSkillsC
+logoutC
+    :<|> listSkillsC
     :<|> listStationsC
     :<|> listShiftsC
     :<|> listSchedulesC
@@ -365,65 +380,89 @@ rpcCreateSkillC
     = client rpcApi
 
 -- -----------------------------------------------------------------
--- Test helper
+-- Test helpers
 -- -----------------------------------------------------------------
 
 testDbPath :: String
 testDbPath = "/tmp/manars-kitchen-test-api.db"
 
+-- | Create a Manager that injects an Authorization: Bearer header.
+authManagerSettings :: String -> ManagerSettings
+authManagerSettings token = defaultManagerSettings
+    { managerModifyRequest = \req -> return req
+        { requestHeaders = ("Authorization", BS8.pack ("Bearer " ++ token))
+                         : requestHeaders req
+        }
+    }
+
+-- | Core setup: server with auth context. Provides repo and port.
+withServer :: (Repository -> Int -> IO ()) -> IO ()
+withServer action = do
+    exists <- doesFileExist testDbPath
+    if exists then removeFile testDbPath else pure ()
+    (_conn, repo) <- mkSQLiteRepo testDbPath
+    let ctx = authHandler repo :. EmptyContext
+        app = serveWithContext fullApi ctx (fullServer repo)
+    testWithApplication (pure app) $ \port -> action repo port
+    removeFile testDbPath
+
+-- | Create a plain (no auth) ClientEnv for a port.
+mkPlainEnv :: Int -> IO ClientEnv
+mkPlainEnv port = do
+    mgr <- newManager defaultManagerSettings
+    baseUrl <- parseBaseUrl "http://localhost"
+    return $ mkClientEnv mgr baseUrl { baseUrlPort = port }
+
+-- | Create an authenticated ClientEnv with a Bearer token.
+mkAuthEnv :: String -> Int -> IO ClientEnv
+mkAuthEnv token port = do
+    mgr <- newManager (authManagerSettings token)
+    baseUrl <- parseBaseUrl "http://localhost"
+    return $ mkClientEnv mgr baseUrl { baseUrlPort = port }
+
+-- | Login and return the token.
+loginAs :: ClientEnv -> String -> String -> IO String
+loginAs env username password = do
+    result <- runClientM (loginC (LoginReq username password)) env
+    case result of
+        Right resp -> return (lresToken resp)
+        Left err -> error $ "Login failed in test setup: " ++ show err
+
+-- | App with admin user logged in. Provides authenticated ClientEnv.
 withTestApp :: (ClientEnv -> IO ()) -> IO ()
-withTestApp action = do
-    exists <- doesFileExist testDbPath
-    if exists then removeFile testDbPath else pure ()
-    (_conn, repo) <- mkSQLiteRepo testDbPath
-    let app = serve fullApi (fullServer repo)
-    mgr <- newManager defaultManagerSettings
-    testWithApplication (pure app) $ \port -> do
-        baseUrl <- parseBaseUrl "http://localhost"
-        let env = mkClientEnv mgr baseUrl { baseUrlPort = port }
-        action env
-    removeFile testDbPath
+withTestApp action = withServer $ \repo port -> do
+    _ <- register repo "admin" "password" Admin (WorkerId 1)
+    pEnv <- mkPlainEnv port
+    token <- loginAs pEnv "admin" "password"
+    aEnv <- mkAuthEnv token port
+    action aEnv
 
--- | Like withTestApp but also sets up a user and basic data.
+-- | App with admin + seed data + logged in.
 withSeededApp :: (Repository -> ClientEnv -> IO ()) -> IO ()
-withSeededApp action = do
-    exists <- doesFileExist testDbPath
-    if exists then removeFile testDbPath else pure ()
-    (_conn, repo) <- mkSQLiteRepo testDbPath
-    -- Create a test user (needed for absences)
-    _ <- register repo "testadmin" "password" Admin (WorkerId 1)
-    -- Set up an absence type
+withSeededApp action = withServer $ \repo port -> do
+    _ <- register repo "admin" "password" Admin (WorkerId 1)
     repoSaveAbsenceCtx repo emptyAbsenceContext
         { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
         , acYearlyAllowance = Map.singleton (WorkerId 1, AbsenceTypeId 1) 10
         }
-    let app = serve fullApi (fullServer repo)
-    mgr <- newManager defaultManagerSettings
-    testWithApplication (pure app) $ \port -> do
-        baseUrl <- parseBaseUrl "http://localhost"
-        let env = mkClientEnv mgr baseUrl { baseUrlPort = port }
-        action repo env
-    removeFile testDbPath
+    pEnv <- mkPlainEnv port
+    token <- loginAs pEnv "admin" "password"
+    aEnv <- mkAuthEnv token port
+    action repo aEnv
 
--- | Like withSeededApp but provides both ClientEnv and RpcEnv for CLI remote mode tests.
+-- | App with admin + seed data + both ClientEnv and RpcEnv.
 withRemoteApp :: (Repository -> ClientEnv -> RpcEnv -> IO ()) -> IO ()
-withRemoteApp action = do
-    exists <- doesFileExist testDbPath
-    if exists then removeFile testDbPath else pure ()
-    (_conn, repo) <- mkSQLiteRepo testDbPath
-    _ <- register repo "testadmin" "password" Admin (WorkerId 1)
+withRemoteApp action = withServer $ \repo port -> do
+    _ <- register repo "admin" "password" Admin (WorkerId 1)
     repoSaveAbsenceCtx repo emptyAbsenceContext
         { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
         , acYearlyAllowance = Map.singleton (WorkerId 1, AbsenceTypeId 1) 10
         }
-    let app = serve fullApi (fullServer repo)
-    mgr <- newManager defaultManagerSettings
-    testWithApplication (pure app) $ \port -> do
-        baseUrl <- parseBaseUrl "http://localhost"
-        let clientEnv = mkClientEnv mgr baseUrl { baseUrlPort = port }
-            rpcEnv = RpcEnv clientEnv 0 1 Admin
-        action repo clientEnv rpcEnv
-    removeFile testDbPath
+    pEnv <- mkPlainEnv port
+    token <- loginAs pEnv "admin" "password"
+    aEnv <- mkAuthEnv token port
+    let rpcEnv = RpcEnv aEnv 0 1 Admin
+    action repo aEnv rpcEnv
 
 -- | Assert a ClientError is a FailureResponse with the given status code.
 shouldFailWith :: (Show a) => Either ClientError a -> Int -> Expectation
@@ -500,13 +539,12 @@ spec = do
                 result `shouldFailWith` 400
 
     describe "Draft lifecycle" $ do
-        it "create → get → discard" $ withTestApp $ \env -> do
+        it "create -> get -> discard" $ withTestApp $ \env -> do
             -- Create
             Right resp <- runClientM (createDraftC (CreateDraftReq (apr 6) (apr 12))) env
             let did = dcrId resp
             -- Get
-            Right draft <- runClientM (getDraftC did) env
-            draft `shouldSatisfy` const True
+            Right _draft <- runClientM (getDraftC did) env
             -- Discard
             Right _ <- runClientM (discardDraftC did) env
             -- Verify gone
@@ -556,7 +594,7 @@ spec = do
             Set.size s `shouldBe` 0
 
     describe "Absence lifecycle" $ do
-        it "request → list pending → approve → list pending empty" $
+        it "request -> list pending -> approve -> list pending empty" $
             withSeededApp $ \_ env -> do
                 -- Request
                 Right resp <- runClientM (requestAbsenceC
@@ -582,7 +620,7 @@ spec = do
                 result `shouldFailWith` 404
 
     -- -----------------------------------------------------------------
-    -- New endpoint tests
+    -- Entity CRUD tests
     -- -----------------------------------------------------------------
 
     describe "Skill CRUD" $ do
@@ -657,7 +695,7 @@ spec = do
     describe "User management" $ do
         it "create and list users" $ withSeededApp $ \_ env -> do
             Right users <- runClientM listUsersC env
-            length users `shouldSatisfy` (>= 1)  -- seeded app creates testadmin
+            length users `shouldSatisfy` (>= 1)  -- seeded app creates admin
 
     describe "Checkpoints" $ do
         it "create and commit checkpoint" $ withTestApp $ \env -> do
@@ -747,3 +785,235 @@ spec = do
                 Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
                 all (\e -> aeSource e == "rpc") entries `shouldBe` True
+
+    -- -----------------------------------------------------------------
+    -- Auth: Login and Logout (7.1)
+    -- -----------------------------------------------------------------
+
+    describe "Login and Logout" $ do
+        it "login with valid credentials returns token and user info" $
+            withServer $ \repo port -> do
+                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                env <- mkPlainEnv port
+                result <- runClientM (loginC (LoginReq "alice" "secret")) env
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right resp -> do
+                        lresToken resp `shouldSatisfy` (not . null)
+                        lresUsername resp `shouldBe` "alice"
+                        lresRole resp `shouldBe` "admin"
+
+        it "login with invalid password returns 401" $
+            withServer $ \repo port -> do
+                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                env <- mkPlainEnv port
+                result <- runClientM (loginC (LoginReq "alice" "wrong")) env
+                result `shouldFailWith` 401
+
+        it "login with nonexistent user returns 401" $
+            withServer $ \_ port -> do
+                env <- mkPlainEnv port
+                result <- runClientM (loginC (LoginReq "nobody" "pass")) env
+                result `shouldFailWith` 401
+
+        it "logout invalidates the session" $
+            withServer $ \repo port -> do
+                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "alice" "secret"
+                aEnv <- mkAuthEnv token port
+                -- Logout
+                Right _ <- runClientM logoutC aEnv
+                -- Subsequent request with same token should fail
+                result <- runClientM listSkillsC aEnv
+                result `shouldFailWith` 401
+
+    -- -----------------------------------------------------------------
+    -- Auth: Unauthenticated access (7.2)
+    -- -----------------------------------------------------------------
+
+    describe "Unauthenticated access" $ do
+        it "protected endpoint without token returns 401" $
+            withServer $ \_ port -> do
+                env <- mkPlainEnv port
+                result <- runClientM listSkillsC env
+                result `shouldFailWith` 401
+
+        it "protected endpoint with invalid token returns 401" $
+            withServer $ \_ port -> do
+                env <- mkAuthEnv "invalid-token-value" port
+                result <- runClientM listSkillsC env
+                result `shouldFailWith` 401
+
+        it "login endpoint is accessible without token" $
+            withServer $ \repo port -> do
+                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                env <- mkPlainEnv port
+                result <- runClientM (loginC (LoginReq "alice" "secret")) env
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right resp -> lresToken resp `shouldSatisfy` (not . null)
+
+    -- -----------------------------------------------------------------
+    -- Auth: Session expiry (7.3)
+    -- -----------------------------------------------------------------
+
+    describe "Session expiry" $ do
+        it "request after idle timeout returns 401" $ do
+            exists <- doesFileExist testDbPath
+            if exists then removeFile testDbPath else pure ()
+            (conn, repo) <- mkSQLiteRepo testDbPath
+            _ <- register repo "alice" "secret" Admin (WorkerId 1)
+            let ctx = authHandler repo :. EmptyContext
+                app = serveWithContext fullApi ctx (fullServer repo)
+            testWithApplication (pure app) $ \port -> do
+                env <- mkPlainEnv port
+                token <- loginAs env "alice" "secret"
+                aEnv <- mkAuthEnv token port
+                -- Verify token works
+                Right _ <- runClientM listSkillsC aEnv
+                -- Set timeout to 0 so any elapsed time > 0 triggers expiry
+                execute conn
+                    "UPDATE scheduler_config SET value = 0 WHERE key = ?"
+                    (Only ("session_idle_timeout_minutes" :: String))
+                -- Next request should be expired
+                result <- runClientM listStationsC aEnv
+                result `shouldFailWith` 401
+            removeFile testDbPath
+
+    -- -----------------------------------------------------------------
+    -- Auth: Role enforcement (7.4)
+    -- -----------------------------------------------------------------
+
+    describe "Role enforcement" $ do
+        it "admin can access admin-only endpoints" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "admin" "pass"
+                aEnv <- mkAuthEnv token port
+                -- Admin-only: create skill
+                Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "")) aEnv
+                -- Admin-only: audit log
+                Right _ <- runClientM getAuditLogC aEnv
+                -- Admin-only: list users
+                Right _ <- runClientM listUsersC aEnv
+                pure ()
+
+        it "normal user is blocked from admin-only endpoints" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                -- Try admin-only endpoints
+                result1 <- runClientM (createSkillC (CreateSkillReq 1 "grill" "")) wEnv
+                result1 `shouldFailWith` 403
+                result2 <- runClientM getAuditLogC wEnv
+                result2 `shouldFailWith` 403
+                result3 <- runClientM listUsersC wEnv
+                result3 `shouldFailWith` 403
+
+        it "normal user is blocked from creating drafts" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                result <- runClientM (createDraftC (CreateDraftReq (apr 6) (apr 12))) wEnv
+                result `shouldFailWith` 403
+
+        it "normal user can read public data" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                -- Read-only endpoints should work for any authenticated user
+                Right _ <- runClientM listSkillsC wEnv
+                Right _ <- runClientM listStationsC wEnv
+                Right _ <- runClientM listShiftsC wEnv
+                Right _ <- runClientM getConfigC wEnv
+                pure ()
+
+    -- -----------------------------------------------------------------
+    -- Auth: Worker self-scoping (7.5)
+    -- -----------------------------------------------------------------
+
+    describe "Worker self-scoping" $ do
+        it "worker can modify own settings" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                -- Worker 1 can set their own hours
+                Right _ <- runClientM (setWorkerHoursC 1 (SetWorkerHoursReq 40)) wEnv
+                pure ()
+
+        it "worker is blocked from modifying another worker" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                -- Worker 1 cannot set worker 2's hours
+                result <- runClientM (setWorkerHoursC 2 (SetWorkerHoursReq 40)) wEnv
+                result `shouldFailWith` 403
+
+        it "admin can modify any worker" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin (WorkerId 1)
+                env <- mkPlainEnv port
+                token <- loginAs env "admin" "pass"
+                aEnv <- mkAuthEnv token port
+                -- Admin can set any worker's hours
+                Right _ <- runClientM (setWorkerHoursC 1 (SetWorkerHoursReq 40)) aEnv
+                Right _ <- runClientM (setWorkerHoursC 2 (SetWorkerHoursReq 35)) aEnv
+                pure ()
+
+        it "worker absence request is self-scoped" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                repoSaveAbsenceCtx repo emptyAbsenceContext
+                    { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
+                    , acYearlyAllowance = Map.singleton (WorkerId 1, AbsenceTypeId 1) 10
+                    }
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                -- Worker 1 can request absence for themselves
+                Right _ <- runClientM (requestAbsenceC
+                    (RequestAbsenceReq 1 1 (may 1) (may 3))) wEnv
+                -- Worker 1 cannot request absence for worker 2
+                result <- runClientM (requestAbsenceC
+                    (RequestAbsenceReq 2 1 (may 5) (may 7))) wEnv
+                result `shouldFailWith` 403
+
+        it "normal user only sees own pending absences" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin (WorkerId 99)
+                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                repoSaveAbsenceCtx repo emptyAbsenceContext
+                    { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
+                    , acYearlyAllowance = Map.fromList
+                        [ ((WorkerId 1, AbsenceTypeId 1), 10)
+                        , ((WorkerId 99, AbsenceTypeId 1), 10)
+                        ]
+                    }
+                env <- mkPlainEnv port
+                -- Admin creates absences for both workers
+                adminToken <- loginAs env "admin" "pass"
+                aEnv <- mkAuthEnv adminToken port
+                Right _ <- runClientM (requestAbsenceC
+                    (RequestAbsenceReq 1 1 (may 1) (may 3))) aEnv
+                Right _ <- runClientM (requestAbsenceC
+                    (RequestAbsenceReq 99 1 (may 5) (may 7))) aEnv
+                -- Admin sees all pending
+                Right adminPending <- runClientM listPendingAbsencesC aEnv
+                length adminPending `shouldBe` 2
+                -- Worker only sees own
+                workerToken <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv workerToken port
+                Right workerPending <- runClientM listPendingAbsencesC wEnv
+                length workerPending `shouldBe` 1

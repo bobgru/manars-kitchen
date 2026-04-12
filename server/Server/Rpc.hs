@@ -340,8 +340,8 @@ instance FromJSON RpcSessionResp where parseJSON = withObject "RpcSessionResp" $
 -- RPC Server (handlers)
 -- -----------------------------------------------------------------
 
-rpcServer :: Repository -> Server RpcAPI
-rpcServer repo =
+rpcServer :: Repository -> User -> Server RpcAPI
+rpcServer repo _user =
     -- Skill CRUD
          rpcCreateSkill repo
     :<|> rpcDeleteSkill repo
@@ -964,7 +964,7 @@ rpcRebaseHints repo ref = do
 rpcCreateSession :: Repository -> RpcSessionCreate -> Handler RpcSessionResp
 rpcCreateSession repo req = do
     let uid = UserId (rscUserId req)
-    SessionId sid <- liftIO $ repoCreateSession repo uid
+    (SessionId sid, _tok) <- liftIO $ repoCreateSession repo uid
     pure (RpcSessionResp sid)
 
 rpcResumeSession :: Repository -> RpcSessionCreate -> Handler RpcSessionResp
@@ -976,7 +976,7 @@ rpcResumeSession repo req = do
             liftIO $ repoTouchSession repo (SessionId sid)
             pure (RpcSessionResp sid)
         Nothing -> do
-            SessionId sid <- liftIO $ repoCreateSession repo uid
+            (SessionId sid, _tok) <- liftIO $ repoCreateSession repo uid
             pure (RpcSessionResp sid)
 
 -- -----------------------------------------------------------------

@@ -1,5 +1,8 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
 module Server.Handlers
-    ( server
+    ( protectedServer
     , fullServer
     ) where
 
@@ -9,12 +12,12 @@ import qualified Data.Set as Set
 import Data.Time (Day)
 import Servant
 
-import Auth.Types (User(..))
+import Auth.Types (User(..), Role(..))
 import Domain.Types (WorkerId(..), StationId(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule)
 import Domain.Skill (Skill)
 import Domain.Shift (ShiftDef(..))
 import Domain.Scheduler (ScheduleResult)
-import Domain.Absence (AbsenceRequest, AbsenceType(..), AbsenceContext(..))
+import Domain.Absence (AbsenceRequest(..), AbsenceType(..), AbsenceContext(..))
 import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment)
 import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
@@ -29,106 +32,116 @@ import qualified Service.Auth as SAuth
 import qualified Service.FreezeLine as SF
 import qualified Service.HintRebase as SHR
 import qualified Export.JSON as Exp
-import Server.Api (API, FullAPI)
+import Server.Api (RawAPI, FullAPI)
 import Server.Json
 import Server.Error
-import Server.Rpc (rpcServer)
+import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
+import Server.Rpc (RpcAPI, rpcServer)
 
-server :: Repository -> Server API
-server repo =
+-- | REST server for protected endpoints. User is threaded through from AuthProtect.
+server :: Repository -> User -> Server RawAPI
+server repo user =
+    -- Logout
+         handleLogout repo user
     -- Original endpoints
-         handleListSkills repo
+    :<|> handleListSkills repo
     :<|> handleListStations repo
     :<|> handleListShifts repo
     :<|> handleListSchedules repo
     :<|> handleGetSchedule repo
-    :<|> handleDeleteSchedule repo
+    :<|> handleDeleteSchedule repo user
     :<|> handleListDrafts repo
-    :<|> handleCreateDraft repo
+    :<|> handleCreateDraft repo user
     :<|> handleGetDraft repo
-    :<|> handleGenerateDraft repo
-    :<|> handleCommitDraft repo
-    :<|> handleDiscardDraft repo
+    :<|> handleGenerateDraft repo user
+    :<|> handleCommitDraft repo user
+    :<|> handleDiscardDraft repo user
     :<|> handleGetCalendar repo
     :<|> handleListCalendarHistory repo
     :<|> handleGetCalendarCommit repo
-    :<|> handleListPendingAbsences repo
-    :<|> handleRequestAbsence repo
-    :<|> handleApproveAbsence repo
-    :<|> handleRejectAbsence repo
+    :<|> handleListPendingAbsences repo user
+    :<|> handleRequestAbsence repo user
+    :<|> handleApproveAbsence repo user
+    :<|> handleRejectAbsence repo user
     :<|> handleGetConfig repo
     -- Skill CRUD
-    :<|> handleCreateSkill repo
-    :<|> handleDeleteSkill repo
+    :<|> handleCreateSkill repo user
+    :<|> handleDeleteSkill repo user
     -- Station CRUD
-    :<|> handleCreateStation repo
-    :<|> handleDeleteStation repo
-    :<|> handleSetStationHours repo
-    :<|> handleSetStationClosure repo
+    :<|> handleCreateStation repo user
+    :<|> handleDeleteStation repo user
+    :<|> handleSetStationHours repo user
+    :<|> handleSetStationClosure repo user
     -- Shift CRUD
-    :<|> handleCreateShift repo
-    :<|> handleDeleteShift repo
+    :<|> handleCreateShift repo user
+    :<|> handleDeleteShift repo user
     -- Worker configuration
-    :<|> handleSetWorkerHours repo
-    :<|> handleSetWorkerOvertime repo
-    :<|> handleSetWorkerPrefs repo
-    :<|> handleSetWorkerVariety repo
-    :<|> handleSetWorkerShiftPrefs repo
-    :<|> handleSetWorkerWeekendOnly repo
-    :<|> handleSetWorkerSeniority repo
-    :<|> handleSetWorkerCrossTraining repo
-    :<|> handleSetWorkerEmploymentStatus repo
-    :<|> handleSetWorkerOvertimeModel repo
-    :<|> handleSetWorkerPayTracking repo
-    :<|> handleSetWorkerTemp repo
+    :<|> handleSetWorkerHours repo user
+    :<|> handleSetWorkerOvertime repo user
+    :<|> handleSetWorkerPrefs repo user
+    :<|> handleSetWorkerVariety repo user
+    :<|> handleSetWorkerShiftPrefs repo user
+    :<|> handleSetWorkerWeekendOnly repo user
+    :<|> handleSetWorkerSeniority repo user
+    :<|> handleSetWorkerCrossTraining repo user
+    :<|> handleSetWorkerEmploymentStatus repo user
+    :<|> handleSetWorkerOvertimeModel repo user
+    :<|> handleSetWorkerPayTracking repo user
+    :<|> handleSetWorkerTemp repo user
     -- Worker skill grant/revoke
-    :<|> handleGrantWorkerSkill repo
-    :<|> handleRevokeWorkerSkill repo
+    :<|> handleGrantWorkerSkill repo user
+    :<|> handleRevokeWorkerSkill repo user
     -- Worker pairing
-    :<|> handleAvoidPairing repo
-    :<|> handlePreferPairing repo
+    :<|> handleAvoidPairing repo user
+    :<|> handlePreferPairing repo user
     -- Pins
     :<|> handleListPins repo
-    :<|> handleAddPin repo
-    :<|> handleRemovePin repo
+    :<|> handleAddPin repo user
+    :<|> handleRemovePin repo user
     -- Calendar mutations
-    :<|> handleUnfreeze
+    :<|> handleUnfreeze user
     :<|> handleFreezeStatus
     -- Config writes
-    :<|> handleSetConfig repo
-    :<|> handleApplyPreset repo
-    :<|> handleResetConfig repo
-    :<|> handleSetPayPeriod repo
+    :<|> handleSetConfig repo user
+    :<|> handleApplyPreset repo user
+    :<|> handleResetConfig repo user
+    :<|> handleSetPayPeriod repo user
     -- Audit
-    :<|> handleGetAuditLog repo
+    :<|> handleGetAuditLog repo user
     -- Checkpoints
-    :<|> handleCreateCheckpoint repo
-    :<|> handleCommitCheckpoint repo
-    :<|> handleRollbackCheckpoint repo
+    :<|> handleCreateCheckpoint repo user
+    :<|> handleCommitCheckpoint repo user
+    :<|> handleRollbackCheckpoint repo user
     -- Import/Export
-    :<|> handleExport repo
-    :<|> handleImport repo
+    :<|> handleExport repo user
+    :<|> handleImport repo user
     -- Absence type management
-    :<|> handleCreateAbsenceType repo
-    :<|> handleDeleteAbsenceType repo
-    :<|> handleSetAbsenceAllowance repo
+    :<|> handleCreateAbsenceType repo user
+    :<|> handleDeleteAbsenceType repo user
+    :<|> handleSetAbsenceAllowance repo user
     -- User management
-    :<|> handleListUsers repo
-    :<|> handleCreateUser repo
-    :<|> handleDeleteUser repo
+    :<|> handleListUsers repo user
+    :<|> handleCreateUser repo user
+    :<|> handleDeleteUser repo user
     -- Hint sessions
-    :<|> handleListHints repo
-    :<|> handleAddHint repo
-    :<|> handleRevertHint repo
-    :<|> handleApplyHints repo
-    :<|> handleRebaseHints repo
+    :<|> handleListHints repo user
+    :<|> handleAddHint repo user
+    :<|> handleRevertHint repo user
+    :<|> handleApplyHints repo user
+    :<|> handleRebaseHints repo user
 
--- | Combined REST + RPC server.
+-- | Protected server: REST + RPC, both receiving User from AuthProtect.
+protectedServer :: Repository -> User -> Server (RawAPI :<|> RpcAPI)
+protectedServer repo user = server repo user :<|> rpcServer repo user
+
+-- | Combined server: Public + Protected.
 fullServer :: Repository -> Server FullAPI
-fullServer repo = server repo :<|> rpcServer repo
+fullServer repo =
+         handleLogin repo
+    :<|> protectedServer repo
 
 -- -----------------------------------------------------------------
--- Skills / Stations / Shifts
+-- Skills / Stations / Shifts (read — no auth guard needed)
 -- -----------------------------------------------------------------
 
 handleListSkills :: Repository -> Handler [(SkillId, Skill)]
@@ -156,8 +169,9 @@ handleGetSchedule repo name = do
         Nothing -> throwApiError (NotFound ("Schedule not found: " ++ name))
         Just s  -> pure s
 
-handleDeleteSchedule :: Repository -> String -> Handler NoContent
-handleDeleteSchedule repo name = do
+handleDeleteSchedule :: Repository -> User -> String -> Handler NoContent
+handleDeleteSchedule repo user name = do
+    requireAdmin user
     liftIO $ SS.deleteSchedule repo name
     pure NoContent
 
@@ -168,8 +182,9 @@ handleDeleteSchedule repo name = do
 handleListDrafts :: Repository -> Handler [DraftInfo]
 handleListDrafts repo = liftIO $ SD.listDrafts repo
 
-handleCreateDraft :: Repository -> CreateDraftReq -> Handler DraftCreatedResp
-handleCreateDraft repo req = do
+handleCreateDraft :: Repository -> User -> CreateDraftReq -> Handler DraftCreatedResp
+handleCreateDraft repo user req = do
+    requireAdmin user
     result <- liftIO $ SD.createDraft repo (cdrDateFrom req) (cdrDateTo req)
     case result of
         Left msg  -> throwApiError (Conflict msg)
@@ -182,23 +197,26 @@ handleGetDraft repo did = do
         Nothing -> throwApiError (NotFound "Draft not found")
         Just d  -> pure d
 
-handleGenerateDraft :: Repository -> Int -> GenerateDraftReq -> Handler ScheduleResult
-handleGenerateDraft repo did req = do
+handleGenerateDraft :: Repository -> User -> Int -> GenerateDraftReq -> Handler ScheduleResult
+handleGenerateDraft repo user did req = do
+    requireAdmin user
     let workers = Set.fromList (map WorkerId (gdrWorkerIds req))
     result <- liftIO $ SD.generateDraft repo did workers
     case result of
         Left msg -> throwApiError (NotFound msg)
         Right r  -> pure r
 
-handleCommitDraft :: Repository -> Int -> CommitDraftReq -> Handler NoContent
-handleCommitDraft repo did req = do
+handleCommitDraft :: Repository -> User -> Int -> CommitDraftReq -> Handler NoContent
+handleCommitDraft repo user did req = do
+    requireAdmin user
     result <- liftIO $ SD.commitDraft repo did (cmrNote req)
     case result of
         Left msg -> throwApiError (NotFound msg)
         Right () -> pure NoContent
 
-handleDiscardDraft :: Repository -> Int -> Handler NoContent
-handleDiscardDraft repo did = do
+handleDiscardDraft :: Repository -> User -> Int -> Handler NoContent
+handleDiscardDraft repo user did = do
+    requireAdmin user
     result <- liftIO $ SD.discardDraft repo did
     case result of
         Left msg -> throwApiError (NotFound msg)
@@ -224,11 +242,16 @@ handleGetCalendarCommit repo cid = liftIO $ SC.viewCommit repo cid
 -- Absences
 -- -----------------------------------------------------------------
 
-handleListPendingAbsences :: Repository -> Handler [AbsenceRequest]
-handleListPendingAbsences repo = liftIO $ SA.listPendingAbsences repo
+handleListPendingAbsences :: Repository -> User -> Handler [AbsenceRequest]
+handleListPendingAbsences repo user = do
+    allPending <- liftIO $ SA.listPendingAbsences repo
+    case userRole user of
+        Admin  -> pure allPending
+        Normal -> pure $ filter (\a -> arWorker a == userWorkerId user) allPending
 
-handleRequestAbsence :: Repository -> RequestAbsenceReq -> Handler AbsenceCreatedResp
-handleRequestAbsence repo req = do
+handleRequestAbsence :: Repository -> User -> RequestAbsenceReq -> Handler AbsenceCreatedResp
+handleRequestAbsence repo user req = do
+    requireSelfOrAdmin user (rarWorkerId req)
     result <- liftIO $ SA.requestAbsenceService repo
         (WorkerId (rarWorkerId req))
         (AbsenceTypeId (rarTypeId req))
@@ -239,8 +262,9 @@ handleRequestAbsence repo req = do
         Left err -> throwApiError (InternalError (show err))
         Right (AbsenceId aid) -> pure (AbsenceCreatedResp aid)
 
-handleApproveAbsence :: Repository -> Int -> Handler NoContent
-handleApproveAbsence repo aid = do
+handleApproveAbsence :: Repository -> User -> Int -> Handler NoContent
+handleApproveAbsence repo user aid = do
+    requireAdmin user
     result <- liftIO $ SA.approveAbsenceService repo (AbsenceId aid)
     case result of
         Left SA.AbsenceNotFound -> throwApiError (NotFound "Absence not found")
@@ -248,8 +272,9 @@ handleApproveAbsence repo aid = do
         Left err -> throwApiError (InternalError (show err))
         Right () -> pure NoContent
 
-handleRejectAbsence :: Repository -> Int -> Handler NoContent
-handleRejectAbsence repo aid = do
+handleRejectAbsence :: Repository -> User -> Int -> Handler NoContent
+handleRejectAbsence repo user aid = do
+    requireAdmin user
     result <- liftIO $ SA.rejectAbsenceService repo (AbsenceId aid)
     case result of
         Left SA.AbsenceNotFound -> throwApiError (NotFound "Absence not found")
@@ -267,13 +292,15 @@ handleGetConfig repo = liftIO $ SCfg.listConfigParams repo
 -- Skill CRUD
 -- -----------------------------------------------------------------
 
-handleCreateSkill :: Repository -> CreateSkillReq -> Handler NoContent
-handleCreateSkill repo req = do
+handleCreateSkill :: Repository -> User -> CreateSkillReq -> Handler NoContent
+handleCreateSkill repo user req = do
+    requireAdmin user
     liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
     pure NoContent
 
-handleDeleteSkill :: Repository -> Int -> Handler NoContent
-handleDeleteSkill repo sid = do
+handleDeleteSkill :: Repository -> User -> Int -> Handler NoContent
+handleDeleteSkill repo user sid = do
+    requireAdmin user
     liftIO $ SW.removeSkill repo (SkillId sid)
     pure NoContent
 
@@ -281,23 +308,27 @@ handleDeleteSkill repo sid = do
 -- Station CRUD
 -- -----------------------------------------------------------------
 
-handleCreateStation :: Repository -> CreateStationReq -> Handler NoContent
-handleCreateStation repo req = do
+handleCreateStation :: Repository -> User -> CreateStationReq -> Handler NoContent
+handleCreateStation repo user req = do
+    requireAdmin user
     liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
     pure NoContent
 
-handleDeleteStation :: Repository -> Int -> Handler NoContent
-handleDeleteStation repo sid = do
+handleDeleteStation :: Repository -> User -> Int -> Handler NoContent
+handleDeleteStation repo user sid = do
+    requireAdmin user
     liftIO $ SW.removeStation repo (StationId sid)
     pure NoContent
 
-handleSetStationHours :: Repository -> Int -> SetStationHoursReq -> Handler NoContent
-handleSetStationHours repo sid req = do
+handleSetStationHours :: Repository -> User -> Int -> SetStationHoursReq -> Handler NoContent
+handleSetStationHours repo user sid req = do
+    requireAdmin user
     liftIO $ SW.setStationHours repo (StationId sid) (sshrStart req) (sshrEnd req)
     pure NoContent
 
-handleSetStationClosure :: Repository -> Int -> SetStationClosureReq -> Handler NoContent
-handleSetStationClosure repo sid req = do
+handleSetStationClosure :: Repository -> User -> Int -> SetStationClosureReq -> Handler NoContent
+handleSetStationClosure repo user sid req = do
+    requireAdmin user
     liftIO $ SW.closeStationDay repo (StationId sid) (sscrDay req)
     pure NoContent
 
@@ -305,13 +336,15 @@ handleSetStationClosure repo sid req = do
 -- Shift CRUD
 -- -----------------------------------------------------------------
 
-handleCreateShift :: Repository -> CreateShiftReq -> Handler NoContent
-handleCreateShift repo req = do
+handleCreateShift :: Repository -> User -> CreateShiftReq -> Handler NoContent
+handleCreateShift repo user req = do
+    requireAdmin user
     liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
     pure NoContent
 
-handleDeleteShift :: Repository -> String -> Handler NoContent
-handleDeleteShift repo name = do
+handleDeleteShift :: Repository -> User -> String -> Handler NoContent
+handleDeleteShift repo user name = do
+    requireAdmin user
     liftIO $ repoDeleteShift repo name
     pure NoContent
 
@@ -319,64 +352,76 @@ handleDeleteShift repo name = do
 -- Worker configuration
 -- -----------------------------------------------------------------
 
-handleSetWorkerHours :: Repository -> Int -> SetWorkerHoursReq -> Handler NoContent
-handleSetWorkerHours repo wid req = do
+handleSetWorkerHours :: Repository -> User -> Int -> SetWorkerHoursReq -> Handler NoContent
+handleSetWorkerHours repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setMaxHours repo (WorkerId wid) (fromIntegral (swhrHours req))
     pure NoContent
 
-handleSetWorkerOvertime :: Repository -> Int -> SetWorkerOvertimeReq -> Handler NoContent
-handleSetWorkerOvertime repo wid req = do
+handleSetWorkerOvertime :: Repository -> User -> Int -> SetWorkerOvertimeReq -> Handler NoContent
+handleSetWorkerOvertime repo user wid req = do
+    requireSelfOrAdmin user wid
     _ <- liftIO $ SW.setOvertimeOptIn repo (WorkerId wid) (sworOptIn req)
     pure NoContent
 
-handleSetWorkerPrefs :: Repository -> Int -> SetWorkerPrefsReq -> Handler NoContent
-handleSetWorkerPrefs repo wid req = do
+handleSetWorkerPrefs :: Repository -> User -> Int -> SetWorkerPrefsReq -> Handler NoContent
+handleSetWorkerPrefs repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setStationPreferences repo (WorkerId wid)
         (map StationId (swprStationIds req))
     pure NoContent
 
-handleSetWorkerVariety :: Repository -> Int -> SetWorkerVarietyReq -> Handler NoContent
-handleSetWorkerVariety repo wid req = do
+handleSetWorkerVariety :: Repository -> User -> Int -> SetWorkerVarietyReq -> Handler NoContent
+handleSetWorkerVariety repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setVarietyPreference repo (WorkerId wid) (swvrPrefer req)
     pure NoContent
 
-handleSetWorkerShiftPrefs :: Repository -> Int -> SetWorkerShiftPrefsReq -> Handler NoContent
-handleSetWorkerShiftPrefs repo wid req = do
+handleSetWorkerShiftPrefs :: Repository -> User -> Int -> SetWorkerShiftPrefsReq -> Handler NoContent
+handleSetWorkerShiftPrefs repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setShiftPreferences repo (WorkerId wid) (swsprShifts req)
     pure NoContent
 
-handleSetWorkerWeekendOnly :: Repository -> Int -> SetWorkerWeekendOnlyReq -> Handler NoContent
-handleSetWorkerWeekendOnly repo wid req = do
+handleSetWorkerWeekendOnly :: Repository -> User -> Int -> SetWorkerWeekendOnlyReq -> Handler NoContent
+handleSetWorkerWeekendOnly repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setWeekendOnly repo (WorkerId wid) (swwoVal req)
     pure NoContent
 
-handleSetWorkerSeniority :: Repository -> Int -> SetWorkerSeniorityReq -> Handler NoContent
-handleSetWorkerSeniority repo wid req = do
+handleSetWorkerSeniority :: Repository -> User -> Int -> SetWorkerSeniorityReq -> Handler NoContent
+handleSetWorkerSeniority repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setSeniority repo (WorkerId wid) (swsrLevel req)
     pure NoContent
 
-handleSetWorkerCrossTraining :: Repository -> Int -> SetWorkerCrossTrainingReq -> Handler NoContent
-handleSetWorkerCrossTraining repo wid req = do
+handleSetWorkerCrossTraining :: Repository -> User -> Int -> SetWorkerCrossTrainingReq -> Handler NoContent
+handleSetWorkerCrossTraining repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.addCrossTraining repo (WorkerId wid) (SkillId (swctrSkillId req))
     pure NoContent
 
-handleSetWorkerEmploymentStatus :: Repository -> Int -> SetWorkerEmploymentStatusReq -> Handler NoContent
-handleSetWorkerEmploymentStatus repo wid req = do
+handleSetWorkerEmploymentStatus :: Repository -> User -> Int -> SetWorkerEmploymentStatusReq -> Handler NoContent
+handleSetWorkerEmploymentStatus repo user wid req = do
+    requireSelfOrAdmin user wid
     _ <- liftIO $ SW.setEmploymentStatus repo (WorkerId wid) (swesStatus req)
     pure NoContent
 
-handleSetWorkerOvertimeModel :: Repository -> Int -> SetWorkerOvertimeModelReq -> Handler NoContent
-handleSetWorkerOvertimeModel repo wid req = do
+handleSetWorkerOvertimeModel :: Repository -> User -> Int -> SetWorkerOvertimeModelReq -> Handler NoContent
+handleSetWorkerOvertimeModel repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setOvertimeModel repo (WorkerId wid) (swomModel req)
     pure NoContent
 
-handleSetWorkerPayTracking :: Repository -> Int -> SetWorkerPayTrackingReq -> Handler NoContent
-handleSetWorkerPayTracking repo wid req = do
+handleSetWorkerPayTracking :: Repository -> User -> Int -> SetWorkerPayTrackingReq -> Handler NoContent
+handleSetWorkerPayTracking repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setPayPeriodTracking repo (WorkerId wid) (swptTracking req)
     pure NoContent
 
-handleSetWorkerTemp :: Repository -> Int -> SetWorkerTempReq -> Handler NoContent
-handleSetWorkerTemp repo wid req = do
+handleSetWorkerTemp :: Repository -> User -> Int -> SetWorkerTempReq -> Handler NoContent
+handleSetWorkerTemp repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.setTempFlag repo (WorkerId wid) (swtTemp req)
     pure NoContent
 
@@ -384,13 +429,15 @@ handleSetWorkerTemp repo wid req = do
 -- Worker skill grant / revoke
 -- -----------------------------------------------------------------
 
-handleGrantWorkerSkill :: Repository -> Int -> Int -> Handler NoContent
-handleGrantWorkerSkill repo wid sid = do
+handleGrantWorkerSkill :: Repository -> User -> Int -> Int -> Handler NoContent
+handleGrantWorkerSkill repo user wid sid = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.grantWorkerSkill repo (WorkerId wid) (SkillId sid)
     pure NoContent
 
-handleRevokeWorkerSkill :: Repository -> Int -> Int -> Handler NoContent
-handleRevokeWorkerSkill repo wid sid = do
+handleRevokeWorkerSkill :: Repository -> User -> Int -> Int -> Handler NoContent
+handleRevokeWorkerSkill repo user wid sid = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.revokeWorkerSkill repo (WorkerId wid) (SkillId sid)
     pure NoContent
 
@@ -398,13 +445,15 @@ handleRevokeWorkerSkill repo wid sid = do
 -- Worker pairing
 -- -----------------------------------------------------------------
 
-handleAvoidPairing :: Repository -> Int -> WorkerPairingReq -> Handler NoContent
-handleAvoidPairing repo wid req = do
+handleAvoidPairing :: Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
+handleAvoidPairing repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.addAvoidPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
     pure NoContent
 
-handlePreferPairing :: Repository -> Int -> WorkerPairingReq -> Handler NoContent
-handlePreferPairing repo wid req = do
+handlePreferPairing :: Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
+handlePreferPairing repo user wid req = do
+    requireSelfOrAdmin user wid
     liftIO $ SW.addPreferPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
     pure NoContent
 
@@ -415,13 +464,15 @@ handlePreferPairing repo wid req = do
 handleListPins :: Repository -> Handler [PinnedAssignment]
 handleListPins repo = liftIO $ SW.listPins repo
 
-handleAddPin :: Repository -> PinnedAssignment -> Handler NoContent
-handleAddPin repo pin = do
+handleAddPin :: Repository -> User -> PinnedAssignment -> Handler NoContent
+handleAddPin repo user pin = do
+    requireAdmin user
     liftIO $ SW.addPin repo pin
     pure NoContent
 
-handleRemovePin :: Repository -> PinnedAssignment -> Handler NoContent
-handleRemovePin repo pin = do
+handleRemovePin :: Repository -> User -> PinnedAssignment -> Handler NoContent
+handleRemovePin repo user pin = do
+    requireAdmin user
     liftIO $ SW.removePin repo pin
     pure NoContent
 
@@ -429,10 +480,9 @@ handleRemovePin repo pin = do
 -- Calendar mutations
 -- -----------------------------------------------------------------
 
-handleUnfreeze :: UnfreezeReq -> Handler NoContent
-handleUnfreeze _req = do
-    -- Unfreeze is a session-level operation; the REST endpoint acknowledges
-    -- the request. Full session integration happens in the RPC layer.
+handleUnfreeze :: User -> UnfreezeReq -> Handler NoContent
+handleUnfreeze user _req = do
+    requireAdmin user
     pure NoContent
 
 handleFreezeStatus :: Handler FreezeStatusResp
@@ -444,27 +494,31 @@ handleFreezeStatus = do
 -- Config writes
 -- -----------------------------------------------------------------
 
-handleSetConfig :: Repository -> String -> SetConfigReq -> Handler NoContent
-handleSetConfig repo key req = do
+handleSetConfig :: Repository -> User -> String -> SetConfigReq -> Handler NoContent
+handleSetConfig repo user key req = do
+    requireAdmin user
     result <- liftIO $ SCfg.setConfigParam repo key (scrValue req)
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown config key: " ++ key))
         Just _  -> pure NoContent
 
-handleApplyPreset :: Repository -> String -> Handler NoContent
-handleApplyPreset repo name = do
+handleApplyPreset :: Repository -> User -> String -> Handler NoContent
+handleApplyPreset repo user name = do
+    requireAdmin user
     result <- liftIO $ SCfg.applyPreset repo name
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown preset: " ++ name))
         Just _  -> pure NoContent
 
-handleResetConfig :: Repository -> Handler NoContent
-handleResetConfig repo = do
+handleResetConfig :: Repository -> User -> Handler NoContent
+handleResetConfig repo user = do
+    requireAdmin user
     liftIO $ SCfg.saveConfig repo =<< SCfg.loadConfig repo
     pure NoContent
 
-handleSetPayPeriod :: Repository -> SetPayPeriodReq -> Handler NoContent
-handleSetPayPeriod repo req = do
+handleSetPayPeriod :: Repository -> User -> SetPayPeriodReq -> Handler NoContent
+handleSetPayPeriod repo user req = do
+    requireAdmin user
     case parsePayPeriodType (sprType req) of
         Nothing -> throwApiError (BadRequest ("Unknown pay period type: " ++ sprType req))
         Just pt -> do
@@ -476,25 +530,30 @@ handleSetPayPeriod repo req = do
 -- Audit log
 -- -----------------------------------------------------------------
 
-handleGetAuditLog :: Repository -> Handler [AuditEntry]
-handleGetAuditLog repo = liftIO $ repoGetAuditLog repo
+handleGetAuditLog :: Repository -> User -> Handler [AuditEntry]
+handleGetAuditLog repo user = do
+    requireAdmin user
+    liftIO $ repoGetAuditLog repo
 
 -- -----------------------------------------------------------------
 -- Checkpoints
 -- -----------------------------------------------------------------
 
-handleCreateCheckpoint :: Repository -> CreateCheckpointReq -> Handler NoContent
-handleCreateCheckpoint repo req = do
+handleCreateCheckpoint :: Repository -> User -> CreateCheckpointReq -> Handler NoContent
+handleCreateCheckpoint repo user req = do
+    requireAdmin user
     liftIO $ repoSavepoint repo (ccrName req)
     pure NoContent
 
-handleCommitCheckpoint :: Repository -> String -> Handler NoContent
-handleCommitCheckpoint repo name = do
+handleCommitCheckpoint :: Repository -> User -> String -> Handler NoContent
+handleCommitCheckpoint repo user name = do
+    requireAdmin user
     liftIO $ repoRelease repo name
     pure NoContent
 
-handleRollbackCheckpoint :: Repository -> String -> Handler NoContent
-handleRollbackCheckpoint repo name = do
+handleRollbackCheckpoint :: Repository -> User -> String -> Handler NoContent
+handleRollbackCheckpoint repo user name = do
+    requireAdmin user
     liftIO $ repoRollbackTo repo name
     pure NoContent
 
@@ -502,13 +561,15 @@ handleRollbackCheckpoint repo name = do
 -- Import / Export
 -- -----------------------------------------------------------------
 
-handleExport :: Repository -> Handler ExportResp
-handleExport repo = do
+handleExport :: Repository -> User -> Handler ExportResp
+handleExport repo user = do
+    requireAdmin user
     dat <- liftIO $ Exp.gatherExport repo Nothing
     pure (ExportResp dat)
 
-handleImport :: Repository -> ImportReq -> Handler ImportResp
-handleImport repo req = do
+handleImport :: Repository -> User -> ImportReq -> Handler ImportResp
+handleImport repo user req = do
+    requireAdmin user
     msgs <- liftIO $ Exp.applyImport repo (irData req)
     pure (ImportResp msgs)
 
@@ -516,8 +577,9 @@ handleImport repo req = do
 -- Absence type management
 -- -----------------------------------------------------------------
 
-handleCreateAbsenceType :: Repository -> CreateAbsenceTypeReq -> Handler NoContent
-handleCreateAbsenceType repo req = do
+handleCreateAbsenceType :: Repository -> User -> CreateAbsenceTypeReq -> Handler NoContent
+handleCreateAbsenceType repo user req = do
+    requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let atId = AbsenceTypeId (catrId req)
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
@@ -525,15 +587,17 @@ handleCreateAbsenceType repo req = do
     liftIO $ repoSaveAbsenceCtx repo ctx'
     pure NoContent
 
-handleDeleteAbsenceType :: Repository -> Int -> Handler NoContent
-handleDeleteAbsenceType repo atid = do
+handleDeleteAbsenceType :: Repository -> User -> Int -> Handler NoContent
+handleDeleteAbsenceType repo user atid = do
+    requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let ctx' = ctx { acTypes = Map.delete (AbsenceTypeId atid) (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
     pure NoContent
 
-handleSetAbsenceAllowance :: Repository -> Int -> SetAbsenceAllowanceReq -> Handler NoContent
-handleSetAbsenceAllowance repo atid req = do
+handleSetAbsenceAllowance :: Repository -> User -> Int -> SetAbsenceAllowanceReq -> Handler NoContent
+handleSetAbsenceAllowance repo user atid req = do
+    requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let key = (WorkerId (saarWorkerId req), AbsenceTypeId atid)
         ctx' = ctx { acYearlyAllowance = Map.insert key (saarAllowance req) (acYearlyAllowance ctx) }
@@ -544,11 +608,14 @@ handleSetAbsenceAllowance repo atid req = do
 -- User management
 -- -----------------------------------------------------------------
 
-handleListUsers :: Repository -> Handler [User]
-handleListUsers repo = liftIO $ repoListUsers repo
+handleListUsers :: Repository -> User -> Handler [User]
+handleListUsers repo user = do
+    requireAdmin user
+    liftIO $ repoListUsers repo
 
-handleCreateUser :: Repository -> CreateUserReq -> Handler NoContent
-handleCreateUser repo req = do
+handleCreateUser :: Repository -> User -> CreateUserReq -> Handler NoContent
+handleCreateUser repo user req = do
+    requireAdmin user
     result <- liftIO $ SAuth.register repo
         (curUsername req) (curPassword req) (curRole req) (WorkerId (curWorkerId req))
     case result of
@@ -556,8 +623,9 @@ handleCreateUser repo req = do
         Left err -> throwApiError (InternalError (show err))
         Right _ -> pure NoContent
 
-handleDeleteUser :: Repository -> String -> Handler NoContent
-handleDeleteUser repo uname = do
+handleDeleteUser :: Repository -> User -> String -> Handler NoContent
+handleDeleteUser repo user uname = do
+    requireAdmin user
     mUser <- liftIO $ repoGetUserByName repo uname
     case mUser of
         Nothing -> throwApiError (NotFound ("User not found: " ++ uname))
@@ -569,18 +637,20 @@ handleDeleteUser repo uname = do
 -- Hint sessions
 -- -----------------------------------------------------------------
 
-handleListHints :: Repository -> Maybe Int -> Maybe Int -> Handler [Hint]
-handleListHints repo mSid mDid =
+handleListHints :: Repository -> User -> Maybe Int -> Maybe Int -> Handler [Hint]
+handleListHints repo user mSid mDid =
     case (mSid, mDid) of
         (Just sid, Just did) -> do
+            requireSessionOwner repo user (SessionId sid)
             mRec <- liftIO $ repoLoadHintSession repo (SessionId sid) did
             case mRec of
                 Nothing  -> pure []
                 Just rec -> pure (hsHints rec)
         _ -> throwApiError (BadRequest "Both sessionId and draftId query params are required")
 
-handleAddHint :: Repository -> AddHintReq -> Handler [Hint]
-handleAddHint repo req = do
+handleAddHint :: Repository -> User -> AddHintReq -> Handler [Hint]
+handleAddHint repo user req = do
+    requireSessionOwner repo user (SessionId (ahrSessionId req))
     let sid = SessionId (ahrSessionId req)
         did = ahrDraftId req
     mRec <- liftIO $ repoLoadHintSession repo sid did
@@ -590,8 +660,9 @@ handleAddHint repo req = do
     liftIO $ repoSaveHintSession repo sid did newHints checkpoint
     pure newHints
 
-handleRevertHint :: Repository -> HintSessionRef -> Handler [Hint]
-handleRevertHint repo ref = do
+handleRevertHint :: Repository -> User -> HintSessionRef -> Handler [Hint]
+handleRevertHint repo user ref = do
+    requireSessionOwner repo user (SessionId (hsrSessionId ref))
     let sid = SessionId (hsrSessionId ref)
         did = hsrDraftId ref
     mRec <- liftIO $ repoLoadHintSession repo sid did
@@ -606,15 +677,17 @@ handleRevertHint repo ref = do
                     liftIO $ repoSaveHintSession repo sid did reverted (hsCheckpoint rec)
                     pure reverted
 
-handleApplyHints :: Repository -> HintSessionRef -> Handler NoContent
-handleApplyHints repo ref = do
+handleApplyHints :: Repository -> User -> HintSessionRef -> Handler NoContent
+handleApplyHints repo user ref = do
+    requireSessionOwner repo user (SessionId (hsrSessionId ref))
     let sid = SessionId (hsrSessionId ref)
         did = hsrDraftId ref
     liftIO $ repoDeleteHintSession repo sid did
     pure NoContent
 
-handleRebaseHints :: Repository -> HintSessionRef -> Handler RebaseResultResp
-handleRebaseHints repo ref = do
+handleRebaseHints :: Repository -> User -> HintSessionRef -> Handler RebaseResultResp
+handleRebaseHints repo user ref = do
+    requireSessionOwner repo user (SessionId (hsrSessionId ref))
     let sid = SessionId (hsrSessionId ref)
         did = hsrDraftId ref
     mRec <- liftIO $ repoLoadHintSession repo sid did
@@ -627,7 +700,6 @@ handleRebaseHints repo ref = do
                 SHR.UpToDate ->
                     pure (RebaseResultResp "up-to-date" "No changes since last checkpoint")
                 SHR.AutoRebase n -> do
-                    -- Update checkpoint to latest audit entry
                     let newCheckpoint = if null entries then hsCheckpoint rec
                                         else aeId (last entries)
                     liftIO $ repoSaveHintSession repo sid did (hsHints rec) newCheckpoint
@@ -638,3 +710,18 @@ handleRebaseHints repo ref = do
                         "Some changes conflict with current hints")
                 SHR.SessionInvalid msg ->
                     pure (RebaseResultResp "session-invalid" msg)
+
+-- -----------------------------------------------------------------
+-- Session ownership check
+-- -----------------------------------------------------------------
+
+-- | Ensure the authenticated user owns the given session (or is admin).
+requireSessionOwner :: Repository -> User -> SessionId -> Handler ()
+requireSessionOwner repo user sid = do
+    case userRole user of
+        Admin -> return ()
+        Normal -> do
+            mOwner <- liftIO $ repoGetSessionOwner repo sid
+            case mOwner of
+                Just owner | owner == userId user -> return ()
+                _ -> throwApiError (Forbidden "Forbidden")

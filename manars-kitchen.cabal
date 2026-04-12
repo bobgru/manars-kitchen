@@ -52,6 +52,7 @@ library
                      , Audit.CommandMeta
                      , Export.JSON
                      , Server.Api
+                     , Server.Auth
                      , Server.Error
                      , Server.Handlers
                      , Server.Json
@@ -151,6 +152,7 @@ test-suite manars-kitchen-test
                      , warp
                      , http-client
                      , http-types
+                     , sqlite-simple
   ghc-options:         -Wall
                        -Wcompat
 

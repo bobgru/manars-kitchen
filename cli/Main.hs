@@ -129,7 +129,7 @@ resolveSession repo user = do
     let uid = userId user
     mExisting <- repoGetActiveSession repo uid
     case mExisting of
-        Nothing -> repoCreateSession repo uid
+        Nothing -> fst <$> repoCreateSession repo uid
         Just existingSid -> do
             putStr "Active session found. Resume? [Y/n] "
             hFlush stdout
@@ -137,7 +137,7 @@ resolveSession repo user = do
             if answer `elem` ["n", "N", "no", "No"]
                 then do
                     repoCloseSession repo existingSid
-                    repoCreateSession repo uid
+                    fst <$> repoCreateSession repo uid
                 else do
                     repoTouchSession repo existingSid
                     return existingSid

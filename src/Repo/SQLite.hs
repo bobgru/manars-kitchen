@@ -32,6 +32,10 @@ import Domain.Hint (Hint, encodeHints, decodeHints)
 import qualified Data.ByteString.Lazy as BL
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import qualified Data.Text as T
+import Data.Time (UTCTime)
+import Data.Time.Format (parseTimeM, defaultTimeLocale)
+import Numeric (showHex)
+import System.Random (randomRIO)
 import Repo.Schema (initSchema)
 import Repo.Serialize
 import Audit.CommandMeta (classify, CommandMeta(..))
@@ -103,6 +107,9 @@ mkSQLiteRepo path = do
         , repoGetActiveSession = sqlGetActiveSession conn
         , repoTouchSession     = sqlTouchSession conn
         , repoCloseSession     = sqlCloseSession conn
+        , repoGetSessionByToken = sqlGetSessionByToken conn
+        , repoGetSessionOwner = sqlGetSessionOwner conn
+        , repoGetIdleTimeoutMinutes = sqlGetIdleTimeoutMinutes conn
         , repoSaveHintSession   = sqlSaveHintSession conn
         , repoLoadHintSession   = sqlLoadHintSession conn
         , repoDeleteHintSession = sqlDeleteHintSession conn
@@ -1103,11 +1110,12 @@ sanitize = filter (/= '"')
 -- Sessions
 -- =====================================================================
 
-sqlCreateSession :: Connection -> UserId -> IO SessionId
+sqlCreateSession :: Connection -> UserId -> IO (SessionId, String)
 sqlCreateSession conn (UserId uid) = do
-    execute conn "INSERT INTO sessions (user_id) VALUES (?)" (Only uid)
+    tok <- generateToken
+    execute conn "INSERT INTO sessions (user_id, token) VALUES (?, ?)" (uid, tok)
     sid <- lastInsertRowId conn
-    return (SessionId (fromIntegral sid))
+    return (SessionId (fromIntegral sid), tok)
 
 sqlGetActiveSession :: Connection -> UserId -> IO (Maybe SessionId)
 sqlGetActiveSession conn (UserId uid) = do
@@ -1131,6 +1139,52 @@ sqlCloseSession conn (SessionId sid) =
     execute conn
         "UPDATE sessions SET is_active = 0 WHERE id = ?"
         (Only sid)
+
+sqlGetSessionByToken :: Connection -> String -> IO (Maybe (SessionId, UserId, UTCTime))
+sqlGetSessionByToken conn tok = do
+    rows <- query conn
+        "SELECT id, user_id, last_active_at FROM sessions \
+        \WHERE token = ? AND is_active = 1 LIMIT 1"
+        (Only tok)
+        :: IO [(Int, Int, String)]
+    return $ case rows of
+        [(sid, uid, la)] -> case parseUTCTime la of
+            Just t  -> Just (SessionId sid, UserId uid, t)
+            Nothing -> Nothing
+        _ -> Nothing
+
+-- | Parse a SQLite datetime string to UTCTime.
+parseUTCTime :: String -> Maybe UTCTime
+parseUTCTime s =
+    parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S" s
+
+-- | Get the user ID that owns a session.
+sqlGetSessionOwner :: Connection -> SessionId -> IO (Maybe UserId)
+sqlGetSessionOwner conn (SessionId sid) = do
+    rows <- query conn
+        "SELECT user_id FROM sessions WHERE id = ?"
+        (Only sid)
+        :: IO [Only Int]
+    return $ case rows of
+        [Only uid] -> Just (UserId uid)
+        _          -> Nothing
+
+-- | Get the idle timeout in minutes from scheduler_config (default 30).
+sqlGetIdleTimeoutMinutes :: Connection -> IO Double
+sqlGetIdleTimeoutMinutes conn = do
+    rows <- query conn
+        "SELECT value FROM scheduler_config WHERE key = ?"
+        (Only ("session_idle_timeout_minutes" :: String))
+        :: IO [Only Double]
+    return $ case rows of
+        [Only v] -> v
+        _        -> 30.0
+
+-- | Generate a random 64-character hex token (32 bytes of entropy).
+generateToken :: IO String
+generateToken = do
+    bytes <- mapM (\_ -> randomRIO (0, 255 :: Int)) [(1::Int)..32]
+    return $ concatMap (\b -> let h = showHex b "" in if b < 16 then '0':h else h) bytes
 
 -- =====================================================================
 -- Hint sessions

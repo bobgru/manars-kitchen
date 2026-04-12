@@ -4,13 +4,14 @@ module Repo.Types
     , DraftInfo(..)
     , AuditEntry(..)
     , SessionId(..)
+    , Token
     , HintSessionRecord(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time (Day)
+import Data.Time (Day, UTCTime)
 import Domain.Types (WorkerId, StationId, SkillId, Schedule)
 import Domain.Shift (ShiftDef)
 import Domain.Skill (Skill, SkillContext)
@@ -24,6 +25,9 @@ import Domain.Hint (Hint)
 -- | Opaque session identifier.
 newtype SessionId = SessionId Int
     deriving (Eq, Ord, Show)
+
+-- | Opaque authentication token (64-character hex string).
+type Token = String
 
 -- | Metadata for a draft session.
 data DraftInfo = DraftInfo
@@ -224,14 +228,20 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Sessions
       -- ---------------------------------------------------------------
-    , repoCreateSession     :: UserId -> IO SessionId
-      -- ^ Create a new active session for a user
+    , repoCreateSession     :: UserId -> IO (SessionId, Token)
+      -- ^ Create a new active session for a user, returning session ID and auth token
     , repoGetActiveSession  :: UserId -> IO (Maybe SessionId)
       -- ^ Get the active session for a user, if any
     , repoTouchSession      :: SessionId -> IO ()
       -- ^ Update last_active_at to current time
     , repoCloseSession      :: SessionId -> IO ()
       -- ^ Mark a session as inactive
+    , repoGetSessionByToken :: Token -> IO (Maybe (SessionId, UserId, UTCTime))
+      -- ^ Look up a session by auth token; returns session ID, user ID, and last_active_at
+    , repoGetSessionOwner :: SessionId -> IO (Maybe UserId)
+      -- ^ Get the user ID that owns a session
+    , repoGetIdleTimeoutMinutes :: IO Double
+      -- ^ Get the session idle timeout in minutes (from scheduler_config)
 
       -- ---------------------------------------------------------------
       -- Hint sessions (persistent what-if)

@@ -16,7 +16,7 @@ spec = do
     describe "hint session persistence" $ do
         it "save and load round-trips" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "alice"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                         , CloseStation (StationId 1) testSlot
                         ]
@@ -26,13 +26,13 @@ spec = do
 
         it "returns Nothing for nonexistent session" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "bob"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             result <- repoLoadHintSession repo sid 99
             result `shouldBe` Nothing
 
         it "upsert overwrites existing session" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "carol"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             let hints1 = [GrantSkill (WorkerId 1) (SkillId 1)]
                 hints2 = [WaiveOvertime (WorkerId 2)]
             repoSaveHintSession repo sid 1 hints1 10
@@ -42,7 +42,7 @@ spec = do
 
         it "delete removes session" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "dave"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             let hints = [WaiveOvertime (WorkerId 1)]
             repoSaveHintSession repo sid 1 hints 5
             repoDeleteHintSession repo sid 1
@@ -51,7 +51,7 @@ spec = do
 
         it "delete nonexistent is a no-op" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "eve"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             repoDeleteHintSession repo sid 99  -- should not error
 
     describe "audit-since query" $ do

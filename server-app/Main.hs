@@ -1,13 +1,13 @@
 module Main (main) where
 
 import Network.Wai.Handler.Warp (run)
-import Servant (serve)
+import Servant (serveWithContext, Context(..))
 import System.Environment (getArgs)
 
 import Repo.SQLite (mkSQLiteRepo)
 import Server.Api (fullApi)
+import Server.Auth (authHandler)
 import Server.Handlers (fullServer)
-import Server.Rpc (sessionMiddleware)
 
 main :: IO ()
 main = do
@@ -16,7 +16,8 @@ main = do
     putStrLn $ "Database: " ++ dbPath
     putStrLn $ "Listening on port " ++ show port
     (_conn, repo) <- mkSQLiteRepo dbPath
-    run port (sessionMiddleware repo $ serve fullApi (fullServer repo))
+    let ctx = authHandler repo :. EmptyContext
+    run port (serveWithContext fullApi ctx (fullServer repo))
 
 parseArgs :: [String] -> (String, Int)
 parseArgs []     = ("run-db/manars-kitchen.db", 8080)

@@ -1920,7 +1920,7 @@ runDemo repo delayUs cmdLines = do
     case mUser of
         Nothing -> putStrLn "ERROR: admin user not found after creation"
         Just adminUser -> do
-            demoSid <- repoCreateSession repo (userId adminUser)
+            (demoSid, _tok) <- repoCreateSession repo (userId adminUser)
             st <- mkAppState repo adminUser demoSid
             let entries = [("", "", c) | c <- cmdLines]
                 opts = ReplayOpts delayUs (delayUs > 0)

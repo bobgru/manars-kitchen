@@ -276,10 +276,12 @@ statements =
     , "CREATE TABLE IF NOT EXISTS sessions (\
       \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
       \  user_id INTEGER NOT NULL,\
+      \  token TEXT NOT NULL,\
       \  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
       \  last_active_at TEXT NOT NULL DEFAULT (datetime('now')),\
       \  is_active INTEGER NOT NULL DEFAULT 1\
       \)"
+    , "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token)"
 
       -- Hint sessions (persistent what-if sessions)
     , "CREATE TABLE IF NOT EXISTS hint_sessions (\
@@ -310,6 +312,10 @@ migrations =
     , "ALTER TABLE audit_log ADD COLUMN is_mutation INTEGER NOT NULL DEFAULT 1"
     , "ALTER TABLE audit_log ADD COLUMN params TEXT"
     , "ALTER TABLE audit_log ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'"
+    -- Session auth token
+    , "ALTER TABLE sessions ADD COLUMN token TEXT NOT NULL DEFAULT ''"
+    -- Session idle timeout default
+    , "INSERT OR IGNORE INTO scheduler_config (key, value) VALUES ('session_idle_timeout_minutes', 30)"
     ]
 
 -- | Try to execute a statement, silently ignoring errors (for idempotent migrations).

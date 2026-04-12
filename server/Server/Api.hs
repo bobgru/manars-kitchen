@@ -1,8 +1,12 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Server.Api
     ( API
+    , RawAPI
+    , PublicAPI
     , FullAPI
     , api
     , fullApi
@@ -11,6 +15,7 @@ module Server.Api
 import Data.Proxy (Proxy(..))
 import Data.Time (Day)
 import Servant.API
+import Servant.Server.Experimental.Auth (AuthServerData)
 
 import Auth.Types (User)
 import Domain.Types (SkillId, Schedule)
@@ -22,11 +27,23 @@ import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment)
 import Repo.Types (DraftInfo, CalendarCommit, AuditEntry)
 import Server.Json
+import Server.Auth (LoginReq, LoginResp)
 import Server.Rpc (RpcAPI)
 
-type API =
+-- | Map the AuthProtect tag to the User type.
+type instance AuthServerData (AuthProtect "session") = User
+
+-- | Public endpoints (no auth required).
+type PublicAPI =
+         "api" :> "login" :> ReqBody '[JSON] LoginReq :> Post '[JSON] LoginResp
+
+-- | The raw REST API (without auth combinator — used inside ProtectedAPI).
+type RawAPI =
+    -- Logout (requires auth, placed here since it's under the protected block)
+         "api" :> "logout" :> PostNoContent
+
     -- Skills (read)
-         "api" :> "skills" :> Get '[JSON] [(SkillId, Skill)]
+    :<|> "api" :> "skills" :> Get '[JSON] [(SkillId, Skill)]
     -- Stations (read)
     :<|> "api" :> "stations" :> Get '[JSON] [(Int, String)]
     -- Shifts (read)
@@ -188,8 +205,12 @@ type API =
     :<|> "api" :> "hints" :> "rebase" :> ReqBody '[JSON] HintSessionRef
          :> Post '[JSON] RebaseResultResp
 
--- | Combined API: REST + RPC
-type FullAPI = API :<|> RpcAPI
+-- | The old API type alias (for backward compat in type signatures)
+type API = RawAPI
+
+-- | Combined API: Public + Protected (REST + RPC)
+type FullAPI = PublicAPI
+          :<|> AuthProtect "session" :> (RawAPI :<|> RpcAPI)
 
 api :: Proxy API
 api = Proxy

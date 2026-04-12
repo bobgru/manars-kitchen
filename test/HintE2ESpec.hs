@@ -20,7 +20,7 @@ spec = do
             withTestRepo $ \repo -> do
                 -- Session 1: create user, session, draft, save hints
                 uid <- createTestUser repo "alice"
-                sid1 <- repoCreateSession repo uid
+                (sid1, _tok1) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , WaiveOvertime (WorkerId 5)
@@ -35,7 +35,7 @@ spec = do
                 repoCloseSession repo sid1
 
                 -- Session 2: new session, load persisted hints
-                _sid2 <- repoCreateSession repo uid
+                (_sid2, _tok2) <- repoCreateSession repo uid
                 -- Hint sessions are keyed by (session_id, draft_id).
                 -- A different session_id won't find session 1's data directly.
                 -- The real CLI uses the same session_id on resume because
@@ -54,7 +54,7 @@ spec = do
         it "hints preserved after compatible mutation" $
             withTestRepo $ \repo -> do
                 uid <- createTestUser repo "bob"
-                sid <- repoCreateSession repo uid
+                (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
                 -- Establish checkpoint
@@ -86,7 +86,7 @@ spec = do
         it "conflict detected and resolvable by dropping conflicting hints" $
             withTestRepo $ \repo -> do
                 uid <- createTestUser repo "carol"
-                sid <- repoCreateSession repo uid
+                (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , WaiveOvertime (WorkerId 5)
@@ -133,7 +133,7 @@ spec = do
         it "structural change (draft commit) invalidates session" $
             withTestRepo $ \repo -> do
                 uid <- createTestUser repo "dave"
-                sid <- repoCreateSession repo uid
+                (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
                 repoLogCommand repo "dave" "station add 1 grill"
@@ -153,7 +153,7 @@ spec = do
         it "deleting hint session on commit simulates cleanup" $
             withTestRepo $ \repo -> do
                 uid <- createTestUser repo "eve"
-                sid <- repoCreateSession repo uid
+                (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [WaiveOvertime (WorkerId 1)]
                 repoLogCommand repo "eve" "station add 1 grill"
@@ -173,7 +173,7 @@ spec = do
         it "deleting hint session on discard simulates cleanup" $
             withTestRepo $ \repo -> do
                 uid <- createTestUser repo "frank"
-                sid <- repoCreateSession repo uid
+                (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , CloseStation (StationId 1) testSlot

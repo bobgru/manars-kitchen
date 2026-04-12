@@ -16,7 +16,7 @@ spec = do
     describe "create and retrieve session" $ do
         it "creates a session and retrieves it as active" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "alice"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             mActive <- repoGetActiveSession repo uid
             mActive `shouldBe` Just sid
 
@@ -24,7 +24,7 @@ spec = do
     describe "close session" $ do
         it "makes session inactive after close" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "bob"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             repoCloseSession repo sid
             mActive <- repoGetActiveSession repo uid
             mActive `shouldBe` Nothing
@@ -33,7 +33,7 @@ spec = do
     describe "touch session" $ do
         it "updates last_active_at" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "carol"
-            sid <- repoCreateSession repo uid
+            (sid, _tok) <- repoCreateSession repo uid
             -- Small delay so timestamps differ
             threadDelay 1100000  -- 1.1 seconds (SQLite datetime has 1s resolution)
             repoTouchSession repo sid
@@ -45,16 +45,16 @@ spec = do
     describe "multiple sessions" $ do
         it "returns only the most recent active session" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "dave"
-            sid1 <- repoCreateSession repo uid
+            (sid1, _tok1) <- repoCreateSession repo uid
             repoCloseSession repo sid1
-            sid2 <- repoCreateSession repo uid
+            (sid2, _tok2) <- repoCreateSession repo uid
             mActive <- repoGetActiveSession repo uid
             mActive `shouldBe` Just sid2
 
         it "returns Nothing when all sessions are closed" $ withTestRepo $ \repo -> do
             uid <- createTestUser repo "eve"
-            sid1 <- repoCreateSession repo uid
-            sid2 <- repoCreateSession repo uid
+            (sid1, _tok1) <- repoCreateSession repo uid
+            (sid2, _tok2) <- repoCreateSession repo uid
             repoCloseSession repo sid1
             repoCloseSession repo sid2
             mActive <- repoGetActiveSession repo uid
