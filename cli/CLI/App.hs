@@ -49,6 +49,7 @@ import Service.DraftValidation (DraftViolation(..), validateDraftAgainstCalendar
 import qualified Service.FreezeLine as Freeze
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
+import Service.PubSub (newPubSub, subscribe, unsubscribe, ProgressEvent(..))
 import CLI.Commands (Command(..), parseCommand)
 import CLI.Display
 import CLI.Resolve
@@ -389,16 +390,20 @@ handleCommand st cmd = case cmd of
                                 , Scheduler.schPeriodBounds = periodBounds
                                 , Scheduler.schCalendarHours = Map.empty
                                 }
-                        result <- Opt.optimizeSchedule ctx seed $ \progress ->
-                            let phaseStr = case opPhase progress of
-                                    PhaseHard -> "hard"
-                                    PhaseSoft -> "soft"
-                                elapsed = showFFloat1 (opElapsedSecs progress)
-                            in putStrLn ("[opt] phase=" ++ phaseStr
-                                        ++ " iter=" ++ show (opIteration progress)
-                                        ++ " unfilled=" ++ show (opBestUnfilled progress)
-                                        ++ " score=" ++ showFFloat1 (opBestScore progress)
-                                        ++ " elapsed=" ++ elapsed ++ "s")
+                        bus <- newPubSub
+                        subId <- subscribe bus $ \evt -> case evt of
+                            OptimizeProgress progress ->
+                                let phaseStr = case opPhase progress of
+                                        PhaseHard -> "hard"
+                                        PhaseSoft -> "soft"
+                                    elapsed = showFFloat1 (opElapsedSecs progress)
+                                in putStrLn ("[opt] phase=" ++ phaseStr
+                                            ++ " iter=" ++ show (opIteration progress)
+                                            ++ " unfilled=" ++ show (opBestUnfilled progress)
+                                            ++ " score=" ++ showFFloat1 (opBestScore progress)
+                                            ++ " elapsed=" ++ elapsed ++ "s")
+                        result <- Opt.optimizeSchedule ctx seed bus
+                        unsubscribe bus subId
                         let sched  = Scheduler.srSchedule result
                             unfilled = Scheduler.srUnfilled result
                             truly = length [u | u <- unfilled, Scheduler.unfilledKind u == Scheduler.TrulyUnfilled]
