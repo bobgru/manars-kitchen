@@ -196,7 +196,16 @@ statements =
       \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
       \  timestamp TEXT NOT NULL DEFAULT (datetime('now')),\
       \  username TEXT NOT NULL,\
-      \  command TEXT NOT NULL\
+      \  command TEXT,\
+      \  entity_type TEXT,\
+      \  operation TEXT,\
+      \  entity_id INTEGER,\
+      \  target_id INTEGER,\
+      \  date_from TEXT,\
+      \  date_to TEXT,\
+      \  is_mutation INTEGER NOT NULL DEFAULT 1,\
+      \  params TEXT,\
+      \  source TEXT NOT NULL DEFAULT 'cli'\
       \)"
 
       -- Calendar assignments (continuous calendar, no schedule name)
@@ -271,6 +280,16 @@ migrations :: [Query]
 migrations =
     [ "ALTER TABLE drafts ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT (datetime('now'))"
     , "ALTER TABLE worker_hours RENAME COLUMN max_weekly_seconds TO max_period_seconds"
+    -- Structured audit log columns (idempotent via tryExec)
+    , "ALTER TABLE audit_log ADD COLUMN entity_type TEXT"
+    , "ALTER TABLE audit_log ADD COLUMN operation TEXT"
+    , "ALTER TABLE audit_log ADD COLUMN entity_id INTEGER"
+    , "ALTER TABLE audit_log ADD COLUMN target_id INTEGER"
+    , "ALTER TABLE audit_log ADD COLUMN date_from TEXT"
+    , "ALTER TABLE audit_log ADD COLUMN date_to TEXT"
+    , "ALTER TABLE audit_log ADD COLUMN is_mutation INTEGER NOT NULL DEFAULT 1"
+    , "ALTER TABLE audit_log ADD COLUMN params TEXT"
+    , "ALTER TABLE audit_log ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'"
     ]
 
 -- | Try to execute a statement, silently ignoring errors (for idempotent migrations).

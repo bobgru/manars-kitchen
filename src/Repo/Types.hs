@@ -2,6 +2,7 @@ module Repo.Types
     ( Repository(..)
     , CalendarCommit(..)
     , DraftInfo(..)
+    , AuditEntry(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
@@ -34,6 +35,23 @@ data CalendarCommit = CalendarCommit
     , ccDateTo      :: !Day
     , ccNote        :: !String
     } deriving (Show)
+
+-- | Structured audit log entry.
+data AuditEntry = AuditEntry
+    { aeId         :: !Int
+    , aeTimestamp  :: !String
+    , aeUsername   :: !String
+    , aeCommand    :: !(Maybe String)
+    , aeEntityType :: !(Maybe String)
+    , aeOperation  :: !(Maybe String)
+    , aeEntityId   :: !(Maybe Int)
+    , aeTargetId   :: !(Maybe Int)
+    , aeDateFrom   :: !(Maybe String)
+    , aeDateTo     :: !(Maybe String)
+    , aeIsMutation :: !Bool
+    , aeParams     :: !(Maybe String)
+    , aeSource     :: !String
+    } deriving (Show, Eq)
 
 -- | Record-of-functions abstracting over storage backend.
 -- Each field is an IO action; swap the record to swap the backend
@@ -137,8 +155,8 @@ data Repository = Repository
       -- ---------------------------------------------------------------
     , repoLogCommand     :: String -> String -> IO ()
       -- ^ username, command string
-    , repoGetAuditLog    :: IO [(String, String, String)]
-      -- ^ returns (timestamp, username, command)
+    , repoGetAuditLog    :: IO [AuditEntry]
+      -- ^ returns structured audit entries
     , repoWipeAll        :: IO ()
       -- ^ delete all data from all tables (for demo/replay)
 

@@ -3,6 +3,10 @@
 ### Requirement: CommandMeta type
 The system SHALL define a `CommandMeta` record with fields: `cmEntityType` (Maybe String), `cmOperation` (Maybe String), `cmEntityId` (Maybe Int), `cmTargetId` (Maybe Int), `cmDateFrom` (Maybe Day), `cmDateTo` (Maybe Day), `cmIsMutation` (Bool), `cmParams` (Maybe Value for JSON blob).
 
+#### Scenario: Default metadata
+- **WHEN** a CommandMeta is constructed with `defaultMeta`
+- **THEN** all Maybe fields are Nothing and cmIsMutation is False
+
 ### Requirement: classify function
 The system SHALL provide `classify :: String -> CommandMeta` that extracts structured metadata from a raw command string.
 

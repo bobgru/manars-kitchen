@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeOperators #-}
 module Repo.SQLite
     ( mkSQLiteRepo
     ) where
@@ -26,9 +27,10 @@ import Domain.Absence
     , AbsenceRequest(..), AbsenceContext(..)
     )
 import Data.Time (Day)
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..))
 import Repo.Schema (initSchema)
 import Repo.Serialize
+import Audit.CommandMeta (classify, CommandMeta(..))
 
 -- | Create a Repository backed by a SQLite database at the given path.
 -- Creates the schema if it doesn't exist.
@@ -642,15 +644,42 @@ sqlDeleteSchedule conn name = do
 
 sqlLogCommand :: Connection -> String -> String -> IO ()
 sqlLogCommand conn username command =
-    execute conn "INSERT INTO audit_log (username, command) VALUES (?, ?)"
-        (username, command)
+    let meta = classify command
+        mut  = if cmIsMutation meta then (1 :: Int) else 0
+    in execute conn
+        "INSERT INTO audit_log (username, command, entity_type, operation, \
+        \entity_id, target_id, date_from, date_to, is_mutation, params, source) \
+        \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cli')"
+        ( username, command
+        , cmEntityType meta, cmOperation meta
+        , cmEntityId meta, cmTargetId meta
+        , cmDateFrom meta, cmDateTo meta
+        , mut, cmParams meta
+        )
 
-sqlGetAuditLog :: Connection -> IO [(String, String, String)]
+sqlGetAuditLog :: Connection -> IO [AuditEntry]
 sqlGetAuditLog conn = do
     rows <- query_ conn
-        "SELECT timestamp, username, command FROM audit_log ORDER BY id ASC"
-        :: IO [(String, String, String)]
-    return rows
+        "SELECT id, timestamp, username, command, entity_type, operation, \
+        \entity_id, target_id, date_from, date_to, is_mutation, params, source \
+        \FROM audit_log ORDER BY id ASC"
+        :: IO [(Int, String, String, Maybe String, Maybe String, Maybe String,
+                Maybe Int) :. (Maybe Int, Maybe String, Maybe String, Int, Maybe String, String)]
+    return [AuditEntry
+        { aeId         = i
+        , aeTimestamp  = ts
+        , aeUsername   = user
+        , aeCommand    = cmd
+        , aeEntityType = et
+        , aeOperation  = op
+        , aeEntityId   = eid
+        , aeTargetId   = tid
+        , aeDateFrom   = df
+        , aeDateTo     = dt
+        , aeIsMutation = mut /= (0 :: Int)
+        , aeParams     = ps
+        , aeSource     = src
+        } | (i, ts, user, cmd, et, op, eid) :. (tid, df, dt, mut, ps, src) <- rows]
 
 -- =====================================================================
 -- Scheduler config

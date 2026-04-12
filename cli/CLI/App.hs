@@ -3,6 +3,7 @@ module CLI.App
     , mkAppState
     , runRepl
     , runDemo
+    , isMutating
     ) where
 
 import System.IO (hFlush, stdout, hSetEcho, stdin)
@@ -35,7 +36,8 @@ import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..))
+import qualified Audit.CommandMeta as Meta
 import Service.Auth (AuthError(..), register, changePassword)
 import qualified Service.Worker as SW
 import qualified Service.Absence as SA
@@ -1410,15 +1412,18 @@ handleCommand st cmd = case cmd of
         entries <- repoGetAuditLog (asRepo st)
         if null entries
             then putStrLn "  (no audit entries)"
-            else mapM_ (\(ts, user, c) ->
-                putStrLn ("  " ++ ts ++ "  " ++ user ++ ": " ++ c)
+            else mapM_ (\ae ->
+                let cmdStr = case aeCommand ae of
+                        Just c  -> c
+                        Nothing -> Meta.render (auditEntryToMeta ae)
+                in putStrLn ("  " ++ aeTimestamp ae ++ "  " ++ aeUsername ae ++ ": " ++ cmdStr)
                 ) entries
 
     CmdReplay -> requireAdmin st $ do
         entries <- repoGetAuditLog (asRepo st)
         if null entries
             then putStrLn "  (no audit entries to replay)"
-            else replayCommands fastReplay st entries
+            else replayCommands fastReplay st (map auditEntryToTriple entries)
 
     CmdReplayFile file -> requireAdmin st $ do
         contents <- readFile file
@@ -1439,7 +1444,7 @@ handleCommand st cmd = case cmd of
                 -- Re-create default admin
                 _ <- register (asRepo st) "admin" "admin" Admin (WorkerId 1)
                 putStrLn "Created default admin user (admin/admin), Worker 1"
-                replayCommands fastReplay st entries
+                replayCommands fastReplay st (map auditEntryToTriple entries)
                 putStrLn "Demo complete."
 
     -- Self
@@ -1647,6 +1652,28 @@ replayCommands opts st entries = do
                 _                 -> handleCommand st cmd
         ) entries
     putStrLn "\nReplay complete."
+
+-- | Convert an AuditEntry to a (timestamp, username, command) triple for replay.
+-- Uses the raw command when present, falls back to render.
+auditEntryToTriple :: AuditEntry -> (String, String, String)
+auditEntryToTriple ae =
+    let cmdStr = case aeCommand ae of
+            Just c  -> c
+            Nothing -> Meta.render (auditEntryToMeta ae)
+    in (aeTimestamp ae, aeUsername ae, cmdStr)
+
+-- | Convert an AuditEntry to a CommandMeta for rendering.
+auditEntryToMeta :: AuditEntry -> Meta.CommandMeta
+auditEntryToMeta ae = Meta.CommandMeta
+    { Meta.cmEntityType = aeEntityType ae
+    , Meta.cmOperation  = aeOperation ae
+    , Meta.cmEntityId   = aeEntityId ae
+    , Meta.cmTargetId   = aeTargetId ae
+    , Meta.cmDateFrom   = aeDateFrom ae
+    , Meta.cmDateTo     = aeDateTo ae
+    , Meta.cmIsMutation = aeIsMutation ae
+    , Meta.cmParams     = aeParams ae
+    }
 
 -- | Run demo mode: create admin, replay commands from a file with delay.
 -- Called from Main when --demo flag is used.

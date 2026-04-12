@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Structured audit log schema
 The `audit_log` table SHALL be extended with columns: `entity_type TEXT`, `operation TEXT`, `entity_id INTEGER`, `target_id INTEGER`, `date_from TEXT`, `date_to TEXT`, `is_mutation INTEGER NOT NULL DEFAULT 1`, `params TEXT`, `source TEXT NOT NULL DEFAULT 'cli'`. The existing `command` column SHALL become nullable.
@@ -13,6 +13,10 @@ The `audit_log` table SHALL be extended with columns: `entity_type TEXT`, `opera
 
 ### Requirement: AuditEntry type
 The system SHALL define an `AuditEntry` record type with fields for all audit_log columns: `aeId` (Int), `aeTimestamp` (String), `aeUsername` (String), `aeCommand` (Maybe String), `aeEntityType` (Maybe String), `aeOperation` (Maybe String), `aeEntityId` (Maybe Int), `aeTargetId` (Maybe Int), `aeDateFrom` (Maybe String), `aeDateTo` (Maybe String), `aeIsMutation` (Bool), `aeParams` (Maybe String), `aeSource` (String).
+
+#### Scenario: AuditEntry fields populated from structured row
+- **WHEN** an audit_log row with all structured columns populated is read
+- **THEN** the resulting AuditEntry has all corresponding fields set
 
 ### Requirement: repoLogCommand internally classifies
 The `repoLogCommand` function SHALL continue to accept `(username, command_string)` with no signature change. Internally, it SHALL call `classify` on the command string and INSERT both the raw command and the structured fields.
