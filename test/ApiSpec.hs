@@ -82,6 +82,10 @@ getConfigC       :: ClientM [(String, Double)]
 -- Skill CRUD
 createSkillC     :: CreateSkillReq -> ClientM NoContent
 deleteSkillC     :: Int -> ClientM NoContent
+_renameSkillC    :: Int -> RenameSkillReq -> ClientM NoContent
+_listImplicationsC :: ClientM (Map.Map Int [Int])
+_addImplicationC :: Int -> AddImplicationReq -> ClientM NoContent
+_removeImplicationC :: Int -> Int -> ClientM NoContent
 
 -- Station CRUD
 createStationC    :: CreateStationReq -> ClientM NoContent
@@ -181,6 +185,10 @@ logoutC
     -- New endpoints
     :<|> createSkillC
     :<|> deleteSkillC
+    :<|> _renameSkillC
+    :<|> _listImplicationsC
+    :<|> _addImplicationC
+    :<|> _removeImplicationC
     :<|> createStationC
     :<|> _deleteStationC
     :<|> setStationHoursC

@@ -12,6 +12,8 @@ module Server.Json
     , AbsenceCreatedResp(..)
       -- * Skill / Station / Shift CRUD
     , CreateSkillReq(..)
+    , RenameSkillReq(..)
+    , AddImplicationReq(..)
     , CreateStationReq(..)
     , SetStationHoursReq(..)
     , SetStationClosureReq(..)
@@ -533,6 +535,28 @@ instance ToJSON CreateSkillReq where
 instance FromJSON CreateSkillReq where
     parseJSON = withObject "CreateSkillReq" $ \v ->
         CreateSkillReq <$> v .: "id" <*> v .: "name" <*> v .: "description"
+
+data RenameSkillReq = RenameSkillReq
+    { rsrName :: !String
+    } deriving (Show)
+
+instance ToJSON RenameSkillReq where
+    toJSON r = object ["name" .= rsrName r]
+
+instance FromJSON RenameSkillReq where
+    parseJSON = withObject "RenameSkillReq" $ \v ->
+        RenameSkillReq <$> v .: "name"
+
+data AddImplicationReq = AddImplicationReq
+    { airImpliesSkillId :: !Int
+    } deriving (Show)
+
+instance ToJSON AddImplicationReq where
+    toJSON r = object ["impliesSkillId" .= airImpliesSkillId r]
+
+instance FromJSON AddImplicationReq where
+    parseJSON = withObject "AddImplicationReq" $ \v ->
+        AddImplicationReq <$> v .: "impliesSkillId"
 
 data CreateStationReq = CreateStationReq
     { cstrId   :: !Int

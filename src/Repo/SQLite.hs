@@ -58,6 +58,9 @@ mkSQLiteRepo path = do
         , repoCreateSkill    = sqlCreateSkill conn
         , repoDeleteSkill    = sqlDeleteSkill conn
         , repoListSkills     = sqlListSkills conn
+        , repoRenameSkill    = sqlRenameSkill conn
+        , repoListSkillImplications = sqlListSkillImplications conn
+        , repoRemoveSkillImplication = sqlRemoveSkillImplication conn
         , repoCreateStation  = sqlCreateStation conn
         , repoDeleteStation  = sqlDeleteStation conn
         , repoListStations   = sqlListStations conn
@@ -189,6 +192,22 @@ sqlListSkills conn = do
     rows <- query_ conn "SELECT id, name, description FROM skills ORDER BY id"
         :: IO [(Int, String, String)]
     return [(SkillId sid, Skill name desc) | (sid, name, desc) <- rows]
+
+sqlRenameSkill :: Connection -> SkillId -> String -> IO ()
+sqlRenameSkill conn (SkillId sid) newName =
+    execute conn "UPDATE skills SET name = ? WHERE id = ?" (newName, sid)
+
+sqlListSkillImplications :: Connection -> IO [(SkillId, SkillId)]
+sqlListSkillImplications conn = do
+    rows <- query_ conn "SELECT skill_id, implies_skill_id FROM skill_implications"
+        :: IO [(Int, Int)]
+    return [(SkillId s, SkillId i) | (s, i) <- rows]
+
+sqlRemoveSkillImplication :: Connection -> SkillId -> SkillId -> IO ()
+sqlRemoveSkillImplication conn (SkillId s) (SkillId i) =
+    execute conn
+        "DELETE FROM skill_implications WHERE skill_id = ? AND implies_skill_id = ?"
+        (s, i)
 
 -- =====================================================================
 -- Stations (entity CRUD)

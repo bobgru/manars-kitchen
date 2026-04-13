@@ -93,6 +93,12 @@ data Repository = Repository
       -- ^ id, name, description
     , repoDeleteSkill    :: SkillId -> IO ()
     , repoListSkills     :: IO [(SkillId, Skill)]
+    , repoRenameSkill    :: SkillId -> String -> IO ()
+      -- ^ id, new name
+    , repoListSkillImplications :: IO [(SkillId, SkillId)]
+      -- ^ all (skill_id, implies_skill_id) pairs
+    , repoRemoveSkillImplication :: SkillId -> SkillId -> IO ()
+      -- ^ skill_id, implies_skill_id
 
       -- ---------------------------------------------------------------
       -- Stations (entity CRUD)

@@ -68,6 +68,11 @@ server repo user =
     -- Skill CRUD
     :<|> handleCreateSkill repo user
     :<|> handleDeleteSkill repo user
+    :<|> handleRenameSkill repo user
+    -- Skill implications
+    :<|> handleListImplications repo
+    :<|> handleAddImplication repo user
+    :<|> handleRemoveImplication repo user
     -- Station CRUD
     :<|> handleCreateStation repo user
     :<|> handleDeleteStation repo user
@@ -303,6 +308,31 @@ handleDeleteSkill :: Repository -> User -> Int -> Handler NoContent
 handleDeleteSkill repo user sid = do
     requireAdmin user
     liftIO $ SW.removeSkill repo (SkillId sid)
+    pure NoContent
+
+handleRenameSkill :: Repository -> User -> Int -> RenameSkillReq -> Handler NoContent
+handleRenameSkill repo user sid req = do
+    requireAdmin user
+    liftIO $ SW.renameSkill repo (SkillId sid) (rsrName req)
+    pure NoContent
+
+handleListImplications :: Repository -> Handler (Map.Map Int [Int])
+handleListImplications repo = do
+    impl <- liftIO $ SW.listSkillImplications repo
+    let toInt (SkillId i) = i
+    pure $ Map.fromList
+        [ (toInt k, map toInt vs) | (k, vs) <- Map.toList impl ]
+
+handleAddImplication :: Repository -> User -> Int -> AddImplicationReq -> Handler NoContent
+handleAddImplication repo user sid req = do
+    requireAdmin user
+    liftIO $ SW.addSkillImplication repo (SkillId sid) (SkillId (airImpliesSkillId req))
+    pure NoContent
+
+handleRemoveImplication :: Repository -> User -> Int -> Int -> Handler NoContent
+handleRemoveImplication repo user sid impliedId = do
+    requireAdmin user
+    liftIO $ SW.removeSkillImplication repo (SkillId sid) (SkillId impliedId)
     pure NoContent
 
 -- -----------------------------------------------------------------

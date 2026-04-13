@@ -12,6 +12,7 @@ module Server.Api
     , fullApi
     ) where
 
+import Data.Map.Strict (Map)
 import Data.Proxy (Proxy(..))
 import Data.Time (Day)
 import Servant.API
@@ -80,6 +81,13 @@ type RawAPI =
     -- -----------------------------------------------------------------
     :<|> "api" :> "skills" :> ReqBody '[JSON] CreateSkillReq :> PostNoContent
     :<|> "api" :> "skills" :> Capture "id" Int :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "id" Int :> ReqBody '[JSON] RenameSkillReq :> PutNoContent
+    -- Skill implications
+    :<|> "api" :> "skills" :> "implications" :> Get '[JSON] (Map Int [Int])
+    :<|> "api" :> "skills" :> Capture "id" Int :> "implications"
+         :> ReqBody '[JSON] AddImplicationReq :> PostNoContent
+    :<|> "api" :> "skills" :> Capture "id" Int :> "implications"
+         :> Capture "impliedId" Int :> DeleteNoContent
 
     -- -----------------------------------------------------------------
     -- Station CRUD

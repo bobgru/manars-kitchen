@@ -3,6 +3,9 @@ module Service.Worker
       addSkill
     , removeSkill
     , listSkills
+    , renameSkill
+    , listSkillImplications
+    , removeSkillImplication
       -- * Station entity operations
     , addStation
     , removeStation
@@ -80,6 +83,29 @@ removeSkill repo sid = do
 -- | List all registered skills.
 listSkills :: Repository -> IO [(SkillId, Skill)]
 listSkills = repoListSkills
+
+-- | Rename a skill.
+renameSkill :: Repository -> SkillId -> String -> IO ()
+renameSkill repo sid newName = repoRenameSkill repo sid newName
+
+-- | List all direct skill implications as a map.
+listSkillImplications :: Repository -> IO (Map.Map SkillId [SkillId])
+listSkillImplications repo = do
+    pairs <- repoListSkillImplications repo
+    return $ Map.fromListWith (++) [(s, [i]) | (s, i) <- pairs]
+
+-- | Remove a skill implication.
+removeSkillImplication :: Repository -> SkillId -> SkillId -> IO ()
+removeSkillImplication repo skillA skillB = do
+    repoRemoveSkillImplication repo skillA skillB
+    -- Also update the in-memory context
+    ctx <- repoLoadSkillCtx repo
+    let current = Map.findWithDefault Set.empty skillA (scSkillImplies ctx)
+        updated = Set.delete skillB current
+        ctx' = if Set.null updated
+               then ctx { scSkillImplies = Map.delete skillA (scSkillImplies ctx) }
+               else ctx { scSkillImplies = Map.insert skillA updated (scSkillImplies ctx) }
+    repoSaveSkillCtx repo ctx'
 
 -- -----------------------------------------------------------------
 -- Station entity CRUD

@@ -37,7 +37,7 @@ in `demo-db/` (demos) and `run-db/` (interactive sessions).
 Build the frontend and start the server:
 
 ```
-cd web && npm install && npm run build && cd ..
+make web
 make server
 ```
 

@@ -1,3 +1,5 @@
+import { Outlet } from "react-router";
+import Sidebar from "./Sidebar";
 import Terminal from "./Terminal";
 
 interface AppShellProps {
@@ -22,9 +24,17 @@ export default function AppShell({
           </button>
         </span>
       </header>
-      <main className="app-main">
-        <Terminal onSessionExpired={onSessionExpired} />
-      </main>
+      <div className="app-body">
+        <Sidebar />
+        <div className="app-content">
+          <div className="app-page">
+            <Outlet />
+          </div>
+          <div className="app-terminal">
+            <Terminal onSessionExpired={onSessionExpired} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
