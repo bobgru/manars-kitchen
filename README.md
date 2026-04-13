@@ -3,21 +3,25 @@
 A restaurant employee scheduling system built in Haskell. It generates
 weekly schedules that satisfy hard constraints (skills, hours, rest
 periods) while optimizing soft preferences (station preferences, shift
-preferences, workload balance). An interactive CLI provides schedule
-generation, what-if analysis, diagnosis of coverage gaps, and full
-audit logging backed by SQLite.
+preferences, workload balance). A web interface and interactive CLI
+provide schedule generation, what-if analysis, diagnosis of coverage
+gaps, and full audit logging backed by SQLite.
 
 ## Quick start
 
-Prerequisites: [Stack](https://docs.haskellstack.org/) (GHC 9.10 /
-LTS 24.35).
+Prerequisites:
+
+- [Stack](https://docs.haskellstack.org/) (GHC 9.10 / LTS 24.35)
+- [Node.js](https://nodejs.org/) (for building the web frontend)
+- Python 3 (used by the demo script)
 
 ```
-make build          # compile library + CLI
-make test           # run all tests (325 examples)
+make build          # compile library + CLI + server
+make test           # run all tests
 make demo           # replay the demo restaurant setup (with delay)
 make fast-demo      # same, instant replay
-make run            # launch interactive REPL
+make run            # launch interactive CLI REPL
+make server         # start the web server
 make clean          # remove databases and build artifacts
 ```
 
@@ -28,7 +32,30 @@ automatically exports `demo-export.json` which can be imported into an
 interactive session via `import demo-export.json`. Databases are stored
 in `demo-db/` (demos) and `run-db/` (interactive sessions).
 
-### Interactive session
+### Web interface
+
+Build the frontend and start the server:
+
+```
+cd web && npm install && npm run build && cd ..
+make server
+```
+
+Then open http://localhost:8080 in a browser. Log in as `admin/admin`
+(created automatically on first run). The web terminal accepts the
+same commands as the CLI.
+
+During development, you can run the Vite dev server for hot reload:
+
+```
+cd web && npm run dev
+```
+
+This serves the frontend on http://localhost:5173 and proxies `/api`
+and `/rpc` requests to the backend at http://localhost:8080 (start
+`make server` in a separate terminal).
+
+### Interactive CLI session
 
 ```
 $ make run
@@ -530,14 +557,37 @@ begins, ensuring constant memory usage regardless of iteration count.
 ## Project structure
 
 ```
+server-app/
+  Main.hs                    HTTP server entry point (Warp + static files)
+
+web/
+  src/
+    api/client.ts            Fetch wrapper with auth token injection
+    api/execute.ts           POST /rpc/execute caller
+    components/LoginPage.tsx Login form
+    components/Terminal.tsx   Command terminal with history and paste
+    components/AppShell.tsx   App layout (header + terminal)
+    App.tsx                  Root component (auth routing)
+
 cli/
-  Main.hs                    Entry point (REPL + demo mode)
-  CLI/App.hs                 Command dispatch, authentication
-  CLI/Commands.hs            Command parser
-  CLI/Display.hs             Formatted output (tables, hours, diagnosis)
-  CLI/Resolve.hs             Entity name resolution, session context
+  Main.hs                    CLI entry point (REPL + demo mode)
+  CLI/RpcClient.hs           Remote mode RPC dispatch
 
 src/
+  CLI/
+    App.hs                   Command dispatch, help, demo replay
+    Commands.hs              Command parser
+    Display.hs               Formatted output (tables, hours, diagnosis)
+    Resolve.hs               Entity name resolution, session context
+  Server/
+    Api.hs                   Servant API type definitions
+    Auth.hs                  Login/logout, session token validation
+    Handlers.hs              REST endpoint handlers
+    Rpc.hs                   RPC endpoint handlers
+    Execute.hs               Web terminal command execution (stdout capture)
+    Json.hs                  JSON request/response types
+    Error.hs                 HTTP error responses
+
   Domain/
     Types.hs                 Core types (Schedule, Assignment, Slot, IDs)
     Schedule.hs              Assign/unassign operations (monoid)
@@ -577,7 +627,7 @@ src/
     JSON.hs                  Full import/export
 
 test/
-  Spec.hs                    Test harness (325 examples)
+  Spec.hs                    Test harness (546 examples)
   CalendarSpec.hs            Calendar operations
   DraftSpec.hs               Draft lifecycle
   DraftValidationSpec.hs     Cross-draft constraint checks
