@@ -21,6 +21,7 @@ make test           # run all tests
 make demo           # replay the demo restaurant setup (with delay)
 make fast-demo      # same, instant replay
 make run            # launch interactive CLI REPL
+make web            # build the web frontend
 make server         # start the web server
 make clean          # remove databases and build artifacts
 ```
