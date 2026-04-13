@@ -3,6 +3,7 @@
 module ApiSpec (spec) where
 
 import Test.Hspec
+import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time (Day, fromGregorian)
@@ -36,6 +37,7 @@ import Servant.API (NoContent)
 import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
 import Server.Auth (LoginReq(..), LoginResp(..), authHandler)
+import Server.Execute (newExecuteEnv)
 import Server.Handlers (fullServer)
 import Server.Rpc
 import CLI.Commands (Command(..))
@@ -305,6 +307,7 @@ _rpcApplyHintsC :: HintSessionRef -> ClientM RpcOk
 _rpcRebaseHintsC :: HintSessionRef -> ClientM RebaseResultResp
 rpcCreateSessionC :: RpcSessionCreate -> ClientM RpcSessionResp
 rpcResumeSessionC :: RpcSessionCreate -> ClientM RpcSessionResp
+rpcExecuteC :: ExecuteReq -> ClientM String
 
 rpcCreateSkillC
     :<|> _rpcDeleteSkillC
@@ -377,6 +380,7 @@ rpcCreateSkillC
     :<|> _rpcRebaseHintsC
     :<|> rpcCreateSessionC
     :<|> rpcResumeSessionC
+    :<|> rpcExecuteC
     = client rpcApi
 
 -- -----------------------------------------------------------------
@@ -401,8 +405,9 @@ withServer action = do
     exists <- doesFileExist testDbPath
     if exists then removeFile testDbPath else pure ()
     (_conn, repo) <- mkSQLiteRepo testDbPath
+    execEnv <- newExecuteEnv repo
     let ctx = authHandler repo :. EmptyContext
-        app = serveWithContext fullApi ctx (fullServer repo)
+        app = serveWithContext fullApi ctx (fullServer execEnv repo)
     testWithApplication (pure app) $ \port -> action repo port
     removeFile testDbPath
 
@@ -864,8 +869,9 @@ spec = do
             if exists then removeFile testDbPath else pure ()
             (conn, repo) <- mkSQLiteRepo testDbPath
             _ <- register repo "alice" "secret" Admin (WorkerId 1)
+            execEnv <- newExecuteEnv repo
             let ctx = authHandler repo :. EmptyContext
-                app = serveWithContext fullApi ctx (fullServer repo)
+                app = serveWithContext fullApi ctx (fullServer execEnv repo)
             testWithApplication (pure app) $ \port -> do
                 env <- mkPlainEnv port
                 token <- loginAs env "alice" "secret"
@@ -1017,3 +1023,39 @@ spec = do
                 wEnv <- mkAuthEnv workerToken port
                 Right workerPending <- runClientM listPendingAbsencesC wEnv
                 length workerPending `shouldBe` 1
+
+    -- -----------------------------------------------------------------
+    -- RPC Execute endpoint (web terminal)
+    -- -----------------------------------------------------------------
+
+    describe "RPC Execute" $ do
+        it "executes 'help' and returns output" $ withTestApp $ \env -> do
+            result <- runClientM (rpcExecuteC (ExecuteReq "help")) env
+            case result of
+                Left err -> expectationFailure (show err)
+                Right output -> output `shouldSatisfy` (not . null)
+
+        it "executes 'help skill' and returns group help" $ withTestApp $ \env -> do
+            result <- runClientM (rpcExecuteC (ExecuteReq "help skill")) env
+            case result of
+                Left err -> expectationFailure (show err)
+                Right output -> output `shouldSatisfy` (not . null)
+
+        it "returns error message for unknown command" $ withTestApp $ \env -> do
+            result <- runClientM (rpcExecuteC (ExecuteReq "nonexistent-command")) env
+            case result of
+                Left err -> expectationFailure (show err)
+                Right output -> do
+                    output `shouldSatisfy` (not . null)
+                    output `shouldSatisfy` \s -> "Unknown command" `isInfixOf` s
+
+        it "executes 'skill list' and returns output" $ withTestApp $ \env -> do
+            result <- runClientM (rpcExecuteC (ExecuteReq "skill list")) env
+            case result of
+                Left err -> expectationFailure (show err)
+                Right _output -> pure ()
+
+        it "requires authentication" $ withServer $ \_ port -> do
+            env <- mkPlainEnv port
+            result <- runClientM (rpcExecuteC (ExecuteReq "help")) env
+            result `shouldFailWith` 401

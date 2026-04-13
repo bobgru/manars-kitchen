@@ -7,3 +7,6 @@ export.json
 demo-export.json
 --help*
 dist-newstyle/
+web/node_modules/
+web/dist/
+web/*.db

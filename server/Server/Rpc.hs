@@ -43,6 +43,7 @@ module Server.Rpc
     , RpcUsername(..)
     , RpcSessionCreate(..)
     , RpcSessionResp(..)
+    , ExecuteReq(..)
     ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -81,6 +82,7 @@ import qualified Service.HintRebase as SHR
 import qualified Export.JSON as Exp
 import Server.Json
 import Server.Error
+import Server.Execute (ExecuteEnv, executeCommandText)
 
 -- -----------------------------------------------------------------
 -- RPC API type
@@ -177,6 +179,8 @@ type RpcAPI =
     -- Session management
     :<|> "rpc" :> "session" :> "create" :> ReqBody '[JSON] RpcSessionCreate :> Post '[JSON] RpcSessionResp
     :<|> "rpc" :> "session" :> "resume" :> ReqBody '[JSON] RpcSessionCreate :> Post '[JSON] RpcSessionResp
+    -- Command execution (returns plain text, not JSON)
+    :<|> "rpc" :> "execute" :> ReqBody '[JSON] ExecuteReq :> Post '[PlainText] String
 
 rpcApi :: Proxy RpcAPI
 rpcApi = Proxy
@@ -336,12 +340,17 @@ newtype RpcSessionResp = RpcSessionResp { rsrSessionId :: Int } deriving (Show)
 instance ToJSON RpcSessionResp where toJSON r = object ["sessionId" .= rsrSessionId r]
 instance FromJSON RpcSessionResp where parseJSON = withObject "RpcSessionResp" $ \v -> RpcSessionResp <$> v .: "sessionId"
 
+-- | Request body for /rpc/execute — a raw command string.
+newtype ExecuteReq = ExecuteReq { erCommand :: String } deriving (Show)
+instance ToJSON ExecuteReq where toJSON r = object ["command" .= erCommand r]
+instance FromJSON ExecuteReq where parseJSON = withObject "ExecuteReq" $ \v -> ExecuteReq <$> v .: "command"
+
 -- -----------------------------------------------------------------
 -- RPC Server (handlers)
 -- -----------------------------------------------------------------
 
-rpcServer :: Repository -> User -> Server RpcAPI
-rpcServer repo _user =
+rpcServer :: ExecuteEnv -> Repository -> User -> Server RpcAPI
+rpcServer execEnv repo _user =
     -- Skill CRUD
          rpcCreateSkill repo
     :<|> rpcDeleteSkill repo
@@ -430,6 +439,8 @@ rpcServer repo _user =
     -- Sessions
     :<|> rpcCreateSession repo
     :<|> rpcResumeSession repo
+    -- Command execution
+    :<|> rpcExecute execEnv repo _user
 
 -- -----------------------------------------------------------------
 -- Audit logging helper
@@ -978,6 +989,17 @@ rpcResumeSession repo req = do
         Nothing -> do
             (SessionId sid, _tok) <- liftIO $ repoCreateSession repo uid
             pure (RpcSessionResp sid)
+
+-- -----------------------------------------------------------------
+-- Command execution handler
+-- -----------------------------------------------------------------
+
+rpcExecute :: ExecuteEnv -> Repository -> User -> ExecuteReq -> Handler String
+rpcExecute execEnv repo user req = do
+    let cmdStr = erCommand req
+    output <- liftIO $ executeCommandText execEnv user cmdStr
+    logRpc repo cmdStr
+    return output
 
 -- -----------------------------------------------------------------
 -- X-Session-Id middleware

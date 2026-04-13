@@ -1,6 +1,6 @@
 .RECIPEPREFIX = >
 
-.PHONY: clean build test run demo fast-demo
+.PHONY: clean build test run demo fast-demo server
 
 build:
 > stack build
@@ -23,3 +23,6 @@ fast-demo: build
 clean:
 > rm -f demo-db/*.db demo-db/*.db-wal demo-db/*.db-shm
 > stack clean
+
+server: build
+> stack run manars-server -- run-db/manars-kitchen.db

@@ -3,6 +3,7 @@ module CLI.App
     , mkAppState
     , runRepl
     , runDemo
+    , handleCommand
     , isMutating
     ) where
 
@@ -1558,6 +1559,22 @@ handleCommand st cmd = case cmd of
             Right () -> putStrLn "Password changed."
             Left WrongOldPassword -> putStrLn "Wrong old password."
             Left err -> putStrLn ("Error: " ++ show err)
+
+    -- Help
+    Help -> printHelpSummary (userRole (asUser st))
+    HelpGroup g -> printHelpGroup (userRole (asUser st)) g
+
+    -- Context (stateless in web terminal, but handle gracefully)
+    CmdUse typ ref -> handleUse st typ ref
+    ContextView -> handleContextView st
+    ContextClear -> handleContextClear st
+    ContextClearType typ -> handleContextClearType st typ
+
+    -- Checkpoints
+    CheckpointCreate mName -> handleCheckpointCreate st mName
+    CheckpointCommit -> handleCheckpointCommit st
+    CheckpointRollback mName -> handleCheckpointRollback st mName
+    CheckpointList -> handleCheckpointList st
 
     Unknown s -> putStrLn ("Unknown command: " ++ s ++ ". Type 'help' for available commands.")
     _ -> putStrLn "Command not handled."

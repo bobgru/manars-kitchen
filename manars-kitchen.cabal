@@ -57,6 +57,11 @@ library
                      , Server.Handlers
                      , Server.Json
                      , Server.Rpc
+                     , Server.Execute
+                     , CLI.Commands
+                     , CLI.Display
+                     , CLI.App
+                     , CLI.Resolve
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , containers
@@ -75,6 +80,8 @@ library
                      , servant-server
                      , wai
                      , http-types
+                     , directory
+                     , process
   ghc-options:         -Wall
                        -Wcompat
                        -Widentities
@@ -83,23 +90,10 @@ library
                        -Wpartial-fields
                        -Wredundant-constraints
 
-executable manars-kitchen
-  hs-source-dirs:      app
-  main-is:             Main.hs
-  default-language:    Haskell2010
-  build-depends:       base >= 4.7 && < 5
-                     , manars-kitchen
-  ghc-options:         -Wall
-                       -Wcompat
-
 executable manars-cli
   hs-source-dirs:      cli
   main-is:             Main.hs
-  other-modules:       CLI.App
-                     , CLI.Commands
-                     , CLI.Display
-                     , CLI.Resolve
-                     , CLI.RpcClient
+  other-modules:       CLI.RpcClient
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
@@ -131,10 +125,6 @@ test-suite manars-kitchen-test
                      , SessionSpec
                      , PubSubSpec
                      , ApiSpec
-                     , CLI.Commands
-                     , CLI.Display
-                     , CLI.Resolve
-                     , CLI.App
                      , CLI.RpcClient
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
@@ -163,6 +153,8 @@ executable manars-server
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
                      , servant-server
+                     , wai
+                     , wai-app-static
                      , warp
   ghc-options:         -Wall
                        -Wcompat

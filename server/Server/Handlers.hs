@@ -37,6 +37,7 @@ import Server.Json
 import Server.Error
 import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
+import Server.Execute (ExecuteEnv)
 
 -- | REST server for protected endpoints. User is threaded through from AuthProtect.
 server :: Repository -> User -> Server RawAPI
@@ -131,14 +132,14 @@ server repo user =
     :<|> handleRebaseHints repo user
 
 -- | Protected server: REST + RPC, both receiving User from AuthProtect.
-protectedServer :: Repository -> User -> Server (RawAPI :<|> RpcAPI)
-protectedServer repo user = server repo user :<|> rpcServer repo user
+protectedServer :: ExecuteEnv -> Repository -> User -> Server (RawAPI :<|> RpcAPI)
+protectedServer execEnv repo user = server repo user :<|> rpcServer execEnv repo user
 
 -- | Combined server: Public + Protected.
-fullServer :: Repository -> Server FullAPI
-fullServer repo =
+fullServer :: ExecuteEnv -> Repository -> Server FullAPI
+fullServer execEnv repo =
          handleLogin repo
-    :<|> protectedServer repo
+    :<|> protectedServer execEnv repo
 
 -- -----------------------------------------------------------------
 -- Skills / Stations / Shifts (read — no auth guard needed)

@@ -127,6 +127,7 @@ _cApplyHints    :: HintSessionRef -> ClientM RpcOk
 _cRebaseHints   :: HintSessionRef -> ClientM RebaseResultResp
 _cCreateSession :: RpcSessionCreate -> ClientM RpcSessionResp
 _cResumeSession :: RpcSessionCreate -> ClientM RpcSessionResp
+_cExecute :: ExecuteReq -> ClientM String
 
 cCreateSkill
     :<|> _cDeleteSkill
@@ -199,6 +200,7 @@ cCreateSkill
     :<|> _cRebaseHints
     :<|> _cCreateSession
     :<|> _cResumeSession
+    :<|> _cExecute
     = client rpcApi
 
 -- -----------------------------------------------------------------
