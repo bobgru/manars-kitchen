@@ -1,12 +1,17 @@
 .RECIPEPREFIX = >
 
-.PHONY: clean build test run demo fast-demo server web
+.PHONY: clean build test unit-test integration-test run demo fast-demo server web
 
 build:
 > stack build
 
-test:
-> stack test
+test: unit-test integration-test
+
+unit-test:
+> stack test manars-kitchen:test:manars-kitchen-unit-test
+
+integration-test:
+> stack test manars-kitchen:test:manars-kitchen-integration-test
 
 run: build
 > @mkdir -p run-db
@@ -28,4 +33,4 @@ server: build
 > stack run manars-server -- run-db/manars-kitchen.db
 
 web:
-> cd web && npm install && npm run build 
+> cd web && npm install && npm run build

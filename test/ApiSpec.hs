@@ -11,8 +11,8 @@ import qualified Data.Set as Set
 import Data.Time (Day, fromGregorian)
 import Data.Proxy (Proxy(..))
 import qualified Data.ByteString.Char8 as BS8
-import Network.HTTP.Client (ManagerSettings, newManager, defaultManagerSettings, managerModifyRequest, requestHeaders, parseRequest, httpLbs, responseStatus, responseBody, withResponse, responseOpen, responseClose, brRead)
-import Network.Wai (Application, Request, pathInfo, requestMethod)
+import Network.HTTP.Client (ManagerSettings, newManager, defaultManagerSettings, managerModifyRequest, requestHeaders, parseRequest, httpLbs, responseStatus, responseBody, responseOpen, responseClose, brRead)
+import Network.Wai (Application, pathInfo, requestMethod)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Database.SQLite.Simple (execute, Only(..))
 import Servant.API ((:<|>)(..))
@@ -44,7 +44,6 @@ import Server.EventStream (eventStreamApp)
 import Server.Execute (newExecuteEnv, ExecuteEnv(..))
 import Server.Handlers (fullServer)
 import Server.Rpc
-import Service.PubSub (AppBus(..))
 import CLI.Commands (Command(..))
 import CLI.RpcClient (RpcEnv(..), dispatchCommand)
 
@@ -251,6 +250,7 @@ logoutC
 
 rpcCreateSkillC    :: CreateSkillReq -> ClientM RpcOk
 _rpcDeleteSkillC   :: RpcSkillId -> ClientM RpcOk
+_rpcRenameSkillC :: Int -> RenameSkillReq -> ClientM RpcOk
 rpcListSkillsC     :: RpcEmpty -> ClientM [(SkillId, Skill)]
 _rpcCreateStationC :: CreateStationReq -> ClientM RpcOk
 _rpcDeleteStationC :: RpcStationId -> ClientM RpcOk

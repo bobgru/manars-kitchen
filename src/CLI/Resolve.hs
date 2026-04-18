@@ -85,14 +85,13 @@ commandEntityMap =
 findMapping :: [String] -> Maybe (Int, [ArgSpec])
 findMapping ws =
     -- Try longest prefix first (2 words, then 1 word)
-    case find (\(prefix, _) -> prefix `isPrefixOf` ws) twoWord of
-        Just (prefix, specs) -> Just (length prefix, specs)
-        Nothing -> case find (\(prefix, _) -> prefix `isPrefixOf` ws) oneWord of
-            Just (prefix, specs) -> Just (length prefix, specs)
+    case find (\(prefix, _) -> prefix `isPrefixOf` ws) (commandsOfPrefixLen 2) of
+        Just (_, specs) -> Just (2, specs)
+        Nothing -> case find (\(prefix, _) -> prefix `isPrefixOf` ws) (commandsOfPrefixLen 1) of
+            Just (_, specs) -> Just (1, specs)
             Nothing -> Nothing
   where
-    twoWord = filter (\(p, _) -> length p == 2) commandEntityMap
-    oneWord = filter (\(p, _) -> length p == 1) commandEntityMap
+    commandsOfPrefixLen n = filter (\(p, _) -> length p == n) commandEntityMap
 
 -- | Resolve entity names in input, substituting dots from context.
 -- Returns the line with names replaced by IDs, or an error message.

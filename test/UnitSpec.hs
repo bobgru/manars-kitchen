@@ -20,13 +20,6 @@ import qualified CalendarSpec
 import qualified DraftSpec
 import qualified DraftValidationSpec
 import qualified FreezeLineSpec
-import qualified HintIntegrationSpec
-import qualified HintSessionSpec
-import qualified HintE2ESpec
-import qualified AuditSpec
-import qualified SessionSpec
-import qualified PubSubSpec
-import qualified ApiSpec
 import qualified ShellWordsSpec
 import qualified Service.HintRebase
 
@@ -45,17 +38,10 @@ main = hspec $ do
     describe "Domain.SchedulerConfig" Domain.SchedulerConfig.spec
     describe "Domain.Pin"             Domain.Pin.spec
     describe "Domain.Optimizer"       Domain.Optimizer.spec
-    describe "Domain.PayPeriod"      Domain.PayPeriod.spec
-    describe "Calendar"              CalendarSpec.spec
-    describe "Draft"                 DraftSpec.spec
-    describe "DraftValidation"      DraftValidationSpec.spec
-    describe "FreezeLine"           FreezeLineSpec.spec
-    describe "HintIntegration"     HintIntegrationSpec.spec
-    describe "HintSession"         HintSessionSpec.spec
-    describe "HintE2E"             HintE2ESpec.spec
-    describe "Audit"               AuditSpec.spec
-    describe "Session"             SessionSpec.spec
-    describe "PubSub"              PubSubSpec.spec
-    describe "Service.HintRebase"  Service.HintRebase.spec
-    describe "REST API"            ApiSpec.spec
-    describe "ShellWords"          ShellWordsSpec.spec
+    describe "Domain.PayPeriod"       Domain.PayPeriod.spec
+    describe "Calendar"               CalendarSpec.spec
+    describe "Draft"                  DraftSpec.spec
+    describe "DraftValidation"        DraftValidationSpec.spec
+    describe "FreezeLine"             FreezeLineSpec.spec
+    describe "Service.HintRebase"     Service.HintRebase.spec
+    describe "ShellWords"             ShellWordsSpec.spec
