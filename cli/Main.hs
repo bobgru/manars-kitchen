@@ -11,7 +11,8 @@ import Domain.Types (WorkerId(..))
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), SessionId(..))
 import Service.Auth (register, login)
-import CLI.App (mkAppState, runRepl, runDemo)
+import CLI.App (AppState(..), mkAppState, registerAuditSubscriber, registerTerminalEcho, runRepl, runDemo)
+import Service.PubSub (AppBus(..))
 import CLI.Commands (Command(..), parseCommand)
 import CLI.RpcClient (RpcEnv(..), mkRpcEnv, dispatchCommand)
 
@@ -35,6 +36,8 @@ main = do
             user <- loginLoop repo
             sid <- resolveSession repo user
             st <- mkAppState repo user sid
+            _ <- registerAuditSubscriber (busCommands (asBus st)) repo
+            _ <- registerTerminalEcho (busCommands (asBus st))
             runRepl st
 
 -- | Parse all flags from args in any order.

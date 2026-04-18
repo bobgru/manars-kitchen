@@ -87,6 +87,7 @@ mkSQLiteRepo path = do
         , repoLoadPins       = sqlLoadPins conn
         , repoLogCommand     = sqlLogCommand conn
         , repoLogRpcCommand  = sqlLogRpcCommand conn
+        , repoLogCommandWithSource = sqlLogCommandWithSource conn
         , repoGetAuditLog    = sqlGetAuditLog conn
         , repoWipeAll        = sqlWipeAll conn
         , repoSaveCalendar   = sqlSaveCalendar conn
@@ -174,11 +175,17 @@ toUser i n h r w = User
 -- Skills (entity CRUD — preserves name/description)
 -- =====================================================================
 
-sqlCreateSkill :: Connection -> SkillId -> String -> String -> IO ()
-sqlCreateSkill conn (SkillId sid) name desc =
-    execute conn
-        "INSERT OR REPLACE INTO skills (id, name, description) VALUES (?, ?, ?)"
-        (sid, name, desc)
+sqlCreateSkill :: Connection -> SkillId -> String -> String -> IO (Either String ())
+sqlCreateSkill conn (SkillId sid) name desc = do
+    existing <- query conn "SELECT name FROM skills WHERE id = ?" (Only sid) :: IO [[String]]
+    case existing of
+        ([existingName]:_) -> return $ Left $
+            "Skill " ++ show sid ++ " already exists (\"" ++ existingName ++ "\"). Use 'skill rename " ++ show sid ++ " <new-name>' to rename."
+        _ -> do
+            execute conn
+                "INSERT INTO skills (id, name, description) VALUES (?, ?, ?)"
+                (sid, name, desc)
+            return $ Right ()
 
 sqlDeleteSkill :: Connection -> SkillId -> IO ()
 sqlDeleteSkill conn (SkillId sid) = do
@@ -709,6 +716,22 @@ sqlLogRpcCommand conn username command =
         , cmEntityId meta, cmTargetId meta
         , cmDateFrom meta, cmDateTo meta
         , mut, cmParams meta
+        )
+
+sqlLogCommandWithSource :: Connection -> String -> String -> String -> IO ()
+sqlLogCommandWithSource conn username command source =
+    let meta = classify command
+        mut  = if cmIsMutation meta then (1 :: Int) else 0
+    in execute conn
+        "INSERT INTO audit_log (username, command, entity_type, operation, \
+        \entity_id, target_id, date_from, date_to, is_mutation, params, source) \
+        \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ( ( username, command
+          , cmEntityType meta, cmOperation meta
+          , cmEntityId meta, cmTargetId meta
+          , cmDateFrom meta, cmDateTo meta
+          , mut, cmParams meta
+          ) :. Only source
         )
 
 sqlGetAuditLog :: Connection -> IO [AuditEntry]

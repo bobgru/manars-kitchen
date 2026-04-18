@@ -58,6 +58,7 @@ mkRpcEnv serverUrl uid sid role = do
 
 cCreateSkill    :: CreateSkillReq -> ClientM RpcOk
 _cDeleteSkill   :: RpcSkillId -> ClientM RpcOk
+cRenameSkill    :: Int -> RenameSkillReq -> ClientM RpcOk
 cListSkills     :: RpcEmpty -> ClientM [(SkillId, Skill)]
 cCreateStation  :: CreateStationReq -> ClientM RpcOk
 cDeleteStation  :: RpcStationId -> ClientM RpcOk
@@ -131,6 +132,7 @@ _cExecute :: ExecuteReq -> ClientM String
 
 cCreateSkill
     :<|> _cDeleteSkill
+    :<|> cRenameSkill
     :<|> cListSkills
     :<|> cCreateStation
     :<|> cDeleteStation
@@ -310,6 +312,9 @@ dispatchCommand env cmd = case cmd of
     -- Skills
     SkillCreate sid name -> requireAdmin env $
         runOk env (cCreateSkill (CreateSkillReq sid name "")) "Skill created."
+
+    SkillRename sid name -> requireAdmin env $
+        runOk env (cRenameSkill sid (RenameSkillReq name)) ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
 
     SkillList -> do
         result <- run env (cListSkills RpcEmpty)

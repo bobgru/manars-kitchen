@@ -13,7 +13,8 @@ import WaiAppStatic.Types (unsafeToPiece, LookupResult(..))
 import Repo.SQLite (mkSQLiteRepo)
 import Server.Api (fullApi)
 import Server.Auth (authHandler)
-import Server.Execute (newExecuteEnv)
+import Server.EventStream (eventStreamApp)
+import Server.Execute (newExecuteEnv, ExecuteEnv(..))
 import Server.Handlers (fullServer)
 
 main :: IO ()
@@ -26,7 +27,8 @@ main = do
     execEnv <- newExecuteEnv repo
     let ctx = authHandler repo :. EmptyContext
         servantApp = serveWithContext fullApi ctx (fullServer execEnv repo)
-    run port (spaFallback "web/dist" servantApp)
+    let eventsApp = eventStreamApp repo (eeBus execEnv)
+    run port (spaFallback "web/dist" servantApp eventsApp)
 
 parseArgs :: [String] -> (String, Int)
 parseArgs []     = ("run-db/manars-kitchen.db", 8080)
@@ -38,9 +40,11 @@ parseArgs _      = error "Usage: manars-server [DATABASE] [PORT]"
 --   For GET requests that don't match an API route or a static file,
 --   falls back to index.html (SPA routing).
 --   Non-GET requests and /api/* or /rpc/* paths go straight to Servant.
-spaFallback :: FilePath -> Application -> Application
-spaFallback dir servantApp req sendResponse =
+spaFallback :: FilePath -> Application -> Application -> Application
+spaFallback dir servantApp eventsApp req sendResponse =
     case pathInfo req of
+        ["api", "events"] | requestMethod req == "GET" ->
+              eventsApp req sendResponse
         ("api" : _) -> servantApp req sendResponse
         ("rpc" : _) -> servantApp req sendResponse
         _ | requestMethod req == "GET" ->

@@ -82,7 +82,8 @@ import qualified Service.HintRebase as SHR
 import qualified Export.JSON as Exp
 import Server.Json
 import Server.Error
-import Server.Execute (ExecuteEnv, executeCommandText)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
+import Server.Execute (ExecuteEnv(..), executeCommandText)
 
 -- -----------------------------------------------------------------
 -- RPC API type
@@ -94,6 +95,7 @@ type RpcAPI =
     -- Skill CRUD
          "rpc" :> "skill" :> "create" :> ReqBody '[JSON] CreateSkillReq :> Post '[JSON] RpcOk
     :<|> "rpc" :> "skill" :> "delete" :> ReqBody '[JSON] RpcSkillId :> Post '[JSON] RpcOk
+    :<|> "rpc" :> "skill" :> "rename" :> Capture "id" Int :> ReqBody '[JSON] RenameSkillReq :> Post '[JSON] RpcOk
     :<|> "rpc" :> "skill" :> "list" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [(SkillId, Skill)]
     -- Station CRUD
     :<|> "rpc" :> "station" :> "create" :> ReqBody '[JSON] CreateStationReq :> Post '[JSON] RpcOk
@@ -351,52 +353,55 @@ instance FromJSON ExecuteReq where parseJSON = withObject "ExecuteReq" $ \v -> E
 
 rpcServer :: ExecuteEnv -> Repository -> User -> Server RpcAPI
 rpcServer execEnv repo _user =
+    let cmdBus = busCommands (eeBus execEnv)
+    in
     -- Skill CRUD
-         rpcCreateSkill repo
-    :<|> rpcDeleteSkill repo
+         rpcCreateSkill cmdBus repo
+    :<|> rpcDeleteSkill cmdBus repo
+    :<|> rpcRenameSkill cmdBus repo
     :<|> rpcListSkills repo
     -- Station CRUD
-    :<|> rpcCreateStation repo
-    :<|> rpcDeleteStation repo
-    :<|> rpcSetStationHours repo
-    :<|> rpcCloseStationDay repo
+    :<|> rpcCreateStation cmdBus repo
+    :<|> rpcDeleteStation cmdBus repo
+    :<|> rpcSetStationHours cmdBus repo
+    :<|> rpcCloseStationDay cmdBus repo
     :<|> rpcListStations repo
     -- Shift CRUD
-    :<|> rpcCreateShift repo
-    :<|> rpcDeleteShift repo
+    :<|> rpcCreateShift cmdBus repo
+    :<|> rpcDeleteShift cmdBus repo
     :<|> rpcListShifts repo
     -- Worker configuration
-    :<|> rpcSetWorkerHours repo
-    :<|> rpcSetWorkerOvertime repo
-    :<|> rpcSetWorkerPrefs repo
-    :<|> rpcSetWorkerVariety repo
-    :<|> rpcSetWorkerShiftPrefs repo
-    :<|> rpcSetWorkerWeekendOnly repo
-    :<|> rpcSetWorkerSeniority repo
-    :<|> rpcAddCrossTraining repo
-    :<|> rpcSetEmploymentStatus repo
-    :<|> rpcSetOvertimeModel repo
-    :<|> rpcSetPayTracking repo
-    :<|> rpcSetTemp repo
-    :<|> rpcGrantSkill repo
-    :<|> rpcRevokeSkill repo
-    :<|> rpcAvoidPairing repo
-    :<|> rpcPreferPairing repo
+    :<|> rpcSetWorkerHours cmdBus repo
+    :<|> rpcSetWorkerOvertime cmdBus repo
+    :<|> rpcSetWorkerPrefs cmdBus repo
+    :<|> rpcSetWorkerVariety cmdBus repo
+    :<|> rpcSetWorkerShiftPrefs cmdBus repo
+    :<|> rpcSetWorkerWeekendOnly cmdBus repo
+    :<|> rpcSetWorkerSeniority cmdBus repo
+    :<|> rpcAddCrossTraining cmdBus repo
+    :<|> rpcSetEmploymentStatus cmdBus repo
+    :<|> rpcSetOvertimeModel cmdBus repo
+    :<|> rpcSetPayTracking cmdBus repo
+    :<|> rpcSetTemp cmdBus repo
+    :<|> rpcGrantSkill cmdBus repo
+    :<|> rpcRevokeSkill cmdBus repo
+    :<|> rpcAvoidPairing cmdBus repo
+    :<|> rpcPreferPairing cmdBus repo
     -- Pins
-    :<|> rpcAddPin repo
-    :<|> rpcRemovePin repo
+    :<|> rpcAddPin cmdBus repo
+    :<|> rpcRemovePin cmdBus repo
     :<|> rpcListPins repo
     -- Drafts
     :<|> rpcCreateDraft repo
     :<|> rpcListDrafts repo
     :<|> rpcViewDraft repo
     :<|> rpcGenerateDraft repo
-    :<|> rpcCommitDraft repo
-    :<|> rpcDiscardDraft repo
+    :<|> rpcCommitDraft cmdBus repo
+    :<|> rpcDiscardDraft cmdBus repo
     -- Schedules
     :<|> rpcListSchedules repo
     :<|> rpcViewSchedule repo
-    :<|> rpcDeleteSchedule repo
+    :<|> rpcDeleteSchedule cmdBus repo
     -- Calendar
     :<|> rpcViewCalendar repo
     :<|> rpcCalendarHistory repo
@@ -404,32 +409,32 @@ rpcServer execEnv repo _user =
     :<|> rpcFreezeStatus
     -- Config
     :<|> rpcShowConfig repo
-    :<|> rpcSetConfig repo
-    :<|> rpcApplyPreset repo
-    :<|> rpcResetConfig repo
-    :<|> rpcSetPayPeriod repo
+    :<|> rpcSetConfig cmdBus repo
+    :<|> rpcApplyPreset cmdBus repo
+    :<|> rpcResetConfig cmdBus repo
+    :<|> rpcSetPayPeriod cmdBus repo
     -- Audit
     :<|> rpcListAudit repo
     -- Checkpoints
-    :<|> rpcCreateCheckpoint repo
-    :<|> rpcCommitCheckpoint repo
-    :<|> rpcRollbackCheckpoint repo
+    :<|> rpcCreateCheckpoint cmdBus repo
+    :<|> rpcCommitCheckpoint cmdBus repo
+    :<|> rpcRollbackCheckpoint cmdBus repo
     -- Import/Export
     :<|> rpcExportAll repo
     :<|> rpcImportData repo
     -- Absence types
-    :<|> rpcCreateAbsenceType repo
-    :<|> rpcDeleteAbsenceType repo
-    :<|> rpcSetAllowance repo
+    :<|> rpcCreateAbsenceType cmdBus repo
+    :<|> rpcDeleteAbsenceType cmdBus repo
+    :<|> rpcSetAllowance cmdBus repo
     -- Absences
     :<|> rpcRequestAbsence repo
     :<|> rpcApproveAbsence repo
     :<|> rpcRejectAbsence repo
     :<|> rpcListPendingAbsences repo
     -- Users
-    :<|> rpcCreateUser repo
+    :<|> rpcCreateUser cmdBus repo
     :<|> rpcListUsers repo
-    :<|> rpcDeleteUser repo
+    :<|> rpcDeleteUser cmdBus repo
     -- Hints
     :<|> rpcAddHint repo
     :<|> rpcRevertHint repo
@@ -440,31 +445,42 @@ rpcServer execEnv repo _user =
     :<|> rpcCreateSession repo
     :<|> rpcResumeSession repo
     -- Command execution
-    :<|> rpcExecute execEnv repo _user
+    :<|> rpcExecute cmdBus execEnv repo _user
 
 -- -----------------------------------------------------------------
 -- Audit logging helper
 -- -----------------------------------------------------------------
 
--- | Log an RPC command to the audit log with source='rpc'.
--- Uses "rpc" as the username since RPC handlers don't carry auth context.
-logRpc :: Repository -> String -> Handler ()
-logRpc repo cmd = liftIO $ repoLogRpcCommand repo "rpc" cmd
+-- | Publish an RPC command event to the bus.
+logRpcBus :: TopicBus CommandEvent -> String -> Handler ()
+logRpcBus cmdBus cmd = liftIO $ publishCommand cmdBus RPC "rpc" cmd
 
 -- -----------------------------------------------------------------
 -- Skill handlers
 -- -----------------------------------------------------------------
 
-rpcCreateSkill :: Repository -> CreateSkillReq -> Handler RpcOk
-rpcCreateSkill repo req = do
-    liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
-    logRpc repo ("skill create " ++ show (csrId req) ++ " " ++ csrName req)
+rpcCreateSkill :: TopicBus CommandEvent -> Repository -> CreateSkillReq -> Handler RpcOk
+rpcCreateSkill cmdBus repo req = do
+    result <- liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
+    case result of
+        Left err -> throwApiError (Conflict err)
+        Right () -> do
+            let cmd = "skill create " ++ show (csrId req) ++ " " ++ csrName req
+            liftIO $ publishCommand cmdBus RPC "rpc" cmd
+            pure RpcOk
+
+rpcDeleteSkill :: TopicBus CommandEvent -> Repository -> RpcSkillId -> Handler RpcOk
+rpcDeleteSkill cmdBus repo req = do
+    liftIO $ SW.removeSkill repo (SkillId (rsiId req))
+    let cmd = "skill delete " ++ show (rsiId req)
+    liftIO $ publishCommand cmdBus RPC "rpc" cmd
     pure RpcOk
 
-rpcDeleteSkill :: Repository -> RpcSkillId -> Handler RpcOk
-rpcDeleteSkill repo req = do
-    liftIO $ SW.removeSkill repo (SkillId (rsiId req))
-    logRpc repo ("skill delete " ++ show (rsiId req))
+rpcRenameSkill :: TopicBus CommandEvent -> Repository -> Int -> RenameSkillReq -> Handler RpcOk
+rpcRenameSkill cmdBus repo sid req = do
+    liftIO $ repoRenameSkill repo (SkillId sid) (rsrName req)
+    let cmd = "skill rename " ++ show sid ++ " " ++ rsrName req
+    liftIO $ publishCommand cmdBus RPC "rpc" cmd
     pure RpcOk
 
 rpcListSkills :: Repository -> RpcEmpty -> Handler [(SkillId, Skill)]
@@ -474,29 +490,29 @@ rpcListSkills repo _ = liftIO $ SW.listSkills repo
 -- Station handlers
 -- -----------------------------------------------------------------
 
-rpcCreateStation :: Repository -> CreateStationReq -> Handler RpcOk
-rpcCreateStation repo req = do
+rpcCreateStation :: TopicBus CommandEvent -> Repository -> CreateStationReq -> Handler RpcOk
+rpcCreateStation cmdBus repo req = do
     liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
-    logRpc repo ("station add " ++ show (cstrId req) ++ " " ++ cstrName req)
+    logRpcBus cmdBus ("station add " ++ show (cstrId req) ++ " " ++ cstrName req)
     pure RpcOk
 
-rpcDeleteStation :: Repository -> RpcStationId -> Handler RpcOk
-rpcDeleteStation repo req = do
+rpcDeleteStation :: TopicBus CommandEvent -> Repository -> RpcStationId -> Handler RpcOk
+rpcDeleteStation cmdBus repo req = do
     liftIO $ SW.removeStation repo (StationId (rstId req))
-    logRpc repo ("station remove " ++ show (rstId req))
+    logRpcBus cmdBus ("station remove " ++ show (rstId req))
     pure RpcOk
 
-rpcSetStationHours :: Repository -> RpcStationHours -> Handler RpcOk
-rpcSetStationHours repo req = do
+rpcSetStationHours :: TopicBus CommandEvent -> Repository -> RpcStationHours -> Handler RpcOk
+rpcSetStationHours cmdBus repo req = do
     liftIO $ SW.setStationHours repo (StationId (rshSid req)) (rshStart req) (rshEnd req)
-    logRpc repo ("station set-hours " ++ show (rshSid req) ++ " " ++ show (rshStart req) ++ " " ++ show (rshEnd req))
+    logRpcBus cmdBus ("station set-hours " ++ show (rshSid req) ++ " " ++ show (rshStart req) ++ " " ++ show (rshEnd req))
     pure RpcOk
 
-rpcCloseStationDay :: Repository -> SetStationClosureReq' -> Handler RpcOk
-rpcCloseStationDay repo req = do
+rpcCloseStationDay :: TopicBus CommandEvent -> Repository -> SetStationClosureReq' -> Handler RpcOk
+rpcCloseStationDay cmdBus repo req = do
     let dow = dayOfWeek (sscr'Day req)
     liftIO $ SW.closeStationDay repo (StationId (sscr'Sid req)) dow
-    logRpc repo ("station close-day " ++ show (sscr'Sid req) ++ " " ++ show (sscr'Day req))
+    logRpcBus cmdBus ("station close-day " ++ show (sscr'Sid req) ++ " " ++ show (sscr'Day req))
     pure RpcOk
 
 rpcListStations :: Repository -> RpcEmpty -> Handler [(Int, String)]
@@ -508,16 +524,16 @@ rpcListStations repo _ = do
 -- Shift handlers
 -- -----------------------------------------------------------------
 
-rpcCreateShift :: Repository -> CreateShiftReq -> Handler RpcOk
-rpcCreateShift repo req = do
+rpcCreateShift :: TopicBus CommandEvent -> Repository -> CreateShiftReq -> Handler RpcOk
+rpcCreateShift cmdBus repo req = do
     liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
-    logRpc repo ("shift create " ++ cshrName req)
+    logRpcBus cmdBus ("shift create " ++ cshrName req)
     pure RpcOk
 
-rpcDeleteShift :: Repository -> RpcShiftName -> Handler RpcOk
-rpcDeleteShift repo req = do
+rpcDeleteShift :: TopicBus CommandEvent -> Repository -> RpcShiftName -> Handler RpcOk
+rpcDeleteShift cmdBus repo req = do
     liftIO $ repoDeleteShift repo (rsnName req)
-    logRpc repo ("shift delete " ++ rsnName req)
+    logRpcBus cmdBus ("shift delete " ++ rsnName req)
     pure RpcOk
 
 rpcListShifts :: Repository -> RpcEmpty -> Handler [ShiftDef]
@@ -527,116 +543,116 @@ rpcListShifts repo _ = liftIO $ repoLoadShifts repo
 -- Worker configuration handlers
 -- -----------------------------------------------------------------
 
-rpcSetWorkerHours :: Repository -> RpcWorkerHours -> Handler RpcOk
-rpcSetWorkerHours repo req = do
+rpcSetWorkerHours :: TopicBus CommandEvent -> Repository -> RpcWorkerHours -> Handler RpcOk
+rpcSetWorkerHours cmdBus repo req = do
     liftIO $ SW.setMaxHours repo (WorkerId (rwhWid req)) (fromIntegral (rwhHours req))
-    logRpc repo ("worker set-hours " ++ show (rwhWid req) ++ " " ++ show (rwhHours req))
+    logRpcBus cmdBus ("worker set-hours " ++ show (rwhWid req) ++ " " ++ show (rwhHours req))
     pure RpcOk
 
-rpcSetWorkerOvertime :: Repository -> RpcWorkerOvertime -> Handler RpcOk
-rpcSetWorkerOvertime repo req = do
+rpcSetWorkerOvertime :: TopicBus CommandEvent -> Repository -> RpcWorkerOvertime -> Handler RpcOk
+rpcSetWorkerOvertime cmdBus repo req = do
     _ <- liftIO $ SW.setOvertimeOptIn repo (WorkerId (rwoWid req)) (rwoOptIn req)
-    logRpc repo ("worker set-overtime " ++ show (rwoWid req) ++ " " ++ show (rwoOptIn req))
+    logRpcBus cmdBus ("worker set-overtime " ++ show (rwoWid req) ++ " " ++ show (rwoOptIn req))
     pure RpcOk
 
-rpcSetWorkerPrefs :: Repository -> RpcWorkerPrefs -> Handler RpcOk
-rpcSetWorkerPrefs repo req = do
+rpcSetWorkerPrefs :: TopicBus CommandEvent -> Repository -> RpcWorkerPrefs -> Handler RpcOk
+rpcSetWorkerPrefs cmdBus repo req = do
     liftIO $ SW.setStationPreferences repo (WorkerId (rwpWid req)) (map StationId (rwpStationIds req))
-    logRpc repo ("worker set-prefs " ++ show (rwpWid req))
+    logRpcBus cmdBus ("worker set-prefs " ++ show (rwpWid req))
     pure RpcOk
 
-rpcSetWorkerVariety :: Repository -> RpcWorkerVariety -> Handler RpcOk
-rpcSetWorkerVariety repo req = do
+rpcSetWorkerVariety :: TopicBus CommandEvent -> Repository -> RpcWorkerVariety -> Handler RpcOk
+rpcSetWorkerVariety cmdBus repo req = do
     liftIO $ SW.setVarietyPreference repo (WorkerId (rwvWid req)) (rwvPrefer req)
-    logRpc repo ("worker set-variety " ++ show (rwvWid req) ++ " " ++ show (rwvPrefer req))
+    logRpcBus cmdBus ("worker set-variety " ++ show (rwvWid req) ++ " " ++ show (rwvPrefer req))
     pure RpcOk
 
-rpcSetWorkerShiftPrefs :: Repository -> RpcWorkerShiftPrefs -> Handler RpcOk
-rpcSetWorkerShiftPrefs repo req = do
+rpcSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> RpcWorkerShiftPrefs -> Handler RpcOk
+rpcSetWorkerShiftPrefs cmdBus repo req = do
     liftIO $ SW.setShiftPreferences repo (WorkerId (rwspWid req)) (rwspShifts req)
-    logRpc repo ("worker set-shift-prefs " ++ show (rwspWid req))
+    logRpcBus cmdBus ("worker set-shift-prefs " ++ show (rwspWid req))
     pure RpcOk
 
-rpcSetWorkerWeekendOnly :: Repository -> RpcWorkerWeekendOnly -> Handler RpcOk
-rpcSetWorkerWeekendOnly repo req = do
+rpcSetWorkerWeekendOnly :: TopicBus CommandEvent -> Repository -> RpcWorkerWeekendOnly -> Handler RpcOk
+rpcSetWorkerWeekendOnly cmdBus repo req = do
     liftIO $ SW.setWeekendOnly repo (WorkerId (rwwoWid req)) (rwwoVal req)
-    logRpc repo ("worker set-weekend-only " ++ show (rwwoWid req) ++ " " ++ show (rwwoVal req))
+    logRpcBus cmdBus ("worker set-weekend-only " ++ show (rwwoWid req) ++ " " ++ show (rwwoVal req))
     pure RpcOk
 
-rpcSetWorkerSeniority :: Repository -> RpcWorkerSeniority -> Handler RpcOk
-rpcSetWorkerSeniority repo req = do
+rpcSetWorkerSeniority :: TopicBus CommandEvent -> Repository -> RpcWorkerSeniority -> Handler RpcOk
+rpcSetWorkerSeniority cmdBus repo req = do
     liftIO $ SW.setSeniority repo (WorkerId (rwsWid req)) (rwsLevel req)
-    logRpc repo ("worker set-seniority " ++ show (rwsWid req) ++ " " ++ show (rwsLevel req))
+    logRpcBus cmdBus ("worker set-seniority " ++ show (rwsWid req) ++ " " ++ show (rwsLevel req))
     pure RpcOk
 
-rpcAddCrossTraining :: Repository -> RpcWorkerCrossTraining -> Handler RpcOk
-rpcAddCrossTraining repo req = do
+rpcAddCrossTraining :: TopicBus CommandEvent -> Repository -> RpcWorkerCrossTraining -> Handler RpcOk
+rpcAddCrossTraining cmdBus repo req = do
     liftIO $ SW.addCrossTraining repo (WorkerId (rwctWid req)) (SkillId (rwctSkillId req))
-    logRpc repo ("worker set-cross-training " ++ show (rwctWid req) ++ " " ++ show (rwctSkillId req))
+    logRpcBus cmdBus ("worker set-cross-training " ++ show (rwctWid req) ++ " " ++ show (rwctSkillId req))
     pure RpcOk
 
-rpcSetEmploymentStatus :: Repository -> RpcWorkerEmploymentStatus -> Handler RpcOk
-rpcSetEmploymentStatus repo req = do
+rpcSetEmploymentStatus :: TopicBus CommandEvent -> Repository -> RpcWorkerEmploymentStatus -> Handler RpcOk
+rpcSetEmploymentStatus cmdBus repo req = do
     _ <- liftIO $ SW.setEmploymentStatus repo (WorkerId (rwesWid req)) (rwesStatus req)
-    logRpc repo ("worker set-status " ++ show (rwesWid req) ++ " " ++ rwesStatus req)
+    logRpcBus cmdBus ("worker set-status " ++ show (rwesWid req) ++ " " ++ rwesStatus req)
     pure RpcOk
 
-rpcSetOvertimeModel :: Repository -> RpcWorkerOvertimeModel -> Handler RpcOk
-rpcSetOvertimeModel repo req = do
+rpcSetOvertimeModel :: TopicBus CommandEvent -> Repository -> RpcWorkerOvertimeModel -> Handler RpcOk
+rpcSetOvertimeModel cmdBus repo req = do
     liftIO $ SW.setOvertimeModel repo (WorkerId (rwomWid req)) (rwomModel req)
-    logRpc repo ("worker set-overtime-model " ++ show (rwomWid req))
+    logRpcBus cmdBus ("worker set-overtime-model " ++ show (rwomWid req))
     pure RpcOk
 
-rpcSetPayTracking :: Repository -> RpcWorkerPayTracking -> Handler RpcOk
-rpcSetPayTracking repo req = do
+rpcSetPayTracking :: TopicBus CommandEvent -> Repository -> RpcWorkerPayTracking -> Handler RpcOk
+rpcSetPayTracking cmdBus repo req = do
     liftIO $ SW.setPayPeriodTracking repo (WorkerId (rwptWid req)) (rwptTracking req)
-    logRpc repo ("worker set-pay-tracking " ++ show (rwptWid req))
+    logRpcBus cmdBus ("worker set-pay-tracking " ++ show (rwptWid req))
     pure RpcOk
 
-rpcSetTemp :: Repository -> RpcWorkerTemp -> Handler RpcOk
-rpcSetTemp repo req = do
+rpcSetTemp :: TopicBus CommandEvent -> Repository -> RpcWorkerTemp -> Handler RpcOk
+rpcSetTemp cmdBus repo req = do
     liftIO $ SW.setTempFlag repo (WorkerId (rwtWid req)) (rwtTemp req)
-    logRpc repo ("worker set-temp " ++ show (rwtWid req) ++ " " ++ show (rwtTemp req))
+    logRpcBus cmdBus ("worker set-temp " ++ show (rwtWid req) ++ " " ++ show (rwtTemp req))
     pure RpcOk
 
-rpcGrantSkill :: Repository -> RpcWorkerSkill -> Handler RpcOk
-rpcGrantSkill repo req = do
+rpcGrantSkill :: TopicBus CommandEvent -> Repository -> RpcWorkerSkill -> Handler RpcOk
+rpcGrantSkill cmdBus repo req = do
     liftIO $ SW.grantWorkerSkill repo (WorkerId (rwskWid req)) (SkillId (rwskSkillId req))
-    logRpc repo ("worker grant-skill " ++ show (rwskWid req) ++ " " ++ show (rwskSkillId req))
+    logRpcBus cmdBus ("worker grant-skill " ++ show (rwskWid req) ++ " " ++ show (rwskSkillId req))
     pure RpcOk
 
-rpcRevokeSkill :: Repository -> RpcWorkerSkill -> Handler RpcOk
-rpcRevokeSkill repo req = do
+rpcRevokeSkill :: TopicBus CommandEvent -> Repository -> RpcWorkerSkill -> Handler RpcOk
+rpcRevokeSkill cmdBus repo req = do
     liftIO $ SW.revokeWorkerSkill repo (WorkerId (rwskWid req)) (SkillId (rwskSkillId req))
-    logRpc repo ("worker revoke-skill " ++ show (rwskWid req) ++ " " ++ show (rwskSkillId req))
+    logRpcBus cmdBus ("worker revoke-skill " ++ show (rwskWid req) ++ " " ++ show (rwskSkillId req))
     pure RpcOk
 
-rpcAvoidPairing :: Repository -> RpcWorkerPairing -> Handler RpcOk
-rpcAvoidPairing repo req = do
+rpcAvoidPairing :: TopicBus CommandEvent -> Repository -> RpcWorkerPairing -> Handler RpcOk
+rpcAvoidPairing cmdBus repo req = do
     liftIO $ SW.addAvoidPairing repo (WorkerId (rwprWid req)) (WorkerId (rwprOtherId req))
-    logRpc repo ("worker avoid-pairing " ++ show (rwprWid req) ++ " " ++ show (rwprOtherId req))
+    logRpcBus cmdBus ("worker avoid-pairing " ++ show (rwprWid req) ++ " " ++ show (rwprOtherId req))
     pure RpcOk
 
-rpcPreferPairing :: Repository -> RpcWorkerPairing -> Handler RpcOk
-rpcPreferPairing repo req = do
+rpcPreferPairing :: TopicBus CommandEvent -> Repository -> RpcWorkerPairing -> Handler RpcOk
+rpcPreferPairing cmdBus repo req = do
     liftIO $ SW.addPreferPairing repo (WorkerId (rwprWid req)) (WorkerId (rwprOtherId req))
-    logRpc repo ("worker prefer-pairing " ++ show (rwprWid req) ++ " " ++ show (rwprOtherId req))
+    logRpcBus cmdBus ("worker prefer-pairing " ++ show (rwprWid req) ++ " " ++ show (rwprOtherId req))
     pure RpcOk
 
 -- -----------------------------------------------------------------
 -- Pin handlers
 -- -----------------------------------------------------------------
 
-rpcAddPin :: Repository -> PinnedAssignment -> Handler RpcOk
-rpcAddPin repo pin = do
+rpcAddPin :: TopicBus CommandEvent -> Repository -> PinnedAssignment -> Handler RpcOk
+rpcAddPin cmdBus repo pin = do
     liftIO (SW.addPin repo pin)
-    logRpc repo ("pin add " ++ show (pinWorker pin) ++ " " ++ show (pinStation pin))
+    logRpcBus cmdBus ("pin add " ++ show (pinWorker pin) ++ " " ++ show (pinStation pin))
     pure RpcOk
 
-rpcRemovePin :: Repository -> PinnedAssignment -> Handler RpcOk
-rpcRemovePin repo pin = do
+rpcRemovePin :: TopicBus CommandEvent -> Repository -> PinnedAssignment -> Handler RpcOk
+rpcRemovePin cmdBus repo pin = do
     liftIO (SW.removePin repo pin)
-    logRpc repo ("pin remove " ++ show (pinWorker pin) ++ " " ++ show (pinStation pin))
+    logRpcBus cmdBus ("pin remove " ++ show (pinWorker pin) ++ " " ++ show (pinStation pin))
     pure RpcOk
 
 rpcListPins :: Repository -> RpcEmpty -> Handler [PinnedAssignment]
@@ -671,22 +687,22 @@ rpcGenerateDraft repo req = do
         Left msg -> throwApiError (NotFound msg)
         Right r  -> pure r
 
-rpcCommitDraft :: Repository -> RpcDraftCommit -> Handler RpcOk
-rpcCommitDraft repo req = do
+rpcCommitDraft :: TopicBus CommandEvent -> Repository -> RpcDraftCommit -> Handler RpcOk
+rpcCommitDraft cmdBus repo req = do
     result <- liftIO $ SD.commitDraft repo (rdcDraftId req) (rdcNote req)
     case result of
         Left msg -> throwApiError (NotFound msg)
         Right () -> do
-            logRpc repo ("draft commit " ++ show (rdcDraftId req))
+            logRpcBus cmdBus ("draft commit " ++ show (rdcDraftId req))
             pure RpcOk
 
-rpcDiscardDraft :: Repository -> RpcDraftId -> Handler RpcOk
-rpcDiscardDraft repo req = do
+rpcDiscardDraft :: TopicBus CommandEvent -> Repository -> RpcDraftId -> Handler RpcOk
+rpcDiscardDraft cmdBus repo req = do
     result <- liftIO $ SD.discardDraft repo (rdiId req)
     case result of
         Left msg -> throwApiError (NotFound msg)
         Right () -> do
-            logRpc repo ("draft discard " ++ show (rdiId req))
+            logRpcBus cmdBus ("draft discard " ++ show (rdiId req))
             pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -703,10 +719,10 @@ rpcViewSchedule repo req = do
         Nothing -> throwApiError (NotFound ("Schedule not found: " ++ rsnmName req))
         Just s  -> pure s
 
-rpcDeleteSchedule :: Repository -> RpcScheduleName -> Handler RpcOk
-rpcDeleteSchedule repo req = do
+rpcDeleteSchedule :: TopicBus CommandEvent -> Repository -> RpcScheduleName -> Handler RpcOk
+rpcDeleteSchedule cmdBus repo req = do
     liftIO $ SS.deleteSchedule repo (rsnmName req)
-    logRpc repo ("schedule delete " ++ rsnmName req)
+    logRpcBus cmdBus ("schedule delete " ++ rsnmName req)
     pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -734,37 +750,37 @@ rpcFreezeStatus _ = do
 rpcShowConfig :: Repository -> RpcEmpty -> Handler [(String, Double)]
 rpcShowConfig repo _ = liftIO $ SCfg.listConfigParams repo
 
-rpcSetConfig :: Repository -> RpcConfigSet -> Handler RpcOk
-rpcSetConfig repo req = do
+rpcSetConfig :: TopicBus CommandEvent -> Repository -> RpcConfigSet -> Handler RpcOk
+rpcSetConfig cmdBus repo req = do
     result <- liftIO $ SCfg.setConfigParam repo (rcsKey req) (rcsValue req)
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown config key: " ++ rcsKey req))
         Just _  -> do
-            logRpc repo ("config set " ++ rcsKey req ++ " " ++ show (rcsValue req))
+            logRpcBus cmdBus ("config set " ++ rcsKey req ++ " " ++ show (rcsValue req))
             pure RpcOk
 
-rpcApplyPreset :: Repository -> RpcPresetName -> Handler RpcOk
-rpcApplyPreset repo req = do
+rpcApplyPreset :: TopicBus CommandEvent -> Repository -> RpcPresetName -> Handler RpcOk
+rpcApplyPreset cmdBus repo req = do
     result <- liftIO $ SCfg.applyPreset repo (rpnName req)
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown preset: " ++ rpnName req))
         Just _  -> do
-            logRpc repo ("config preset " ++ rpnName req)
+            logRpcBus cmdBus ("config preset " ++ rpnName req)
             pure RpcOk
 
-rpcResetConfig :: Repository -> RpcEmpty -> Handler RpcOk
-rpcResetConfig repo _ = do
+rpcResetConfig :: TopicBus CommandEvent -> Repository -> RpcEmpty -> Handler RpcOk
+rpcResetConfig cmdBus repo _ = do
     liftIO $ SCfg.saveConfig repo =<< SCfg.loadConfig repo
-    logRpc repo "config reset"
+    logRpcBus cmdBus "config reset"
     pure RpcOk
 
-rpcSetPayPeriod :: Repository -> SetPayPeriodReq -> Handler RpcOk
-rpcSetPayPeriod repo req = do
+rpcSetPayPeriod :: TopicBus CommandEvent -> Repository -> SetPayPeriodReq -> Handler RpcOk
+rpcSetPayPeriod cmdBus repo req = do
     case parsePayPeriodType (sprType req) of
         Nothing -> throwApiError (BadRequest ("Unknown pay period type: " ++ sprType req))
         Just pt -> do
             liftIO $ SCfg.savePayPeriodConfig repo (PayPeriodConfig pt (sprAnchorDate req))
-            logRpc repo ("config set-pay-period " ++ sprType req)
+            logRpcBus cmdBus ("config set-pay-period " ++ sprType req)
             pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -778,22 +794,22 @@ rpcListAudit repo _ = liftIO $ repoGetAuditLog repo
 -- Checkpoint handlers
 -- -----------------------------------------------------------------
 
-rpcCreateCheckpoint :: Repository -> CreateCheckpointReq -> Handler RpcOk
-rpcCreateCheckpoint repo req = do
+rpcCreateCheckpoint :: TopicBus CommandEvent -> Repository -> CreateCheckpointReq -> Handler RpcOk
+rpcCreateCheckpoint cmdBus repo req = do
     liftIO (repoSavepoint repo (ccrName req))
-    logRpc repo ("checkpoint create " ++ ccrName req)
+    logRpcBus cmdBus ("checkpoint create " ++ ccrName req)
     pure RpcOk
 
-rpcCommitCheckpoint :: Repository -> RpcCheckpointName -> Handler RpcOk
-rpcCommitCheckpoint repo req = do
+rpcCommitCheckpoint :: TopicBus CommandEvent -> Repository -> RpcCheckpointName -> Handler RpcOk
+rpcCommitCheckpoint cmdBus repo req = do
     liftIO (repoRelease repo (rcnName req))
-    logRpc repo ("checkpoint commit " ++ rcnName req)
+    logRpcBus cmdBus ("checkpoint commit " ++ rcnName req)
     pure RpcOk
 
-rpcRollbackCheckpoint :: Repository -> RpcCheckpointName -> Handler RpcOk
-rpcRollbackCheckpoint repo req = do
+rpcRollbackCheckpoint :: TopicBus CommandEvent -> Repository -> RpcCheckpointName -> Handler RpcOk
+rpcRollbackCheckpoint cmdBus repo req = do
     liftIO (repoRollbackTo repo (rcnName req))
-    logRpc repo ("checkpoint rollback " ++ rcnName req)
+    logRpcBus cmdBus ("checkpoint rollback " ++ rcnName req)
     pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -810,31 +826,31 @@ rpcImportData repo req = ImportResp <$> liftIO (Exp.applyImport repo (irData req
 -- Absence type handlers
 -- -----------------------------------------------------------------
 
-rpcCreateAbsenceType :: Repository -> CreateAbsenceTypeReq -> Handler RpcOk
-rpcCreateAbsenceType repo req = do
+rpcCreateAbsenceType :: TopicBus CommandEvent -> Repository -> CreateAbsenceTypeReq -> Handler RpcOk
+rpcCreateAbsenceType cmdBus repo req = do
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let atId = AbsenceTypeId (catrId req)
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
         ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpc repo ("absence-type create " ++ show (catrId req) ++ " " ++ catrName req)
+    logRpcBus cmdBus ("absence-type create " ++ show (catrId req) ++ " " ++ catrName req)
     pure RpcOk
 
-rpcDeleteAbsenceType :: Repository -> RpcAbsenceTypeId -> Handler RpcOk
-rpcDeleteAbsenceType repo req = do
+rpcDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> RpcAbsenceTypeId -> Handler RpcOk
+rpcDeleteAbsenceType cmdBus repo req = do
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let ctx' = ctx { acTypes = Map.delete (AbsenceTypeId (ratiId req)) (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpc repo ("absence-type delete " ++ show (ratiId req))
+    logRpcBus cmdBus ("absence-type delete " ++ show (ratiId req))
     pure RpcOk
 
-rpcSetAllowance :: Repository -> RpcSetAllowance -> Handler RpcOk
-rpcSetAllowance repo req = do
+rpcSetAllowance :: TopicBus CommandEvent -> Repository -> RpcSetAllowance -> Handler RpcOk
+rpcSetAllowance cmdBus repo req = do
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let key = (WorkerId (rsaWorkerId req), AbsenceTypeId (rsaTypeId req))
         ctx' = ctx { acYearlyAllowance = Map.insert key (rsaAllowance req) (acYearlyAllowance ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpc repo ("absence-type set-allowance " ++ show (rsaTypeId req) ++ " " ++ show (rsaWorkerId req))
+    logRpcBus cmdBus ("absence-type set-allowance " ++ show (rsaTypeId req) ++ " " ++ show (rsaWorkerId req))
     pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -875,28 +891,28 @@ rpcListPendingAbsences repo _ = liftIO $ SA.listPendingAbsences repo
 -- User handlers
 -- -----------------------------------------------------------------
 
-rpcCreateUser :: Repository -> CreateUserReq -> Handler RpcOk
-rpcCreateUser repo req = do
+rpcCreateUser :: TopicBus CommandEvent -> Repository -> CreateUserReq -> Handler RpcOk
+rpcCreateUser cmdBus repo req = do
     result <- liftIO $ SAuth.register repo
         (curUsername req) (curPassword req) (curRole req) (WorkerId (curWorkerId req))
     case result of
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
         Right _ -> do
-            logRpc repo ("user create " ++ curUsername req)
+            logRpcBus cmdBus ("user create " ++ curUsername req)
             pure RpcOk
 
 rpcListUsers :: Repository -> RpcEmpty -> Handler [User]
 rpcListUsers repo _ = liftIO $ repoListUsers repo
 
-rpcDeleteUser :: Repository -> RpcUsername -> Handler RpcOk
-rpcDeleteUser repo req = do
+rpcDeleteUser :: TopicBus CommandEvent -> Repository -> RpcUsername -> Handler RpcOk
+rpcDeleteUser cmdBus repo req = do
     mUser <- liftIO $ repoGetUserByName repo (ruName req)
     case mUser of
         Nothing -> throwApiError (NotFound ("User not found: " ++ ruName req))
         Just u  -> do
             liftIO $ repoDeleteUser repo (userId u)
-            logRpc repo ("user delete " ++ ruName req)
+            logRpcBus cmdBus ("user delete " ++ ruName req)
             pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -994,11 +1010,11 @@ rpcResumeSession repo req = do
 -- Command execution handler
 -- -----------------------------------------------------------------
 
-rpcExecute :: ExecuteEnv -> Repository -> User -> ExecuteReq -> Handler String
-rpcExecute execEnv repo user req = do
+rpcExecute :: TopicBus CommandEvent -> ExecuteEnv -> Repository -> User -> ExecuteReq -> Handler String
+rpcExecute cmdBus execEnv _repo user req = do
     let cmdStr = erCommand req
     output <- liftIO $ executeCommandText execEnv user cmdStr
-    logRpc repo cmdStr
+    logRpcBus cmdBus cmdStr
     return output
 
 -- -----------------------------------------------------------------

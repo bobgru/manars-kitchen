@@ -7,7 +7,7 @@ interface TerminalProps {
 }
 
 interface OutputLine {
-  type: "command" | "output" | "error";
+  type: "command" | "output" | "error" | "echo";
   text: string;
 }
 
@@ -37,6 +37,22 @@ export default function Terminal({ onSessionExpired }: TerminalProps) {
   // Focus input on mount
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  // EventSource for GUI event echoing
+  useEffect(() => {
+    const token = sessionStorage.getItem("token");
+    if (!token) return;
+    const es = new EventSource(`/api/events?token=${token}`);
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        setLines((prev) => [...prev, { type: "echo", text: `[echo] ${data.command}` }]);
+      } catch {
+        // ignore malformed messages
+      }
+    };
+    return () => es.close();
   }, []);
 
   async function runCommand(cmd: string) {

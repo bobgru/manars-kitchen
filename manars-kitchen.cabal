@@ -57,6 +57,7 @@ library
                      , Server.Handlers
                      , Server.Json
                      , Server.Rpc
+                     , Server.EventStream
                      , Server.Execute
                      , CLI.Commands
                      , CLI.Display
@@ -82,6 +83,7 @@ library
                      , http-types
                      , directory
                      , process
+                     , regex-posix
   ghc-options:         -Wall
                        -Wcompat
                        -Widentities
@@ -139,6 +141,7 @@ test-suite manars-kitchen-test
                      , servant
                      , servant-server
                      , servant-client
+                     , wai
                      , warp
                      , http-client
                      , http-types

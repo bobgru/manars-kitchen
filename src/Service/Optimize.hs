@@ -26,7 +26,7 @@ import Domain.Optimizer
     , iteratedGreedyStep
     , hillClimbStep
     )
-import Service.PubSub (PubSub, ProgressEvent(..), publish)
+import Service.PubSub (TopicBus, Topic(..), ProgressEvent(..), publish)
 
 -- | Run the optimization loop over a schedule.
 --
@@ -42,10 +42,10 @@ import Service.PubSub (PubSub, ProgressEvent(..), publish)
 --   improve the total soft score while maintaining feasibility.
 optimizeSchedule :: SchedulerContext
                  -> Schedule          -- ^ Seed (pinned assignments)
-                 -> PubSub ProgressEvent  -- ^ Event bus for progress
+                 -> TopicBus ProgressEvent  -- ^ Event bus for progress
                  -> IO ScheduleResult
 optimizeSchedule ctx seed bus = do
-    let reportProgress = publish bus . OptimizeProgress
+    let reportProgress p = publish bus (Topic "optimize.progress") (OptimizeProgress p)
     let cfg = schConfig ctx
     if cfgOptEnabled cfg <= 0.0
         then return (buildScheduleFrom seed ctx)

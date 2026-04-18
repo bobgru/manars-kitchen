@@ -28,6 +28,7 @@ data Command
     | StationSetMultiHours Int Int Int  -- ^ station-id start-hour end-hour
     | StationRequireSkill Int Int    -- ^ station-id skill-id
     | SkillCreate Int String          -- ^ skill-id name
+    | SkillRename Int String          -- ^ skill-id new-name
     | SkillList
     | SkillImplication Int Int       -- ^ skill-a skill-b (a implies b)
     | WorkerGrantSkill Int Int       -- ^ worker-id skill-id
@@ -188,6 +189,8 @@ parseCommand input = case words input of
 
     ["skill", "create", sid, name]
         | isDigit' sid -> SkillCreate (read sid) name
+    ["skill", "rename", sid, name]
+        | isDigit' sid -> SkillRename (read sid) name
     ["skill", "list"]              -> SkillList
     ["skill", "implication", a, b]
         | all isDigit' [a, b] -> SkillImplication (read a) (read b)

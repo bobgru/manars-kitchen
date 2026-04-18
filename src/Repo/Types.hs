@@ -89,8 +89,8 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Skills (entity CRUD)
       -- ---------------------------------------------------------------
-    , repoCreateSkill    :: SkillId -> String -> String -> IO ()
-      -- ^ id, name, description
+    , repoCreateSkill    :: SkillId -> String -> String -> IO (Either String ())
+      -- ^ id, name, description; Left if skill ID already exists
     , repoDeleteSkill    :: SkillId -> IO ()
     , repoListSkills     :: IO [(SkillId, Skill)]
     , repoRenameSkill    :: SkillId -> String -> IO ()
@@ -180,6 +180,8 @@ data Repository = Repository
       -- ^ username, command string (source='cli')
     , repoLogRpcCommand  :: String -> String -> IO ()
       -- ^ username, command string (source='rpc')
+    , repoLogCommandWithSource :: String -> String -> String -> IO ()
+      -- ^ username, command string, source (e.g. "cli", "rpc", "demo")
     , repoGetAuditLog    :: IO [AuditEntry]
       -- ^ returns structured audit entries
     , repoWipeAll        :: IO ()

@@ -1,6 +1,8 @@
 module CLI.App
     ( AppState(..)
     , mkAppState
+    , registerAuditSubscriber
+    , registerTerminalEcho
     , runRepl
     , runDemo
     , handleCommand
@@ -51,7 +53,12 @@ import Service.DraftValidation (DraftViolation(..), validateDraftAgainstCalendar
 import qualified Service.FreezeLine as Freeze
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
-import Service.PubSub (newPubSub, subscribe, unsubscribe, ProgressEvent(..))
+import Service.PubSub
+    ( TopicBus, SubscriptionId, AppBus(..), newAppBus, newTopicBus
+    , subscribe, unsubscribe
+    , ProgressEvent(..), Source(..), CommandEvent(..)
+    , publishCommand, sourceString
+    )
 import CLI.Commands (Command(..), parseCommand)
 import CLI.Display
 import CLI.Resolve
@@ -71,20 +78,33 @@ data AppState = AppState
     { asRepo       :: !Repository
     , asUser       :: !User
     , asSessionId  :: !SessionId
+    , asBus        :: !AppBus
     , asContext    :: !(IORef SessionContext)
     , asCheckpoints :: !(IORef [String])
     , asUnfreezes  :: !(IORef (Set.Set (Day, Day)))
     , asHintSession :: !(IORef (Maybe HintState))
     }
 
--- | Create an AppState with initialized IORefs.
+-- | Create an AppState with initialized IORefs and event bus.
 mkAppState :: Repository -> User -> SessionId -> IO AppState
 mkAppState repo user sid = do
+    bus    <- newAppBus
     ctxRef <- newIORef emptyContext
     cpRef  <- newIORef []
     ufRef  <- newIORef Set.empty
     hsRef  <- newIORef Nothing
-    return (AppState repo user sid ctxRef cpRef ufRef hsRef)
+    return (AppState repo user sid bus ctxRef cpRef ufRef hsRef)
+
+registerAuditSubscriber :: TopicBus CommandEvent -> Repository -> IO SubscriptionId
+registerAuditSubscriber cmdBus repo =
+    subscribe cmdBus ".*" $ \_topic event ->
+        repoLogCommandWithSource repo (ceUsername event) (ceCommand event) (sourceString (ceSource event))
+
+registerTerminalEcho :: TopicBus CommandEvent -> IO SubscriptionId
+registerTerminalEcho cmdBus =
+    subscribe cmdBus ".*" $ \_topic event ->
+        when (ceSource event /= CLI) $
+            putStrLn ("[echo] " ++ ceCommand event)
 
 runRepl :: AppState -> IO ()
 runRepl st = do
@@ -116,7 +136,7 @@ runRepl st = do
                 Right resolvedLine -> do
                     let cmd = parseCommand resolvedLine
                     when (isMutating cmd) $ do
-                        repoLogCommand (asRepo st) uname line  -- log original input
+                        publishCommand (busCommands (asBus st)) CLI uname line
                         repoTouchSession (asRepo st) (asSessionId st)
                     handleCommand st cmd
                     -- Mark hint session as stale if a mutating command ran
@@ -405,8 +425,8 @@ handleCommand st cmd = case cmd of
                                 , Scheduler.schPeriodBounds = periodBounds
                                 , Scheduler.schCalendarHours = Map.empty
                                 }
-                        bus <- newPubSub
-                        subId <- subscribe bus $ \evt -> case evt of
+                        progressBus <- newTopicBus
+                        subId <- subscribe progressBus ".*" $ \_topic evt -> case evt of
                             OptimizeProgress progress ->
                                 let phaseStr = case opPhase progress of
                                         PhaseHard -> "hard"
@@ -417,8 +437,8 @@ handleCommand st cmd = case cmd of
                                             ++ " unfilled=" ++ show (opBestUnfilled progress)
                                             ++ " score=" ++ showFFloat1 (opBestScore progress)
                                             ++ " elapsed=" ++ elapsed ++ "s")
-                        result <- Opt.optimizeSchedule ctx seed bus
-                        unsubscribe bus subId
+                        result <- Opt.optimizeSchedule ctx seed progressBus
+                        unsubscribe progressBus subId
                         let sched  = Scheduler.srSchedule result
                             unfilled = Scheduler.srUnfilled result
                             truly = length [u | u <- unfilled, Scheduler.unfilledKind u == Scheduler.TrulyUnfilled]
@@ -1154,8 +1174,14 @@ handleCommand st cmd = case cmd of
         putStrLn ("Station " ++ show sid ++ " now requires Skill " ++ show skid)
 
     SkillCreate sid name -> requireAdmin st $ do
-        SW.addSkill (asRepo st) (SkillId sid) name ""
-        putStrLn ("Created Skill " ++ show sid ++ " (" ++ name ++ ")")
+        result <- SW.addSkill (asRepo st) (SkillId sid) name ""
+        case result of
+            Left err -> putStrLn $ "Error: " ++ err
+            Right () -> putStrLn ("Created Skill " ++ show sid ++ " (" ++ name ++ ")")
+
+    SkillRename sid name -> requireAdmin st $ do
+        repoRenameSkill (asRepo st) (SkillId sid) name
+        putStrLn ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
 
     SkillList -> do
         skills <- SW.listSkills (asRepo st)

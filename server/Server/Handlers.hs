@@ -12,14 +12,14 @@ import qualified Data.Set as Set
 import Data.Time (Day)
 import Servant
 
-import Auth.Types (User(..), Role(..))
+import Auth.Types (User(..), Username(..), Role(..))
 import Domain.Types (WorkerId(..), StationId(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule)
-import Domain.Skill (Skill)
+import Domain.Skill (Skill, skillName)
 import Domain.Shift (ShiftDef(..))
 import Domain.Scheduler (ScheduleResult)
 import Domain.Absence (AbsenceRequest(..), AbsenceType(..), AbsenceContext(..))
 import Domain.Hint (Hint)
-import Domain.Pin (PinnedAssignment)
+import Domain.Pin (PinnedAssignment(..))
 import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
 import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), SessionId(..), HintSessionRecord(..))
 import qualified Service.Worker as SW
@@ -37,11 +37,41 @@ import Server.Json
 import Server.Error
 import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
-import Server.Execute (ExecuteEnv)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
+import Server.Execute (ExecuteEnv(..))
+
+-- | Publish a command event from a REST handler.
+logRest :: TopicBus CommandEvent -> User -> String -> Handler ()
+logRest cmdBus user cmd = let Username uname = userName user
+                          in liftIO $ publishCommand cmdBus GUI uname cmd
+
+-- | Look up a skill name by ID; returns the ID as a string if not found.
+lookupSkillName :: Repository -> SkillId -> IO String
+lookupSkillName repo sid = do
+    skills <- repoListSkills repo
+    case lookup sid skills of
+        Just sk -> return (skillName sk)
+        Nothing -> let SkillId i = sid in return (show i)
+
+-- | Look up a station name by ID; returns the ID as a string if not found.
+lookupStationName :: Repository -> StationId -> IO String
+lookupStationName repo stid = do
+    stations <- repoListStations repo
+    case lookup stid stations of
+        Just n  -> return n
+        Nothing -> let StationId i = stid in return (show i)
+
+-- | Look up a worker name by ID; returns the ID as a string if not found.
+lookupWorkerName :: Repository -> WorkerId -> IO String
+lookupWorkerName repo wid = do
+    users <- repoListUsers repo
+    case [uname | u <- users, userWorkerId u == wid, let Username uname = userName u] of
+        (n:_) -> return n
+        []    -> let WorkerId i = wid in return (show i)
 
 -- | REST server for protected endpoints. User is threaded through from AuthProtect.
-server :: Repository -> User -> Server RawAPI
-server repo user =
+server :: TopicBus CommandEvent -> Repository -> User -> Server RawAPI
+server cmdBus repo user =
     -- Logout
          handleLogout repo user
     -- Original endpoints
@@ -50,85 +80,85 @@ server repo user =
     :<|> handleListShifts repo
     :<|> handleListSchedules repo
     :<|> handleGetSchedule repo
-    :<|> handleDeleteSchedule repo user
+    :<|> handleDeleteSchedule cmdBus repo user
     :<|> handleListDrafts repo
     :<|> handleCreateDraft repo user
     :<|> handleGetDraft repo
     :<|> handleGenerateDraft repo user
-    :<|> handleCommitDraft repo user
-    :<|> handleDiscardDraft repo user
+    :<|> handleCommitDraft cmdBus repo user
+    :<|> handleDiscardDraft cmdBus repo user
     :<|> handleGetCalendar repo
     :<|> handleListCalendarHistory repo
     :<|> handleGetCalendarCommit repo
     :<|> handleListPendingAbsences repo user
-    :<|> handleRequestAbsence repo user
-    :<|> handleApproveAbsence repo user
-    :<|> handleRejectAbsence repo user
+    :<|> handleRequestAbsence cmdBus repo user
+    :<|> handleApproveAbsence cmdBus repo user
+    :<|> handleRejectAbsence cmdBus repo user
     :<|> handleGetConfig repo
     -- Skill CRUD
-    :<|> handleCreateSkill repo user
-    :<|> handleDeleteSkill repo user
-    :<|> handleRenameSkill repo user
+    :<|> handleCreateSkill cmdBus repo user
+    :<|> handleDeleteSkill cmdBus repo user
+    :<|> handleRenameSkill cmdBus repo user
     -- Skill implications
     :<|> handleListImplications repo
-    :<|> handleAddImplication repo user
-    :<|> handleRemoveImplication repo user
+    :<|> handleAddImplication cmdBus repo user
+    :<|> handleRemoveImplication cmdBus repo user
     -- Station CRUD
-    :<|> handleCreateStation repo user
-    :<|> handleDeleteStation repo user
-    :<|> handleSetStationHours repo user
-    :<|> handleSetStationClosure repo user
+    :<|> handleCreateStation cmdBus repo user
+    :<|> handleDeleteStation cmdBus repo user
+    :<|> handleSetStationHours cmdBus repo user
+    :<|> handleSetStationClosure cmdBus repo user
     -- Shift CRUD
-    :<|> handleCreateShift repo user
-    :<|> handleDeleteShift repo user
+    :<|> handleCreateShift cmdBus repo user
+    :<|> handleDeleteShift cmdBus repo user
     -- Worker configuration
-    :<|> handleSetWorkerHours repo user
-    :<|> handleSetWorkerOvertime repo user
-    :<|> handleSetWorkerPrefs repo user
-    :<|> handleSetWorkerVariety repo user
-    :<|> handleSetWorkerShiftPrefs repo user
-    :<|> handleSetWorkerWeekendOnly repo user
-    :<|> handleSetWorkerSeniority repo user
-    :<|> handleSetWorkerCrossTraining repo user
-    :<|> handleSetWorkerEmploymentStatus repo user
-    :<|> handleSetWorkerOvertimeModel repo user
-    :<|> handleSetWorkerPayTracking repo user
-    :<|> handleSetWorkerTemp repo user
+    :<|> handleSetWorkerHours cmdBus repo user
+    :<|> handleSetWorkerOvertime cmdBus repo user
+    :<|> handleSetWorkerPrefs cmdBus repo user
+    :<|> handleSetWorkerVariety cmdBus repo user
+    :<|> handleSetWorkerShiftPrefs cmdBus repo user
+    :<|> handleSetWorkerWeekendOnly cmdBus repo user
+    :<|> handleSetWorkerSeniority cmdBus repo user
+    :<|> handleSetWorkerCrossTraining cmdBus repo user
+    :<|> handleSetWorkerEmploymentStatus cmdBus repo user
+    :<|> handleSetWorkerOvertimeModel cmdBus repo user
+    :<|> handleSetWorkerPayTracking cmdBus repo user
+    :<|> handleSetWorkerTemp cmdBus repo user
     -- Worker skill grant/revoke
-    :<|> handleGrantWorkerSkill repo user
-    :<|> handleRevokeWorkerSkill repo user
+    :<|> handleGrantWorkerSkill cmdBus repo user
+    :<|> handleRevokeWorkerSkill cmdBus repo user
     -- Worker pairing
-    :<|> handleAvoidPairing repo user
-    :<|> handlePreferPairing repo user
+    :<|> handleAvoidPairing cmdBus repo user
+    :<|> handlePreferPairing cmdBus repo user
     -- Pins
     :<|> handleListPins repo
-    :<|> handleAddPin repo user
-    :<|> handleRemovePin repo user
+    :<|> handleAddPin cmdBus repo user
+    :<|> handleRemovePin cmdBus repo user
     -- Calendar mutations
     :<|> handleUnfreeze user
     :<|> handleFreezeStatus
     -- Config writes
-    :<|> handleSetConfig repo user
-    :<|> handleApplyPreset repo user
-    :<|> handleResetConfig repo user
-    :<|> handleSetPayPeriod repo user
+    :<|> handleSetConfig cmdBus repo user
+    :<|> handleApplyPreset cmdBus repo user
+    :<|> handleResetConfig cmdBus repo user
+    :<|> handleSetPayPeriod cmdBus repo user
     -- Audit
     :<|> handleGetAuditLog repo user
     -- Checkpoints
-    :<|> handleCreateCheckpoint repo user
-    :<|> handleCommitCheckpoint repo user
-    :<|> handleRollbackCheckpoint repo user
+    :<|> handleCreateCheckpoint cmdBus repo user
+    :<|> handleCommitCheckpoint cmdBus repo user
+    :<|> handleRollbackCheckpoint cmdBus repo user
     -- Import/Export
     :<|> handleExport repo user
-    :<|> handleImport repo user
+    :<|> handleImport cmdBus repo user
     -- Absence type management
-    :<|> handleCreateAbsenceType repo user
-    :<|> handleDeleteAbsenceType repo user
-    :<|> handleSetAbsenceAllowance repo user
+    :<|> handleCreateAbsenceType cmdBus repo user
+    :<|> handleDeleteAbsenceType cmdBus repo user
+    :<|> handleSetAbsenceAllowance cmdBus repo user
     -- User management
     :<|> handleListUsers repo user
-    :<|> handleCreateUser repo user
-    :<|> handleDeleteUser repo user
+    :<|> handleCreateUser cmdBus repo user
+    :<|> handleDeleteUser cmdBus repo user
     -- Hint sessions
     :<|> handleListHints repo user
     :<|> handleAddHint repo user
@@ -138,7 +168,9 @@ server repo user =
 
 -- | Protected server: REST + RPC, both receiving User from AuthProtect.
 protectedServer :: ExecuteEnv -> Repository -> User -> Server (RawAPI :<|> RpcAPI)
-protectedServer execEnv repo user = server repo user :<|> rpcServer execEnv repo user
+protectedServer execEnv repo user =
+    let cmdBus = busCommands (eeBus execEnv)
+    in server cmdBus repo user :<|> rpcServer execEnv repo user
 
 -- | Combined server: Public + Protected.
 fullServer :: ExecuteEnv -> Repository -> Server FullAPI
@@ -175,10 +207,11 @@ handleGetSchedule repo name = do
         Nothing -> throwApiError (NotFound ("Schedule not found: " ++ name))
         Just s  -> pure s
 
-handleDeleteSchedule :: Repository -> User -> String -> Handler NoContent
-handleDeleteSchedule repo user name = do
+handleDeleteSchedule :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
+handleDeleteSchedule cmdBus repo user name = do
     requireAdmin user
     liftIO $ SS.deleteSchedule repo name
+    logRest cmdBus user ("schedule delete " ++ name)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -212,21 +245,25 @@ handleGenerateDraft repo user did req = do
         Left msg -> throwApiError (NotFound msg)
         Right r  -> pure r
 
-handleCommitDraft :: Repository -> User -> Int -> CommitDraftReq -> Handler NoContent
-handleCommitDraft repo user did req = do
+handleCommitDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> CommitDraftReq -> Handler NoContent
+handleCommitDraft cmdBus repo user did req = do
     requireAdmin user
     result <- liftIO $ SD.commitDraft repo did (cmrNote req)
     case result of
         Left msg -> throwApiError (NotFound msg)
-        Right () -> pure NoContent
+        Right () -> do
+            logRest cmdBus user ("draft commit " ++ show did)
+            pure NoContent
 
-handleDiscardDraft :: Repository -> User -> Int -> Handler NoContent
-handleDiscardDraft repo user did = do
+handleDiscardDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleDiscardDraft cmdBus repo user did = do
     requireAdmin user
     result <- liftIO $ SD.discardDraft repo did
     case result of
         Left msg -> throwApiError (NotFound msg)
-        Right () -> pure NoContent
+        Right () -> do
+            logRest cmdBus user ("draft discard " ++ show did)
+            pure NoContent
 
 -- -----------------------------------------------------------------
 -- Calendar
@@ -255,8 +292,8 @@ handleListPendingAbsences repo user = do
         Admin  -> pure allPending
         Normal -> pure $ filter (\a -> arWorker a == userWorkerId user) allPending
 
-handleRequestAbsence :: Repository -> User -> RequestAbsenceReq -> Handler AbsenceCreatedResp
-handleRequestAbsence repo user req = do
+handleRequestAbsence :: TopicBus CommandEvent -> Repository -> User -> RequestAbsenceReq -> Handler AbsenceCreatedResp
+handleRequestAbsence cmdBus repo user req = do
     requireSelfOrAdmin user (rarWorkerId req)
     result <- liftIO $ SA.requestAbsenceService repo
         (WorkerId (rarWorkerId req))
@@ -266,26 +303,32 @@ handleRequestAbsence repo user req = do
     case result of
         Left SA.UnknownAbsenceType -> throwApiError (BadRequest "Unknown absence type")
         Left err -> throwApiError (InternalError (show err))
-        Right (AbsenceId aid) -> pure (AbsenceCreatedResp aid)
+        Right (AbsenceId aid) -> do
+            logRest cmdBus user ("absence request " ++ show (rarWorkerId req) ++ " " ++ show (rarTypeId req) ++ " " ++ show (rarFrom req) ++ " " ++ show (rarTo req))
+            pure (AbsenceCreatedResp aid)
 
-handleApproveAbsence :: Repository -> User -> Int -> Handler NoContent
-handleApproveAbsence repo user aid = do
+handleApproveAbsence :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleApproveAbsence cmdBus repo user aid = do
     requireAdmin user
     result <- liftIO $ SA.approveAbsenceService repo (AbsenceId aid)
     case result of
         Left SA.AbsenceNotFound -> throwApiError (NotFound "Absence not found")
         Left SA.AbsenceAllowanceExceeded -> throwApiError (Conflict "Allowance exceeded")
         Left err -> throwApiError (InternalError (show err))
-        Right () -> pure NoContent
+        Right () -> do
+            logRest cmdBus user ("absence approve " ++ show aid)
+            pure NoContent
 
-handleRejectAbsence :: Repository -> User -> Int -> Handler NoContent
-handleRejectAbsence repo user aid = do
+handleRejectAbsence :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleRejectAbsence cmdBus repo user aid = do
     requireAdmin user
     result <- liftIO $ SA.rejectAbsenceService repo (AbsenceId aid)
     case result of
         Left SA.AbsenceNotFound -> throwApiError (NotFound "Absence not found")
         Left err -> throwApiError (InternalError (show err))
-        Right () -> pure NoContent
+        Right () -> do
+            logRest cmdBus user ("absence reject " ++ show aid)
+            pure NoContent
 
 -- -----------------------------------------------------------------
 -- Config (read)
@@ -298,22 +341,30 @@ handleGetConfig repo = liftIO $ SCfg.listConfigParams repo
 -- Skill CRUD
 -- -----------------------------------------------------------------
 
-handleCreateSkill :: Repository -> User -> CreateSkillReq -> Handler NoContent
-handleCreateSkill repo user req = do
+handleCreateSkill :: TopicBus CommandEvent -> Repository -> User -> CreateSkillReq -> Handler NoContent
+handleCreateSkill cmdBus repo user req = do
     requireAdmin user
-    liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
-    pure NoContent
+    result <- liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
+    case result of
+        Left err -> throwApiError (Conflict err)
+        Right () -> do
+            logRest cmdBus user ("skill create " ++ csrName req)
+            pure NoContent
 
-handleDeleteSkill :: Repository -> User -> Int -> Handler NoContent
-handleDeleteSkill repo user sid = do
+handleDeleteSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleDeleteSkill cmdBus repo user sid = do
     requireAdmin user
+    sName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.removeSkill repo (SkillId sid)
+    logRest cmdBus user ("skill delete " ++ sName)
     pure NoContent
 
-handleRenameSkill :: Repository -> User -> Int -> RenameSkillReq -> Handler NoContent
-handleRenameSkill repo user sid req = do
+handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> RenameSkillReq -> Handler NoContent
+handleRenameSkill cmdBus repo user sid req = do
     requireAdmin user
+    oldName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.renameSkill repo (SkillId sid) (rsrName req)
+    logRest cmdBus user ("skill rename " ++ oldName ++ " " ++ rsrName req)
     pure NoContent
 
 handleListImplications :: Repository -> Handler (Map.Map Int [Int])
@@ -323,169 +374,221 @@ handleListImplications repo = do
     pure $ Map.fromList
         [ (toInt k, map toInt vs) | (k, vs) <- Map.toList impl ]
 
-handleAddImplication :: Repository -> User -> Int -> AddImplicationReq -> Handler NoContent
-handleAddImplication repo user sid req = do
+handleAddImplication :: TopicBus CommandEvent -> Repository -> User -> Int -> AddImplicationReq -> Handler NoContent
+handleAddImplication cmdBus repo user sid req = do
     requireAdmin user
+    sName <- liftIO $ lookupSkillName repo (SkillId sid)
+    implName <- liftIO $ lookupSkillName repo (SkillId (airImpliesSkillId req))
     liftIO $ SW.addSkillImplication repo (SkillId sid) (SkillId (airImpliesSkillId req))
+    logRest cmdBus user ("skill implication " ++ sName ++ " " ++ implName)
     pure NoContent
 
-handleRemoveImplication :: Repository -> User -> Int -> Int -> Handler NoContent
-handleRemoveImplication repo user sid impliedId = do
+handleRemoveImplication :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
+handleRemoveImplication cmdBus repo user sid impliedId = do
     requireAdmin user
+    sName <- liftIO $ lookupSkillName repo (SkillId sid)
+    implName <- liftIO $ lookupSkillName repo (SkillId impliedId)
     liftIO $ SW.removeSkillImplication repo (SkillId sid) (SkillId impliedId)
+    logRest cmdBus user ("skill remove-implication " ++ sName ++ " " ++ implName)
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Station CRUD
 -- -----------------------------------------------------------------
 
-handleCreateStation :: Repository -> User -> CreateStationReq -> Handler NoContent
-handleCreateStation repo user req = do
+handleCreateStation :: TopicBus CommandEvent -> Repository -> User -> CreateStationReq -> Handler NoContent
+handleCreateStation cmdBus repo user req = do
     requireAdmin user
     liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
+    logRest cmdBus user ("station add " ++ cstrName req)
     pure NoContent
 
-handleDeleteStation :: Repository -> User -> Int -> Handler NoContent
-handleDeleteStation repo user sid = do
+handleDeleteStation :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleDeleteStation cmdBus repo user sid = do
     requireAdmin user
+    sName <- liftIO $ lookupStationName repo (StationId sid)
     liftIO $ SW.removeStation repo (StationId sid)
+    logRest cmdBus user ("station remove " ++ sName)
     pure NoContent
 
-handleSetStationHours :: Repository -> User -> Int -> SetStationHoursReq -> Handler NoContent
-handleSetStationHours repo user sid req = do
+handleSetStationHours :: TopicBus CommandEvent -> Repository -> User -> Int -> SetStationHoursReq -> Handler NoContent
+handleSetStationHours cmdBus repo user sid req = do
     requireAdmin user
+    sName <- liftIO $ lookupStationName repo (StationId sid)
     liftIO $ SW.setStationHours repo (StationId sid) (sshrStart req) (sshrEnd req)
+    logRest cmdBus user ("station set-hours " ++ sName ++ " " ++ show (sshrStart req) ++ " " ++ show (sshrEnd req))
     pure NoContent
 
-handleSetStationClosure :: Repository -> User -> Int -> SetStationClosureReq -> Handler NoContent
-handleSetStationClosure repo user sid req = do
+handleSetStationClosure :: TopicBus CommandEvent -> Repository -> User -> Int -> SetStationClosureReq -> Handler NoContent
+handleSetStationClosure cmdBus repo user sid req = do
     requireAdmin user
+    sName <- liftIO $ lookupStationName repo (StationId sid)
     liftIO $ SW.closeStationDay repo (StationId sid) (sscrDay req)
+    logRest cmdBus user ("station close-day " ++ sName ++ " " ++ show (sscrDay req))
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Shift CRUD
 -- -----------------------------------------------------------------
 
-handleCreateShift :: Repository -> User -> CreateShiftReq -> Handler NoContent
-handleCreateShift repo user req = do
+handleCreateShift :: TopicBus CommandEvent -> Repository -> User -> CreateShiftReq -> Handler NoContent
+handleCreateShift cmdBus repo user req = do
     requireAdmin user
     liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
+    logRest cmdBus user ("shift create " ++ cshrName req ++ " " ++ show (cshrStart req) ++ " " ++ show (cshrEnd req))
     pure NoContent
 
-handleDeleteShift :: Repository -> User -> String -> Handler NoContent
-handleDeleteShift repo user name = do
+handleDeleteShift :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
+handleDeleteShift cmdBus repo user name = do
     requireAdmin user
     liftIO $ repoDeleteShift repo name
+    logRest cmdBus user ("shift delete " ++ name)
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Worker configuration
 -- -----------------------------------------------------------------
 
-handleSetWorkerHours :: Repository -> User -> Int -> SetWorkerHoursReq -> Handler NoContent
-handleSetWorkerHours repo user wid req = do
+handleSetWorkerHours :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerHoursReq -> Handler NoContent
+handleSetWorkerHours cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setMaxHours repo (WorkerId wid) (fromIntegral (swhrHours req))
+    logRest cmdBus user ("worker set-hours " ++ wName ++ " " ++ show (swhrHours req))
     pure NoContent
 
-handleSetWorkerOvertime :: Repository -> User -> Int -> SetWorkerOvertimeReq -> Handler NoContent
-handleSetWorkerOvertime repo user wid req = do
+handleSetWorkerOvertime :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerOvertimeReq -> Handler NoContent
+handleSetWorkerOvertime cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     _ <- liftIO $ SW.setOvertimeOptIn repo (WorkerId wid) (sworOptIn req)
+    logRest cmdBus user ("worker set-overtime " ++ wName ++ " " ++ show (sworOptIn req))
     pure NoContent
 
-handleSetWorkerPrefs :: Repository -> User -> Int -> SetWorkerPrefsReq -> Handler NoContent
-handleSetWorkerPrefs repo user wid req = do
+handleSetWorkerPrefs :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerPrefsReq -> Handler NoContent
+handleSetWorkerPrefs cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setStationPreferences repo (WorkerId wid)
         (map StationId (swprStationIds req))
+    logRest cmdBus user ("worker set-prefs " ++ wName)
     pure NoContent
 
-handleSetWorkerVariety :: Repository -> User -> Int -> SetWorkerVarietyReq -> Handler NoContent
-handleSetWorkerVariety repo user wid req = do
+handleSetWorkerVariety :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerVarietyReq -> Handler NoContent
+handleSetWorkerVariety cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setVarietyPreference repo (WorkerId wid) (swvrPrefer req)
+    logRest cmdBus user ("worker set-variety " ++ wName ++ " " ++ show (swvrPrefer req))
     pure NoContent
 
-handleSetWorkerShiftPrefs :: Repository -> User -> Int -> SetWorkerShiftPrefsReq -> Handler NoContent
-handleSetWorkerShiftPrefs repo user wid req = do
+handleSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerShiftPrefsReq -> Handler NoContent
+handleSetWorkerShiftPrefs cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setShiftPreferences repo (WorkerId wid) (swsprShifts req)
+    logRest cmdBus user ("worker set-shift-pref " ++ wName)
     pure NoContent
 
-handleSetWorkerWeekendOnly :: Repository -> User -> Int -> SetWorkerWeekendOnlyReq -> Handler NoContent
-handleSetWorkerWeekendOnly repo user wid req = do
+handleSetWorkerWeekendOnly :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerWeekendOnlyReq -> Handler NoContent
+handleSetWorkerWeekendOnly cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setWeekendOnly repo (WorkerId wid) (swwoVal req)
+    logRest cmdBus user ("worker set-weekend-only " ++ wName ++ " " ++ show (swwoVal req))
     pure NoContent
 
-handleSetWorkerSeniority :: Repository -> User -> Int -> SetWorkerSeniorityReq -> Handler NoContent
-handleSetWorkerSeniority repo user wid req = do
+handleSetWorkerSeniority :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerSeniorityReq -> Handler NoContent
+handleSetWorkerSeniority cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setSeniority repo (WorkerId wid) (swsrLevel req)
+    logRest cmdBus user ("worker set-seniority " ++ wName ++ " " ++ show (swsrLevel req))
     pure NoContent
 
-handleSetWorkerCrossTraining :: Repository -> User -> Int -> SetWorkerCrossTrainingReq -> Handler NoContent
-handleSetWorkerCrossTraining repo user wid req = do
+handleSetWorkerCrossTraining :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerCrossTrainingReq -> Handler NoContent
+handleSetWorkerCrossTraining cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+    skName <- liftIO $ lookupSkillName repo (SkillId (swctrSkillId req))
     liftIO $ SW.addCrossTraining repo (WorkerId wid) (SkillId (swctrSkillId req))
+    logRest cmdBus user ("worker set-cross-training " ++ wName ++ " " ++ skName)
     pure NoContent
 
-handleSetWorkerEmploymentStatus :: Repository -> User -> Int -> SetWorkerEmploymentStatusReq -> Handler NoContent
-handleSetWorkerEmploymentStatus repo user wid req = do
+handleSetWorkerEmploymentStatus :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerEmploymentStatusReq -> Handler NoContent
+handleSetWorkerEmploymentStatus cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     _ <- liftIO $ SW.setEmploymentStatus repo (WorkerId wid) (swesStatus req)
+    logRest cmdBus user ("worker set-status " ++ wName ++ " " ++ swesStatus req)
     pure NoContent
 
-handleSetWorkerOvertimeModel :: Repository -> User -> Int -> SetWorkerOvertimeModelReq -> Handler NoContent
-handleSetWorkerOvertimeModel repo user wid req = do
+handleSetWorkerOvertimeModel :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerOvertimeModelReq -> Handler NoContent
+handleSetWorkerOvertimeModel cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setOvertimeModel repo (WorkerId wid) (swomModel req)
+    logRest cmdBus user ("worker set-overtime-model " ++ wName)
     pure NoContent
 
-handleSetWorkerPayTracking :: Repository -> User -> Int -> SetWorkerPayTrackingReq -> Handler NoContent
-handleSetWorkerPayTracking repo user wid req = do
+handleSetWorkerPayTracking :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerPayTrackingReq -> Handler NoContent
+handleSetWorkerPayTracking cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setPayPeriodTracking repo (WorkerId wid) (swptTracking req)
+    logRest cmdBus user ("worker set-pay-tracking " ++ wName)
     pure NoContent
 
-handleSetWorkerTemp :: Repository -> User -> Int -> SetWorkerTempReq -> Handler NoContent
-handleSetWorkerTemp repo user wid req = do
+handleSetWorkerTemp :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerTempReq -> Handler NoContent
+handleSetWorkerTemp cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setTempFlag repo (WorkerId wid) (swtTemp req)
+    logRest cmdBus user ("worker set-temp " ++ wName ++ " " ++ show (swtTemp req))
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Worker skill grant / revoke
 -- -----------------------------------------------------------------
 
-handleGrantWorkerSkill :: Repository -> User -> Int -> Int -> Handler NoContent
-handleGrantWorkerSkill repo user wid sid = do
+handleGrantWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
+handleGrantWorkerSkill cmdBus repo user wid sid = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+    skName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.grantWorkerSkill repo (WorkerId wid) (SkillId sid)
+    logRest cmdBus user ("worker grant-skill " ++ wName ++ " " ++ skName)
     pure NoContent
 
-handleRevokeWorkerSkill :: Repository -> User -> Int -> Int -> Handler NoContent
-handleRevokeWorkerSkill repo user wid sid = do
+handleRevokeWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
+handleRevokeWorkerSkill cmdBus repo user wid sid = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+    skName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.revokeWorkerSkill repo (WorkerId wid) (SkillId sid)
+    logRest cmdBus user ("worker revoke-skill " ++ wName ++ " " ++ skName)
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Worker pairing
 -- -----------------------------------------------------------------
 
-handleAvoidPairing :: Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
-handleAvoidPairing repo user wid req = do
+handleAvoidPairing :: TopicBus CommandEvent -> Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
+handleAvoidPairing cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+    otherName <- liftIO $ lookupWorkerName repo (WorkerId (wprOtherWorkerId req))
     liftIO $ SW.addAvoidPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
+    logRest cmdBus user ("worker avoid-pairing " ++ wName ++ " " ++ otherName)
     pure NoContent
 
-handlePreferPairing :: Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
-handlePreferPairing repo user wid req = do
+handlePreferPairing :: TopicBus CommandEvent -> Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
+handlePreferPairing cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
+    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+    otherName <- liftIO $ lookupWorkerName repo (WorkerId (wprOtherWorkerId req))
     liftIO $ SW.addPreferPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
+    logRest cmdBus user ("worker prefer-pairing " ++ wName ++ " " ++ otherName)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -495,16 +598,22 @@ handlePreferPairing repo user wid req = do
 handleListPins :: Repository -> Handler [PinnedAssignment]
 handleListPins repo = liftIO $ SW.listPins repo
 
-handleAddPin :: Repository -> User -> PinnedAssignment -> Handler NoContent
-handleAddPin repo user pin = do
+handleAddPin :: TopicBus CommandEvent -> Repository -> User -> PinnedAssignment -> Handler NoContent
+handleAddPin cmdBus repo user pin = do
     requireAdmin user
+    wName <- liftIO $ lookupWorkerName repo (pinWorker pin)
+    sName <- liftIO $ lookupStationName repo (pinStation pin)
     liftIO $ SW.addPin repo pin
+    logRest cmdBus user ("pin " ++ wName ++ " " ++ sName)
     pure NoContent
 
-handleRemovePin :: Repository -> User -> PinnedAssignment -> Handler NoContent
-handleRemovePin repo user pin = do
+handleRemovePin :: TopicBus CommandEvent -> Repository -> User -> PinnedAssignment -> Handler NoContent
+handleRemovePin cmdBus repo user pin = do
     requireAdmin user
+    wName <- liftIO $ lookupWorkerName repo (pinWorker pin)
+    sName <- liftIO $ lookupStationName repo (pinStation pin)
     liftIO $ SW.removePin repo pin
+    logRest cmdBus user ("unpin " ++ wName ++ " " ++ sName)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -525,36 +634,42 @@ handleFreezeStatus = do
 -- Config writes
 -- -----------------------------------------------------------------
 
-handleSetConfig :: Repository -> User -> String -> SetConfigReq -> Handler NoContent
-handleSetConfig repo user key req = do
+handleSetConfig :: TopicBus CommandEvent -> Repository -> User -> String -> SetConfigReq -> Handler NoContent
+handleSetConfig cmdBus repo user key req = do
     requireAdmin user
     result <- liftIO $ SCfg.setConfigParam repo key (scrValue req)
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown config key: " ++ key))
-        Just _  -> pure NoContent
+        Just _  -> do
+            logRest cmdBus user ("config set " ++ key ++ " " ++ show (scrValue req))
+            pure NoContent
 
-handleApplyPreset :: Repository -> User -> String -> Handler NoContent
-handleApplyPreset repo user name = do
+handleApplyPreset :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
+handleApplyPreset cmdBus repo user name = do
     requireAdmin user
     result <- liftIO $ SCfg.applyPreset repo name
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown preset: " ++ name))
-        Just _  -> pure NoContent
+        Just _  -> do
+            logRest cmdBus user ("config preset " ++ name)
+            pure NoContent
 
-handleResetConfig :: Repository -> User -> Handler NoContent
-handleResetConfig repo user = do
+handleResetConfig :: TopicBus CommandEvent -> Repository -> User -> Handler NoContent
+handleResetConfig cmdBus repo user = do
     requireAdmin user
     liftIO $ SCfg.saveConfig repo =<< SCfg.loadConfig repo
+    logRest cmdBus user "config reset"
     pure NoContent
 
-handleSetPayPeriod :: Repository -> User -> SetPayPeriodReq -> Handler NoContent
-handleSetPayPeriod repo user req = do
+handleSetPayPeriod :: TopicBus CommandEvent -> Repository -> User -> SetPayPeriodReq -> Handler NoContent
+handleSetPayPeriod cmdBus repo user req = do
     requireAdmin user
     case parsePayPeriodType (sprType req) of
         Nothing -> throwApiError (BadRequest ("Unknown pay period type: " ++ sprType req))
         Just pt -> do
             liftIO $ SCfg.savePayPeriodConfig repo
                 (PayPeriodConfig pt (sprAnchorDate req))
+            logRest cmdBus user ("config set-pay-period " ++ sprType req)
             pure NoContent
 
 -- -----------------------------------------------------------------
@@ -570,22 +685,25 @@ handleGetAuditLog repo user = do
 -- Checkpoints
 -- -----------------------------------------------------------------
 
-handleCreateCheckpoint :: Repository -> User -> CreateCheckpointReq -> Handler NoContent
-handleCreateCheckpoint repo user req = do
+handleCreateCheckpoint :: TopicBus CommandEvent -> Repository -> User -> CreateCheckpointReq -> Handler NoContent
+handleCreateCheckpoint cmdBus repo user req = do
     requireAdmin user
     liftIO $ repoSavepoint repo (ccrName req)
+    logRest cmdBus user ("checkpoint create " ++ ccrName req)
     pure NoContent
 
-handleCommitCheckpoint :: Repository -> User -> String -> Handler NoContent
-handleCommitCheckpoint repo user name = do
+handleCommitCheckpoint :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
+handleCommitCheckpoint cmdBus repo user name = do
     requireAdmin user
     liftIO $ repoRelease repo name
+    logRest cmdBus user ("checkpoint commit " ++ name)
     pure NoContent
 
-handleRollbackCheckpoint :: Repository -> User -> String -> Handler NoContent
-handleRollbackCheckpoint repo user name = do
+handleRollbackCheckpoint :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
+handleRollbackCheckpoint cmdBus repo user name = do
     requireAdmin user
     liftIO $ repoRollbackTo repo name
+    logRest cmdBus user ("checkpoint rollback " ++ name)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -598,41 +716,45 @@ handleExport repo user = do
     dat <- liftIO $ Exp.gatherExport repo Nothing
     pure (ExportResp dat)
 
-handleImport :: Repository -> User -> ImportReq -> Handler ImportResp
-handleImport repo user req = do
+handleImport :: TopicBus CommandEvent -> Repository -> User -> ImportReq -> Handler ImportResp
+handleImport cmdBus repo user req = do
     requireAdmin user
     msgs <- liftIO $ Exp.applyImport repo (irData req)
+    logRest cmdBus user "import data"
     pure (ImportResp msgs)
 
 -- -----------------------------------------------------------------
 -- Absence type management
 -- -----------------------------------------------------------------
 
-handleCreateAbsenceType :: Repository -> User -> CreateAbsenceTypeReq -> Handler NoContent
-handleCreateAbsenceType repo user req = do
+handleCreateAbsenceType :: TopicBus CommandEvent -> Repository -> User -> CreateAbsenceTypeReq -> Handler NoContent
+handleCreateAbsenceType cmdBus repo user req = do
     requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let atId = AbsenceTypeId (catrId req)
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
         ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
+    logRest cmdBus user ("absence-type create " ++ show (catrId req) ++ " " ++ catrName req)
     pure NoContent
 
-handleDeleteAbsenceType :: Repository -> User -> Int -> Handler NoContent
-handleDeleteAbsenceType repo user atid = do
+handleDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleDeleteAbsenceType cmdBus repo user atid = do
     requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let ctx' = ctx { acTypes = Map.delete (AbsenceTypeId atid) (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
+    logRest cmdBus user ("absence-type delete " ++ show atid)
     pure NoContent
 
-handleSetAbsenceAllowance :: Repository -> User -> Int -> SetAbsenceAllowanceReq -> Handler NoContent
-handleSetAbsenceAllowance repo user atid req = do
+handleSetAbsenceAllowance :: TopicBus CommandEvent -> Repository -> User -> Int -> SetAbsenceAllowanceReq -> Handler NoContent
+handleSetAbsenceAllowance cmdBus repo user atid req = do
     requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
     let key = (WorkerId (saarWorkerId req), AbsenceTypeId atid)
         ctx' = ctx { acYearlyAllowance = Map.insert key (saarAllowance req) (acYearlyAllowance ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
+    logRest cmdBus user ("absence set-allowance " ++ show atid ++ " " ++ show (saarWorkerId req) ++ " " ++ show (saarAllowance req))
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -644,24 +766,27 @@ handleListUsers repo user = do
     requireAdmin user
     liftIO $ repoListUsers repo
 
-handleCreateUser :: Repository -> User -> CreateUserReq -> Handler NoContent
-handleCreateUser repo user req = do
+handleCreateUser :: TopicBus CommandEvent -> Repository -> User -> CreateUserReq -> Handler NoContent
+handleCreateUser cmdBus repo user req = do
     requireAdmin user
     result <- liftIO $ SAuth.register repo
         (curUsername req) (curPassword req) (curRole req) (WorkerId (curWorkerId req))
     case result of
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
-        Right _ -> pure NoContent
+        Right _ -> do
+            logRest cmdBus user ("user create " ++ curUsername req)
+            pure NoContent
 
-handleDeleteUser :: Repository -> User -> String -> Handler NoContent
-handleDeleteUser repo user uname = do
+handleDeleteUser :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
+handleDeleteUser cmdBus repo user uname = do
     requireAdmin user
     mUser <- liftIO $ repoGetUserByName repo uname
     case mUser of
         Nothing -> throwApiError (NotFound ("User not found: " ++ uname))
         Just u  -> do
             liftIO $ repoDeleteUser repo (userId u)
+            logRest cmdBus user ("user delete " ++ uname)
             pure NoContent
 
 -- -----------------------------------------------------------------

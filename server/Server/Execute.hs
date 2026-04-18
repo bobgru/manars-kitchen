@@ -12,7 +12,8 @@ import System.Process (createPipe)
 
 import Auth.Types (User(..))
 import Repo.Types (Repository, SessionId(..))
-import CLI.App (mkAppState, handleCommand)
+import Service.PubSub (AppBus(..), newAppBus)
+import CLI.App (mkAppState, handleCommand, registerAuditSubscriber)
 import CLI.Commands (Command(..), parseCommand)
 
 -- | Environment for command execution. Holds an MVar to serialize
@@ -20,13 +21,16 @@ import CLI.Commands (Command(..), parseCommand)
 data ExecuteEnv = ExecuteEnv
     { eeRepo :: !Repository
     , eeLock :: !(MVar ())
+    , eeBus  :: !AppBus
     }
 
--- | Create a new execution environment.
+-- | Create a new execution environment with a shared event bus.
 newExecuteEnv :: Repository -> IO ExecuteEnv
 newExecuteEnv repo = do
     lock <- newMVar ()
-    return (ExecuteEnv repo lock)
+    bus  <- newAppBus
+    _ <- registerAuditSubscriber (busCommands bus) repo
+    return (ExecuteEnv repo lock bus)
 
 -- | Parse and execute a command string, returning the formatted text output.
 --   Thread-safe: concurrent calls are serialized via MVar.

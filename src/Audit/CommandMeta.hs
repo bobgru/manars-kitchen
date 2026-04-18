@@ -178,6 +178,9 @@ classifySkill op rest = case op of
     "create" -> case rest of
         (sid : _) -> (mutating etSkill "create") { cmEntityId = readMaybe sid }
         _         -> mutating etSkill "create"
+    "rename" -> case rest of
+        (sid : _) -> (mutating etSkill "rename") { cmEntityId = readMaybe sid }
+        _         -> mutating etSkill "rename"
     "implication" -> case rest of
         (a : b : _) -> (mutating etSkill "implication")
             { cmEntityId = readMaybe a, cmTargetId = readMaybe b }

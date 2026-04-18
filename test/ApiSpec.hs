@@ -3,13 +3,16 @@
 module ApiSpec (spec) where
 
 import Test.Hspec
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, tryTakeMVar)
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time (Day, fromGregorian)
 import Data.Proxy (Proxy(..))
 import qualified Data.ByteString.Char8 as BS8
-import Network.HTTP.Client (ManagerSettings, newManager, defaultManagerSettings, managerModifyRequest, requestHeaders)
+import Network.HTTP.Client (ManagerSettings, newManager, defaultManagerSettings, managerModifyRequest, requestHeaders, parseRequest, httpLbs, responseStatus, responseBody, withResponse, responseOpen, responseClose, brRead)
+import Network.Wai (Application, Request, pathInfo, requestMethod)
 import Network.Wai.Handler.Warp (testWithApplication)
 import Database.SQLite.Simple (execute, Only(..))
 import Servant.API ((:<|>)(..))
@@ -37,9 +40,11 @@ import Servant.API (NoContent)
 import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
 import Server.Auth (LoginReq(..), LoginResp(..), authHandler)
-import Server.Execute (newExecuteEnv)
+import Server.EventStream (eventStreamApp)
+import Server.Execute (newExecuteEnv, ExecuteEnv(..))
 import Server.Handlers (fullServer)
 import Server.Rpc
+import Service.PubSub (AppBus(..))
 import CLI.Commands (Command(..))
 import CLI.RpcClient (RpcEnv(..), dispatchCommand)
 
@@ -319,6 +324,7 @@ rpcExecuteC :: ExecuteReq -> ClientM String
 
 rpcCreateSkillC
     :<|> _rpcDeleteSkillC
+    :<|> _rpcRenameSkillC
     :<|> rpcListSkillsC
     :<|> _rpcCreateStationC
     :<|> _rpcDeleteStationC
@@ -415,9 +421,19 @@ withServer action = do
     (_conn, repo) <- mkSQLiteRepo testDbPath
     execEnv <- newExecuteEnv repo
     let ctx = authHandler repo :. EmptyContext
-        app = serveWithContext fullApi ctx (fullServer execEnv repo)
+        servantApp = serveWithContext fullApi ctx (fullServer execEnv repo)
+        eventsApp = eventStreamApp repo (eeBus execEnv)
+        app = withEventsRoute eventsApp servantApp
     testWithApplication (pure app) $ \port -> action repo port
     removeFile testDbPath
+
+-- | Middleware that routes GET /api/events to the SSE handler.
+withEventsRoute :: Application -> Application -> Application
+withEventsRoute eventsApp servantApp req sendResponse =
+    case pathInfo req of
+        ["api", "events"] | requestMethod req == "GET" ->
+              eventsApp req sendResponse
+        _ -> servantApp req sendResponse
 
 -- | Create a plain (no auth) ClientEnv for a port.
 mkPlainEnv :: Int -> IO ClientEnv
@@ -571,7 +587,7 @@ spec = do
 
         it "generate populates schedule" $ withSeededApp $ \repo env -> do
             -- Add a skill, station, and worker so the scheduler has something to do
-            SW.addSkill repo (SkillId 1) "grill" ""
+            _ <- SW.addSkill repo (SkillId 1) "grill" ""
             SW.addStation repo (StationId 1) "grill"
             SW.grantWorkerSkill repo (WorkerId 1) (SkillId 1)
             SW.setStationRequiredSkills repo (StationId 1)
@@ -677,7 +693,7 @@ spec = do
             pure ()
 
         it "grant and revoke worker skill" $ withSeededApp $ \repo env -> do
-            SW.addSkill repo (SkillId 1) "grill" ""
+            _ <- SW.addSkill repo (SkillId 1) "grill" ""
             Right _ <- runClientM (grantWorkerSkillC 1 1) env
             Right _ <- runClientM (revokeWorkerSkillC 1 1) env
             pure ()
@@ -723,6 +739,21 @@ spec = do
     describe "RPC Skill CRUD" $ do
         it "create and list skills via RPC" $ withTestApp $ \env -> do
             Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
+            length skills `shouldBe` 1
+
+        it "create rejects duplicate skill ID" $ withTestApp $ \env -> do
+            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            result <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "pastry" "Pastry skills")) env
+            case result of
+                Left (FailureResponse _ resp) ->
+                    statusCode (responseStatusCode resp) `shouldBe` 409
+                Left err -> expectationFailure ("expected 409, got: " ++ show err)
+                Right _ -> expectationFailure "expected error for duplicate skill ID"
+
+        it "rename skill via RPC" $ withTestApp $ \env -> do
+            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            Right _ <- runClientM (_rpcRenameSkillC 1 (RenameSkillReq "broiler")) env
             Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
             length skills `shouldBe` 1
 
@@ -791,6 +822,13 @@ spec = do
                 Right params <- runClientM (rpcShowConfigC RpcEmpty) env
                 lookup "shift-pref-bonus" params `shouldBe` Just 5.0
 
+        it "skill rename via dispatchCommand renames server-side skill" $
+            withRemoteApp $ \_ env rpc -> do
+                dispatchCommand rpc (SkillCreate 1 "grill")
+                dispatchCommand rpc (SkillRename 1 "broiler")
+                Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
+                length skills `shouldBe` 1
+
         it "RPC commands produce audit entries with source=rpc" $
             withRemoteApp $ \_ env rpc -> do
                 dispatchCommand rpc (SkillCreate 1 "grill")
@@ -798,6 +836,13 @@ spec = do
                 Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
                 all (\e -> aeSource e == "rpc") entries `shouldBe` True
+
+        it "REST commands produce audit entries with source=gui" $
+            withTestApp $ \env -> do
+                Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+                Right entries <- runClientM getAuditLogC env
+                let guiEntries = filter (\e -> aeSource e == "gui") entries
+                length guiEntries `shouldSatisfy` (>= 1)
 
     -- -----------------------------------------------------------------
     -- Auth: Login and Logout (7.1)
@@ -1067,3 +1112,62 @@ spec = do
             env <- mkPlainEnv port
             result <- runClientM (rpcExecuteC (ExecuteReq "help")) env
             result `shouldFailWith` 401
+
+    -- -----------------------------------------------------------------
+    -- SSE Event Stream endpoint
+    -- -----------------------------------------------------------------
+
+    describe "SSE Event Stream" $ do
+        it "returns 401 for missing token" $
+            withServer $ \_ port -> do
+                mgr <- newManager defaultManagerSettings
+                req <- parseRequest $ "http://localhost:" ++ show port ++ "/api/events"
+                resp <- httpLbs req mgr
+                statusCode (responseStatus resp) `shouldBe` 401
+
+        it "returns 401 for invalid token" $
+            withServer $ \_ port -> do
+                mgr <- newManager defaultManagerSettings
+                req <- parseRequest $ "http://localhost:" ++ show port ++ "/api/events?token=invalid"
+                resp <- httpLbs req mgr
+                statusCode (responseStatus resp) `shouldBe` 401
+
+        it "streams GUI events to authenticated client" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "password" Admin (WorkerId 1)
+                _ <- SW.addSkill repo (SkillId 1) "grill" ""
+                pEnv <- mkPlainEnv port
+                token <- loginAs pEnv "admin" "password"
+                aEnv <- mkAuthEnv token port
+
+                -- Connect SSE in background, collect chunks until we see data:
+                resultVar <- newEmptyMVar
+                mgr <- newManager defaultManagerSettings
+                sseReq <- parseRequest $ "http://localhost:" ++ show port
+                    ++ "/api/events?token=" ++ token
+                _ <- forkIO $ do
+                    resp <- responseOpen sseReq mgr
+                    let readUntilData acc = do
+                            chunk <- brRead (responseBody resp)
+                            let s = BS8.unpack chunk
+                                total = acc ++ s
+                            if "data:" `isInfixOf` total || null s
+                                then putMVar resultVar total
+                                else readUntilData total
+                    readUntilData ""
+                    responseClose resp
+
+                -- Give SSE time to connect and subscribe
+                threadDelay 500000
+
+                -- Rename skill via REST — triggers GUI event
+                Right _ <- runClientM (_renameSkillC 1 (RenameSkillReq "broiler")) aEnv
+
+                -- Wait for the SSE event to arrive
+                threadDelay 1000000
+                mResult <- tryTakeMVar resultVar
+                case mResult of
+                    Nothing -> expectationFailure "No SSE event received"
+                    Just chunk -> do
+                        chunk `shouldSatisfy` ("data:" `isInfixOf`)
+                        chunk `shouldSatisfy` ("skill rename" `isInfixOf`)

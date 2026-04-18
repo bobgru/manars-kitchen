@@ -200,6 +200,10 @@
 }
 
 .terminal-command {
+  color: #ffffff;
+}
+
+.terminal-echo {
   color: #5390d9;
 }
 
