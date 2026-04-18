@@ -10,7 +10,11 @@ import Servant (serveWithContext, Context(..))
 import System.Environment (getArgs)
 import WaiAppStatic.Types (unsafeToPiece, LookupResult(..))
 
+import Auth.Types (Role(..))
+import Domain.Types (WorkerId(..))
 import Repo.SQLite (mkSQLiteRepo)
+import Repo.Types (Repository(..))
+import qualified Service.Auth as SAuth
 import Server.Api (fullApi)
 import Server.Auth (authHandler)
 import Server.EventStream (eventStreamApp)
@@ -24,11 +28,23 @@ main = do
     putStrLn $ "Database: " ++ dbPath
     putStrLn $ "Listening on port " ++ show port
     (_conn, repo) <- mkSQLiteRepo dbPath
+    seedAdminUser repo
     execEnv <- newExecuteEnv repo
     let ctx = authHandler repo :. EmptyContext
         servantApp = serveWithContext fullApi ctx (fullServer execEnv repo)
     let eventsApp = eventStreamApp repo (eeBus execEnv)
     run port (spaFallback "web/dist" servantApp eventsApp)
+
+seedAdminUser :: Repository -> IO ()
+seedAdminUser repo = do
+    users <- repoListUsers repo
+    case users of
+        [] -> do
+            result <- SAuth.register repo "admin" "admin" Admin (WorkerId 1)
+            case result of
+                Right _ -> putStrLn "Seeded default admin user (username: admin, password: admin)"
+                Left _  -> putStrLn "Warning: failed to seed default admin user"
+        _ -> return ()
 
 parseArgs :: [String] -> (String, Int)
 parseArgs []     = ("run-db/manars-kitchen.db", 8080)

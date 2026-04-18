@@ -123,7 +123,7 @@ spec = do
 
         it "parses grant-skill" $
             parseCommand "what-if grant-skill 2 1"
-                `shouldBe` WhatIfGrantSkill 2 1
+                `shouldBe` WhatIfGrantSkill 2 (SkillId 1)
 
         it "parses override-prefs" $
             parseCommand "what-if override-prefs 1 2 3"

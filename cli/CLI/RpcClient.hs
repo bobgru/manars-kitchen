@@ -310,11 +310,17 @@ dispatchCommand env cmd = case cmd of
         putStrLn "Direct unassignment is not supported in remote mode."
 
     -- Skills
-    SkillCreate sid name -> requireAdmin env $
+    SkillCreate (SkillId sid) name -> requireAdmin env $
         runOk env (cCreateSkill (CreateSkillReq sid name "")) "Skill created."
 
-    SkillRename sid name -> requireAdmin env $
+    SkillRename (SkillId sid) name -> requireAdmin env $
         runOk env (cRenameSkill sid (RenameSkillReq name)) ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
+
+    SkillDelete _ ->
+        putStrLn "skill delete is not yet supported in remote mode."
+
+    SkillForceDelete _ ->
+        putStrLn "skill force-delete is not yet supported in remote mode."
 
     SkillList -> do
         result <- run env (cListSkills RpcEmpty)
@@ -329,10 +335,10 @@ dispatchCommand env cmd = case cmd of
     SkillRemoveImplication _a _b ->
         putStrLn "Skill implication management is not yet supported via RPC."
 
-    WorkerGrantSkill wid sid -> requireAdmin env $
+    WorkerGrantSkill wid (SkillId sid) -> requireAdmin env $
         runOk env (cGrantSkill (RpcWorkerSkill wid sid)) "Skill granted."
 
-    WorkerRevokeSkill wid sid -> requireAdmin env $
+    WorkerRevokeSkill wid (SkillId sid) -> requireAdmin env $
         runOk env (cRevokeSkill (RpcWorkerSkill wid sid)) "Skill revoked."
 
     -- Stations
@@ -361,6 +367,9 @@ dispatchCommand env cmd = case cmd of
 
     StationRequireSkill {} ->
         putStrLn "Station skill requirements not yet supported via RPC."
+
+    StationRemoveRequiredSkill {} ->
+        putStrLn "Station remove-required-skill is not yet supported in remote mode."
 
     -- Shifts
     ShiftCreate name start end -> requireAdmin env $
@@ -399,7 +408,7 @@ dispatchCommand env cmd = case cmd of
     WorkerSetSeniority wid level -> requireAdmin env $
         runOk env (cSetWorkerSeniority (RpcWorkerSeniority wid level)) "Seniority set."
 
-    WorkerSetCrossTraining wid sid -> requireAdmin env $
+    WorkerSetCrossTraining wid (SkillId sid) -> requireAdmin env $
         runOk env (cAddCrossTraining (RpcWorkerCrossTraining wid sid)) "Cross-training added."
 
     WorkerClearCrossTraining {} ->
@@ -426,6 +435,9 @@ dispatchCommand env cmd = case cmd of
 
     WorkerInfo ->
         putStrLn "worker info is not yet supported in remote mode."
+
+    SkillView _ ->
+        putStrLn "skill view is not yet supported in remote mode."
 
     SkillInfo ->
         putStrLn "skill info is not yet supported in remote mode."

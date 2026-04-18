@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router";
-import { fetchSkills, fetchImplications, type SkillInfo } from "../api/skills";
+import {
+  fetchSkills,
+  fetchImplications,
+  createSkill,
+  deleteSkill,
+  forceDeleteSkill,
+  type SkillInfo,
+  type SkillReferences,
+} from "../api/skills";
 import { useEntityEvents } from "../hooks/useSSE";
 
 /** Compute transitive closure from a direct implications map. */
@@ -38,6 +46,17 @@ export default function SkillsListPage() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newId, setNewId] = useState("");
+  const [newName, setNewName] = useState("");
+  const [createError, setCreateError] = useState("");
+
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    skillId: number;
+    skillName: string;
+    refs: SkillReferences;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -89,9 +108,100 @@ export default function SkillsListPage() {
     );
   }
 
+  async function handleCreate() {
+    setCreateError("");
+    const id = parseInt(newId, 10);
+    if (isNaN(id) || !newName.trim()) {
+      setCreateError("ID (number) and name are required.");
+      return;
+    }
+    try {
+      await createSkill(id, newName.trim());
+      setShowCreate(false);
+      setNewId("");
+      setNewName("");
+      load();
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleDelete(skill: SkillInfo) {
+    try {
+      const result = await deleteSkill(skill.id);
+      if (result.ok) {
+        load();
+      } else {
+        setDeleteConfirm({
+          skillId: skill.id,
+          skillName: skill.name,
+          refs: result.references,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handleForceDelete() {
+    if (!deleteConfirm) return;
+    try {
+      await forceDeleteSkill(deleteConfirm.skillId);
+      setDeleteConfirm(null);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function renderRefs(refs: SkillReferences) {
+    const lines: string[] = [];
+    for (const w of refs.workers) lines.push(`Worker: ${w.name}`);
+    for (const s of refs.stations) lines.push(`Station: ${s.name}`);
+    for (const w of refs.crossTraining) lines.push(`Cross-training: ${w.name}`);
+    for (const s of refs.impliedBy) lines.push(`Implied by: ${s.name}`);
+    for (const s of refs.implies) lines.push(`Implies: ${s.name}`);
+    return lines;
+  }
+
   return (
     <div className="page">
       <h2>Skills</h2>
+      {!showCreate && (
+        <button className="btn" onClick={() => setShowCreate(true)}>
+          New Skill
+        </button>
+      )}
+      {showCreate && (
+        <div className="inline-form">
+          <input
+            type="number"
+            placeholder="ID"
+            value={newId}
+            onChange={(e) => setNewId(e.target.value)}
+            style={{ width: "60px" }}
+          />
+          <input
+            type="text"
+            placeholder="Name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+          />
+          <button className="btn" onClick={handleCreate}>
+            Create
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setShowCreate(false);
+              setCreateError("");
+            }}
+          >
+            Cancel
+          </button>
+          {createError && <span className="msg-error">{createError}</span>}
+        </div>
+      )}
       {skills.length === 0 ? (
         <p className="text-muted">No skills defined.</p>
       ) : (
@@ -100,6 +210,7 @@ export default function SkillsListPage() {
             <tr>
               <th>Name</th>
               <th>Implies</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -109,10 +220,43 @@ export default function SkillsListPage() {
                   <Link to={`/skills/${s.id}`}>{s.name}</Link>
                 </td>
                 <td>{renderImplications(s.id)}</td>
+                <td>
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => handleDelete(s)}
+                  >
+                    Delete
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {deleteConfirm && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirm(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Cannot delete "{deleteConfirm.skillName}"</h3>
+            <p>This skill is still referenced:</p>
+            <ul>
+              {renderRefs(deleteConfirm.refs).map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+            <p>Force delete will remove all references first.</p>
+            <div className="modal-actions">
+              <button
+                className="btn btn-secondary"
+                onClick={() => setDeleteConfirm(null)}
+              >
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={handleForceDelete}>
+                Force Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

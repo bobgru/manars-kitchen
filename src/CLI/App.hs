@@ -9,6 +9,7 @@ module CLI.App
     , isMutating
     ) where
 
+import Control.Monad (forM_)
 import System.IO (hFlush, stdout, hSetEcho, stdin)
 import Control.Concurrent (threadDelay)
 import Data.Char (toLower)
@@ -164,6 +165,7 @@ isMutating cmd = case cmd of
     ScheduleHours _     -> False
     ScheduleDiagnose _  -> False
     SkillList           -> False
+    SkillView _         -> False
     SkillInfo           -> False
     StationList         -> False
     WorkerInfo          -> False
@@ -1021,7 +1023,7 @@ handleCommand st cmd = case cmd of
         case result of
             Left err -> putStrLn err
             Right hs -> do
-                let hint = GrantSkill (WorkerId wid) (SkillId sid)
+                let hint = GrantSkill (WorkerId wid) sid
                     sess = hstSess hs
                     oldResult = sessResult sess
                     sess' = addHint hint sess
@@ -1170,34 +1172,79 @@ handleCommand st cmd = case cmd of
     StationRequireSkill sid skid -> requireAdmin st $ do
         ctx <- repoLoadSkillCtx (asRepo st)
         let current = Map.findWithDefault Set.empty (StationId sid) (scStationRequires ctx)
-        SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.insert (SkillId skid) current)
-        putStrLn ("Station " ++ show sid ++ " now requires Skill " ++ show skid)
+        SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.insert skid current)
+        putStrLn ("Station " ++ show sid ++ " now requires " ++ show skid)
+
+    StationRemoveRequiredSkill sid skid -> requireAdmin st $ do
+        ctx <- repoLoadSkillCtx (asRepo st)
+        let current = Map.findWithDefault Set.empty (StationId sid) (scStationRequires ctx)
+        SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.delete skid current)
+        putStrLn ("Station " ++ show sid ++ " no longer requires " ++ show skid)
 
     SkillCreate sid name -> requireAdmin st $ do
-        result <- SW.addSkill (asRepo st) (SkillId sid) name ""
+        result <- SW.addSkill (asRepo st) sid name ""
         case result of
             Left err -> putStrLn $ "Error: " ++ err
-            Right () -> putStrLn ("Created Skill " ++ show sid ++ " (" ++ name ++ ")")
+            Right () -> putStrLn ("Created " ++ show sid ++ " (" ++ name ++ ")")
 
     SkillRename sid name -> requireAdmin st $ do
-        repoRenameSkill (asRepo st) (SkillId sid) name
-        putStrLn ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
+        repoRenameSkill (asRepo st) sid name
+        putStrLn ("Renamed " ++ show sid ++ " to \"" ++ name ++ "\"")
+
+    SkillDelete sid -> requireAdmin st $ do
+        result <- SW.safeDeleteSkill (asRepo st) sid
+        case result of
+            Right () -> putStrLn ("Deleted " ++ show sid)
+            Left refs -> do
+                putStrLn ("Error: " ++ show sid ++ " is still referenced:")
+                displaySkillRefs refs
+
+    SkillForceDelete sid -> requireAdmin st $ do
+        refs <- SW.checkSkillReferences (asRepo st) sid
+        if SW.isUnreferenced refs
+            then handleCommand st (SkillDelete sid)
+            else do
+                forM_ (SW.srWorkers refs) $ \(wid, _) ->
+                    handleCommand st (WorkerRevokeSkill (let WorkerId w = wid in w) sid)
+                forM_ (SW.srStations refs) $ \(stid, _) ->
+                    handleCommand st (StationRemoveRequiredSkill (let StationId s = stid in s) sid)
+                forM_ (SW.srCrossTraining refs) $ \(wid, _) ->
+                    handleCommand st (WorkerClearCrossTraining (let WorkerId w = wid in w) sid)
+                forM_ (SW.srImpliedBy refs) $ \(implier, _) ->
+                    handleCommand st (SkillRemoveImplication implier sid)
+                forM_ (SW.srImplies refs) $ \(implied, _) ->
+                    handleCommand st (SkillRemoveImplication sid implied)
+                handleCommand st (SkillDelete sid)
 
     SkillList -> do
         skills <- SW.listSkills (asRepo st)
         if null skills
             then putStrLn "  (no skills)"
-            else mapM_ (\(SkillId sid, sk) ->
-                putStrLn ("  Skill " ++ show sid ++ ": " ++ Domain.Skill.skillName sk)
+            else mapM_ (\(sid, sk) ->
+                putStrLn ("  " ++ show sid ++ ": " ++ Domain.Skill.skillName sk)
                 ) skills
 
     SkillImplication a b -> requireAdmin st $ do
-        SW.addSkillImplication (asRepo st) (SkillId a) (SkillId b)
-        putStrLn ("Skill " ++ show a ++ " now implies Skill " ++ show b)
+        SW.addSkillImplication (asRepo st) a b
+        putStrLn (show a ++ " now implies " ++ show b)
 
     SkillRemoveImplication a b -> requireAdmin st $ do
-        SW.removeSkillImplication (asRepo st) (SkillId a) (SkillId b)
-        putStrLn ("Removed: Skill " ++ show a ++ " no longer implies Skill " ++ show b)
+        SW.removeSkillImplication (asRepo st) a b
+        putStrLn ("Removed: " ++ show a ++ " no longer implies " ++ show b)
+
+    SkillView sid -> do
+        skills <- repoListSkills (asRepo st)
+        case lookup sid skills of
+            Nothing -> putStrLn ("Unknown skill: " ++ show sid)
+            Just sk -> do
+                ctx <- repoLoadSkillCtx (asRepo st)
+                wctx <- repoLoadWorkerCtx (asRepo st)
+                users <- repoListUsers (asRepo st)
+                stations <- repoListStations (asRepo st)
+                let workerNames = Map.fromList [(userWorkerId u, let Username n = userName u in n) | u <- users]
+                    stationNames = Map.fromList stations
+                    skillNames = Map.fromList [(s, skillName sk') | (s, sk') <- skills]
+                putStr (displaySkillView sid sk ctx wctx workerNames stationNames skillNames)
 
     SkillInfo -> do
         ctx <- repoLoadSkillCtx (asRepo st)
@@ -1205,12 +1252,12 @@ handleCommand st cmd = case cmd of
 
     -- Worker skills (admin)
     WorkerGrantSkill wid sid -> requireAdmin st $ do
-        SW.grantWorkerSkill (asRepo st) (WorkerId wid) (SkillId sid)
-        putStrLn ("Granted Skill " ++ show sid ++ " to Worker " ++ show wid)
+        SW.grantWorkerSkill (asRepo st) (WorkerId wid) sid
+        putStrLn ("Granted " ++ show sid ++ " to Worker " ++ show wid)
 
     WorkerRevokeSkill wid sid -> requireAdmin st $ do
-        SW.revokeWorkerSkill (asRepo st) (WorkerId wid) (SkillId sid)
-        putStrLn ("Revoked Skill " ++ show sid ++ " from Worker " ++ show wid)
+        SW.revokeWorkerSkill (asRepo st) (WorkerId wid) sid
+        putStrLn ("Revoked " ++ show sid ++ " from Worker " ++ show wid)
 
     -- Worker context (admin)
     WorkerSetHours wid h -> requireAdmin st $ do
@@ -1248,12 +1295,12 @@ handleCommand st cmd = case cmd of
         putStrLn ("Set Worker " ++ show wid ++ " seniority level: " ++ show lvl)
 
     WorkerSetCrossTraining wid sid -> requireAdmin st $ do
-        SW.addCrossTraining (asRepo st) (WorkerId wid) (SkillId sid)
-        putStrLn ("Added cross-training goal: Worker " ++ show wid ++ " -> Skill " ++ show sid)
+        SW.addCrossTraining (asRepo st) (WorkerId wid) sid
+        putStrLn ("Added cross-training goal: Worker " ++ show wid ++ " -> " ++ show sid)
 
     WorkerClearCrossTraining wid sid -> requireAdmin st $ do
-        SW.removeCrossTraining (asRepo st) (WorkerId wid) (SkillId sid)
-        putStrLn ("Removed cross-training goal: Worker " ++ show wid ++ " -> Skill " ++ show sid)
+        SW.removeCrossTraining (asRepo st) (WorkerId wid) sid
+        putStrLn ("Removed cross-training goal: Worker " ++ show wid ++ " -> " ++ show sid)
 
     WorkerAvoidPairing w1 w2 -> requireAdmin st $ do
         SW.addAvoidPairing (asRepo st) (WorkerId w1) (WorkerId w2)
@@ -2191,7 +2238,11 @@ helpRegistry =
     , ("schedule", True,  "unassign <sched> <wid> <sid> <date> <hour>", "Remove assignment")
     -- Skill
     , ("skill",    True,  "skill create <id> <name>",        "Create a skill")
+    , ("skill",    True,  "skill rename <id> <name>",        "Rename a skill")
+    , ("skill",    True,  "skill delete <id>",               "Delete a skill (fails if referenced)")
+    , ("skill",    True,  "skill force-delete <id>",         "Remove all references and delete skill")
     , ("skill",    False, "skill list",                      "List all skills")
+    , ("skill",    False, "skill view <id>",                 "View details of a skill")
     , ("skill",    True,  "skill implication <a> <b>",       "Skill A implies skill B")
     , ("skill",    True,  "skill remove-implication <a> <b>", "Remove implication")
     , ("skill",    False, "skill info",                      "Show skill context")
@@ -2203,6 +2254,7 @@ helpRegistry =
     , ("station",  True,  "station close-day <id> <day>",    "Close station on day of week")
     , ("station",  True,  "station set-multi-hours <id> <start> <end>", "Set multi-station hours")
     , ("station",  True,  "station require-skill <sid> <skid>", "Require skill for station")
+    , ("station",  True,  "station remove-required-skill <sid> <skid>", "Remove required skill from station")
     -- Worker
     , ("worker",   True,  "worker grant-skill <wid> <sid>",  "Grant skill to worker")
     , ("worker",   True,  "worker revoke-skill <wid> <sid>", "Revoke skill from worker")
@@ -2313,6 +2365,19 @@ helpGroups =
     , ("user",     "User account management")
     , ("general",  "Help, password, and exit")
     ]
+
+displaySkillRefs :: SW.SkillReferences -> IO ()
+displaySkillRefs refs = do
+    forM_ (SW.srWorkers refs) $ \(wid, name) ->
+        putStrLn ("  Worker " ++ show wid ++ " (" ++ name ++ ") has this skill")
+    forM_ (SW.srStations refs) $ \(stid, name) ->
+        putStrLn ("  Station " ++ show stid ++ " (" ++ name ++ ") requires this skill")
+    forM_ (SW.srCrossTraining refs) $ \(wid, name) ->
+        putStrLn ("  Worker " ++ show wid ++ " (" ++ name ++ ") cross-training toward this skill")
+    forM_ (SW.srImpliedBy refs) $ \(sid, name) ->
+        putStrLn ("  " ++ show sid ++ " (" ++ name ++ ") implies this skill")
+    forM_ (SW.srImplies refs) $ \(sid, name) ->
+        putStrLn ("  This skill implies " ++ show sid ++ " (" ++ name ++ ")")
 
 printHelpSummary :: Role -> IO ()
 printHelpSummary role = do

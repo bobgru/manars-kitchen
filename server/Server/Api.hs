@@ -80,14 +80,15 @@ type RawAPI =
     -- Skill CRUD
     -- -----------------------------------------------------------------
     :<|> "api" :> "skills" :> ReqBody '[JSON] CreateSkillReq :> PostNoContent
-    :<|> "api" :> "skills" :> Capture "id" Int :> DeleteNoContent
-    :<|> "api" :> "skills" :> Capture "id" Int :> ReqBody '[JSON] RenameSkillReq :> PutNoContent
+    :<|> "api" :> "skills" :> Capture "id" SkillId :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "id" SkillId :> "force" :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "id" SkillId :> ReqBody '[JSON] RenameSkillReq :> PutNoContent
     -- Skill implications
     :<|> "api" :> "skills" :> "implications" :> Get '[JSON] (Map Int [Int])
-    :<|> "api" :> "skills" :> Capture "id" Int :> "implications"
+    :<|> "api" :> "skills" :> Capture "id" SkillId :> "implications"
          :> ReqBody '[JSON] AddImplicationReq :> PostNoContent
-    :<|> "api" :> "skills" :> Capture "id" Int :> "implications"
-         :> Capture "impliedId" Int :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "id" SkillId :> "implications"
+         :> Capture "impliedId" SkillId :> DeleteNoContent
 
     -- -----------------------------------------------------------------
     -- Station CRUD
@@ -134,9 +135,9 @@ type RawAPI =
          :> ReqBody '[JSON] SetWorkerTempReq :> PutNoContent
 
     -- Worker skill grant/revoke
-    :<|> "api" :> "workers" :> Capture "id" Int :> "skills" :> Capture "skillId" Int
+    :<|> "api" :> "workers" :> Capture "id" Int :> "skills" :> Capture "skillId" SkillId
          :> PostNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "skills" :> Capture "skillId" Int
+    :<|> "api" :> "workers" :> Capture "id" Int :> "skills" :> Capture "skillId" SkillId
          :> DeleteNoContent
 
     -- Worker pairing

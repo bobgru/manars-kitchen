@@ -85,11 +85,12 @@ getConfigC       :: ClientM [(String, Double)]
 
 -- Skill CRUD
 createSkillC     :: CreateSkillReq -> ClientM NoContent
-deleteSkillC     :: Int -> ClientM NoContent
-_renameSkillC    :: Int -> RenameSkillReq -> ClientM NoContent
+deleteSkillC     :: SkillId -> ClientM NoContent
+_forceDeleteSkillC :: SkillId -> ClientM NoContent
+_renameSkillC    :: SkillId -> RenameSkillReq -> ClientM NoContent
 _listImplicationsC :: ClientM (Map.Map Int [Int])
-_addImplicationC :: Int -> AddImplicationReq -> ClientM NoContent
-_removeImplicationC :: Int -> Int -> ClientM NoContent
+_addImplicationC :: SkillId -> AddImplicationReq -> ClientM NoContent
+_removeImplicationC :: SkillId -> SkillId -> ClientM NoContent
 
 -- Station CRUD
 createStationC    :: CreateStationReq -> ClientM NoContent
@@ -116,8 +117,8 @@ _setWorkerPayTrackingC :: Int -> SetWorkerPayTrackingReq -> ClientM NoContent
 _setWorkerTempC :: Int -> SetWorkerTempReq -> ClientM NoContent
 
 -- Worker skills / pairing
-grantWorkerSkillC :: Int -> Int -> ClientM NoContent
-revokeWorkerSkillC :: Int -> Int -> ClientM NoContent
+grantWorkerSkillC :: Int -> SkillId -> ClientM NoContent
+revokeWorkerSkillC :: Int -> SkillId -> ClientM NoContent
 _avoidPairingC :: Int -> WorkerPairingReq -> ClientM NoContent
 _preferPairingC :: Int -> WorkerPairingReq -> ClientM NoContent
 
@@ -189,6 +190,7 @@ logoutC
     -- New endpoints
     :<|> createSkillC
     :<|> deleteSkillC
+    :<|> _forceDeleteSkillC
     :<|> _renameSkillC
     :<|> _listImplicationsC
     :<|> _addImplicationC
@@ -660,7 +662,7 @@ spec = do
 
         it "create and delete skill" $ withTestApp $ \env -> do
             Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
-            Right _ <- runClientM (deleteSkillC 1) env
+            Right _ <- runClientM (deleteSkillC (SkillId 1)) env
             Right skills <- runClientM listSkillsC env
             length skills `shouldBe` 0
 
@@ -694,8 +696,8 @@ spec = do
 
         it "grant and revoke worker skill" $ withSeededApp $ \repo env -> do
             _ <- SW.addSkill repo (SkillId 1) "grill" ""
-            Right _ <- runClientM (grantWorkerSkillC 1 1) env
-            Right _ <- runClientM (revokeWorkerSkillC 1 1) env
+            Right _ <- runClientM (grantWorkerSkillC 1 (SkillId 1)) env
+            Right _ <- runClientM (revokeWorkerSkillC 1 (SkillId 1)) env
             pure ()
 
     describe "Config writes" $ do
@@ -797,7 +799,7 @@ spec = do
     describe "CLI remote mode" $ do
         it "skill create via dispatchCommand creates server-side skill" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (SkillCreate 1 "grill")
+                dispatchCommand rpc (SkillCreate (SkillId 1) "grill")
                 Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
                 length skills `shouldBe` 1
 
@@ -824,14 +826,14 @@ spec = do
 
         it "skill rename via dispatchCommand renames server-side skill" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (SkillCreate 1 "grill")
-                dispatchCommand rpc (SkillRename 1 "broiler")
+                dispatchCommand rpc (SkillCreate (SkillId 1) "grill")
+                dispatchCommand rpc (SkillRename (SkillId 1) "broiler")
                 Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
                 length skills `shouldBe` 1
 
         it "RPC commands produce audit entries with source=rpc" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (SkillCreate 1 "grill")
+                dispatchCommand rpc (SkillCreate (SkillId 1) "grill")
                 dispatchCommand rpc (StationAdd 1 "kitchen")
                 Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
@@ -1161,7 +1163,7 @@ spec = do
                 threadDelay 500000
 
                 -- Rename skill via REST — triggers GUI event
-                Right _ <- runClientM (_renameSkillC 1 (RenameSkillReq "broiler")) aEnv
+                Right _ <- runClientM (_renameSkillC (SkillId 1) (RenameSkillReq "broiler")) aEnv
 
                 -- Wait for the SSE event to arrive
                 threadDelay 1000000

@@ -32,8 +32,8 @@ statements =
       \)"
 
     , "CREATE TABLE IF NOT EXISTS skill_implications (\
-      \  skill_id INTEGER NOT NULL,\
-      \  implies_skill_id INTEGER NOT NULL,\
+      \  skill_id INTEGER NOT NULL REFERENCES skills(id),\
+      \  implies_skill_id INTEGER NOT NULL REFERENCES skills(id),\
       \  PRIMARY KEY (skill_id, implies_skill_id)\
       \)"
 
@@ -47,7 +47,7 @@ statements =
 
     , "CREATE TABLE IF NOT EXISTS station_required_skills (\
       \  station_id INTEGER NOT NULL,\
-      \  skill_id INTEGER NOT NULL,\
+      \  skill_id INTEGER NOT NULL REFERENCES skills(id),\
       \  PRIMARY KEY (station_id, skill_id)\
       \)"
 
@@ -68,7 +68,7 @@ statements =
       -- Workers
     , "CREATE TABLE IF NOT EXISTS worker_skills (\
       \  worker_id INTEGER NOT NULL,\
-      \  skill_id INTEGER NOT NULL,\
+      \  skill_id INTEGER NOT NULL REFERENCES skills(id),\
       \  PRIMARY KEY (worker_id, skill_id)\
       \)"
 
@@ -177,7 +177,7 @@ statements =
       -- Worker cross-training goals
     , "CREATE TABLE IF NOT EXISTS worker_cross_training (\
       \  worker_id INTEGER NOT NULL,\
-      \  skill_id INTEGER NOT NULL,\
+      \  skill_id INTEGER NOT NULL REFERENCES skills(id),\
       \  PRIMARY KEY (worker_id, skill_id)\
       \)"
 

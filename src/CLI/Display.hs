@@ -11,6 +11,7 @@ module CLI.Display
     , displayUsers
     , displayAbsences
     , displaySkillCtx
+    , displaySkillView
     , displayWorkerCtx
     , displayAbsenceTypes
     , displayConfig
@@ -33,7 +34,7 @@ import Data.Time
 
 import Domain.Types
 import Domain.Schedule (byWorker, byStation, byDay)
-import Domain.Skill (SkillContext(..))
+import Domain.Skill (Skill(..), SkillContext(..), effectiveSkills)
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.Absence
     ( AbsenceType(..), AbsenceRequest(..), AbsenceStatus(..), AbsenceContext(..)
@@ -509,6 +510,47 @@ showSkillSet :: Set.Set SkillId -> String
 showSkillSet s
     | Set.null s = "(none)"
     | otherwise  = intercalate ", " [showSkill sk | sk <- Set.toList s]
+
+displaySkillView :: SkillId -> Skill -> SkillContext -> WorkerContext
+                 -> Map.Map WorkerId String -> Map.Map StationId String
+                 -> Map.Map SkillId String -> String
+displaySkillView sid sk sctx wctx workerNames stationNames skillNames =
+    let namedSkill skid = Map.findWithDefault (showSkill skid) skid skillNames
+        namedWorker wid = Map.findWithDefault (showWorker wid) wid workerNames
+        namedStation stid = Map.findWithDefault (showStation stid) stid stationNames
+        workers = [ (wid, namedWorker wid)
+                  | (wid, skills) <- Map.toList (scWorkerSkills sctx)
+                  , Set.member sid skills ]
+        stations = [ (stid, namedStation stid)
+                   | (stid, skills) <- Map.toList (scStationRequires sctx)
+                   , Set.member sid skills ]
+        impliedBy = [ (skid, namedSkill skid)
+                    | (skid, imps) <- Map.toList (scSkillImplies sctx)
+                    , Set.member sid imps ]
+        implies = case Map.lookup sid (scSkillImplies sctx) of
+            Nothing -> []
+            Just imps -> [(skid, namedSkill skid) | skid <- Set.toList imps]
+        eff = Set.delete sid $ effectiveSkills sctx (Set.singleton sid)
+        crossTraining = [ (wid, namedWorker wid)
+                        | (wid, skills) <- Map.toList (wcCrossTraining wctx)
+                        , Set.member sid skills ]
+    in unlines $ concat
+        [ [namedSkill sid ++ " (" ++ show sid ++ ")"]
+        , if null (skillDescription sk) then []
+          else ["  Description: " ++ skillDescription sk]
+        , ["  Workers: " ++ if null workers then "(none)"
+           else intercalate ", " [name | (_, name) <- workers]]
+        , ["  Stations: " ++ if null stations then "(none)"
+           else intercalate ", " [name | (_, name) <- stations]]
+        , if null implies then []
+          else ["  Implies: " ++ intercalate ", " [name | (_, name) <- implies]]
+        , if null impliedBy then []
+          else ["  Implied by: " ++ intercalate ", " [name | (_, name) <- impliedBy]]
+        , if Set.null eff then []
+          else ["  Effective skills: " ++ intercalate ", " [namedSkill s' | s' <- Set.toList eff]]
+        , if null crossTraining then []
+          else ["  Cross-training: " ++ intercalate ", " [name | (_, name) <- crossTraining]]
+        ]
 
 displayWorkerCtx :: WorkerContext -> String
 displayWorkerCtx ctx = unlines $ concat

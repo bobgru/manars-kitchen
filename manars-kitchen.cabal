@@ -79,6 +79,7 @@ library
                      , text
                      , servant
                      , servant-server
+                     , http-api-data
                      , wai
                      , http-types
                      , directory

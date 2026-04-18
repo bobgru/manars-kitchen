@@ -53,6 +53,8 @@ module Server.Json
     , AddHintReq(..)
     , HintSessionRef(..)
     , RebaseResultResp(..)
+      -- * Skill references (for 409 response)
+    , SkillReferencesResp(..)
     ) where
 
 import Data.Aeson
@@ -80,6 +82,7 @@ import Domain.Worker (OvertimeModel(..), PayPeriodTracking(..))
 import Domain.PayPeriod (PayPeriodConfig(..), PayPeriodType(..), parsePayPeriodType, showPayPeriodType)
 import Export.JSON (ExportData)
 import Repo.Types (DraftInfo(..), CalendarCommit(..), AuditEntry(..))
+import qualified Service.Worker as SW
 
 -- -----------------------------------------------------------------
 -- Domain type instances
@@ -957,6 +960,21 @@ instance ToJSON RebaseResultResp where
 instance FromJSON RebaseResultResp where
     parseJSON = withObject "RebaseResultResp" $ \v ->
         RebaseResultResp <$> v .: "status" <*> v .: "details"
+
+-- -----------------------------------------------------------------
+-- Skill references (409 response for safe delete)
+-- -----------------------------------------------------------------
+
+newtype SkillReferencesResp = SkillReferencesResp SW.SkillReferences
+
+instance ToJSON SkillReferencesResp where
+    toJSON (SkillReferencesResp refs) = object
+        [ "workers"       .= [object ["id" .= wid, "name" .= n] | (wid, n) <- SW.srWorkers refs]
+        , "stations"      .= [object ["id" .= sid, "name" .= n] | (sid, n) <- SW.srStations refs]
+        , "crossTraining" .= [object ["id" .= wid, "name" .= n] | (wid, n) <- SW.srCrossTraining refs]
+        , "impliedBy"     .= [object ["id" .= sid, "name" .= n] | (sid, n) <- SW.srImpliedBy refs]
+        , "implies"       .= [object ["id" .= sid, "name" .= n] | (sid, n) <- SW.srImplies refs]
+        ]
 
 -- -----------------------------------------------------------------
 -- Helpers

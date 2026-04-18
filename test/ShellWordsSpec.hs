@@ -2,6 +2,7 @@ module ShellWordsSpec (spec) where
 
 import Test.Hspec
 import CLI.Commands (shellWords, shellQuote, parseCommand, Command(..))
+import Domain.Types (SkillId(..))
 
 spec :: Spec
 spec = do
@@ -47,10 +48,10 @@ spec = do
 
     describe "parseCommand with quoted arguments" $ do
         it "parses skill rename with quoted multi-word name" $
-            parseCommand "skill rename 1 \"pizza oven\"" `shouldBe` SkillRename 1 "pizza oven"
+            parseCommand "skill rename 1 \"pizza oven\"" `shouldBe` SkillRename (SkillId 1) "pizza oven"
 
         it "parses skill create with quoted multi-word name" $
-            parseCommand "skill create 3 \"hot grill\"" `shouldBe` SkillCreate 3 "hot grill"
+            parseCommand "skill create 3 \"hot grill\"" `shouldBe` SkillCreate (SkillId 3) "hot grill"
 
         it "parses station add with quoted multi-word name" $
             parseCommand "station add 5 \"prep area\"" `shouldBe` StationAdd 5 "prep area"
@@ -59,7 +60,7 @@ spec = do
             parseCommand "shift create \"morning rush\" 8 17" `shouldBe` ShiftCreate "morning rush" 8 17
 
         it "still parses unquoted single-word names" $
-            parseCommand "skill rename 1 broiler" `shouldBe` SkillRename 1 "broiler"
+            parseCommand "skill rename 1 broiler" `shouldBe` SkillRename (SkillId 1) "broiler"
 
     describe "shellQuote" $ do
         it "passes through simple names" $

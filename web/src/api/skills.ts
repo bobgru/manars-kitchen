@@ -20,6 +20,52 @@ export async function fetchImplications(): Promise<Record<number, number[]>> {
   return resp.json();
 }
 
+export async function createSkill(
+  id: number,
+  name: string,
+  description: string = ""
+): Promise<void> {
+  const resp = await apiFetch("/api/skills", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, name, description }),
+  });
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => null);
+    throw new Error(body?.error || `Failed to create skill: ${resp.status}`);
+  }
+}
+
+export interface SkillReference {
+  id: number;
+  name: string;
+}
+
+export interface SkillReferences {
+  workers: SkillReference[];
+  stations: SkillReference[];
+  crossTraining: SkillReference[];
+  impliedBy: SkillReference[];
+  implies: SkillReference[];
+}
+
+export async function deleteSkill(
+  id: number
+): Promise<{ ok: true } | { ok: false; references: SkillReferences }> {
+  const resp = await apiFetch(`/api/skills/${id}`, { method: "DELETE" });
+  if (resp.ok) return { ok: true };
+  if (resp.status === 409) {
+    const references: SkillReferences = await resp.json();
+    return { ok: false, references };
+  }
+  throw new Error(`Failed to delete skill: ${resp.status}`);
+}
+
+export async function forceDeleteSkill(id: number): Promise<void> {
+  const resp = await apiFetch(`/api/skills/${id}/force`, { method: "DELETE" });
+  if (!resp.ok) throw new Error(`Failed to force-delete skill: ${resp.status}`);
+}
+
 export async function renameSkill(id: number, name: string): Promise<void> {
   const resp = await apiFetch(`/api/skills/${id}`, {
     method: "PUT",

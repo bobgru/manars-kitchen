@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Server.Handlers
@@ -7,6 +8,7 @@ module Server.Handlers
     ) where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Aeson (toJSON, encode)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Time (Day)
@@ -38,7 +40,7 @@ import Server.Error
 import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
 import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
-import Server.Execute (ExecuteEnv(..))
+import Server.Execute (ExecuteEnv(..), executeCommandText)
 import CLI.Commands (shellQuote)
 
 -- | Publish a command event from a REST handler.
@@ -71,8 +73,8 @@ lookupWorkerName repo wid = do
         []    -> let WorkerId i = wid in return (show i)
 
 -- | REST server for protected endpoints. User is threaded through from AuthProtect.
-server :: TopicBus CommandEvent -> Repository -> User -> Server RawAPI
-server cmdBus repo user =
+server :: ExecuteEnv -> TopicBus CommandEvent -> Repository -> User -> Server RawAPI
+server execEnv cmdBus repo user =
     -- Logout
          handleLogout repo user
     -- Original endpoints
@@ -99,6 +101,7 @@ server cmdBus repo user =
     -- Skill CRUD
     :<|> handleCreateSkill cmdBus repo user
     :<|> handleDeleteSkill cmdBus repo user
+    :<|> handleForceDeleteSkill execEnv repo user
     :<|> handleRenameSkill cmdBus repo user
     -- Skill implications
     :<|> handleListImplications repo
@@ -171,7 +174,7 @@ server cmdBus repo user =
 protectedServer :: ExecuteEnv -> Repository -> User -> Server (RawAPI :<|> RpcAPI)
 protectedServer execEnv repo user =
     let cmdBus = busCommands (eeBus execEnv)
-    in server cmdBus repo user :<|> rpcServer execEnv repo user
+    in server execEnv cmdBus repo user :<|> rpcServer execEnv repo user
 
 -- | Combined server: Public + Protected.
 fullServer :: ExecuteEnv -> Repository -> Server FullAPI
@@ -352,18 +355,31 @@ handleCreateSkill cmdBus repo user req = do
             logRest cmdBus user ("skill create " ++ shellQuote (csrName req))
             pure NoContent
 
-handleDeleteSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleDeleteSkill :: TopicBus CommandEvent -> Repository -> User -> SkillId -> Handler NoContent
 handleDeleteSkill cmdBus repo user sid = do
     requireAdmin user
-    sName <- liftIO $ lookupSkillName repo (SkillId sid)
-    liftIO $ SW.removeSkill repo (SkillId sid)
-    logRest cmdBus user ("skill delete " ++ shellQuote sName)
+    result <- liftIO $ SW.safeDeleteSkill repo sid
+    case result of
+        Right () -> do
+            sName <- liftIO $ lookupSkillName repo sid
+            logRest cmdBus user ("skill delete " ++ shellQuote sName)
+            pure NoContent
+        Left refs -> throwError $ err409
+            { errBody = encode (toJSON (SkillReferencesResp refs))
+            , errHeaders = [("Content-Type", "application/json")]
+            }
+
+handleForceDeleteSkill :: ExecuteEnv -> Repository -> User -> SkillId -> Handler NoContent
+handleForceDeleteSkill execEnv _repo user sid = do
+    requireAdmin user
+    let SkillId i = sid
+    _ <- liftIO $ executeCommandText execEnv user ("skill force-delete " ++ show i)
     pure NoContent
 
-handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> RenameSkillReq -> Handler NoContent
+handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> SkillId -> RenameSkillReq -> Handler NoContent
 handleRenameSkill cmdBus repo user sid req = do
     requireAdmin user
-    liftIO $ SW.renameSkill repo (SkillId sid) (rsrName req)
+    liftIO $ SW.renameSkill repo sid (rsrName req)
     logRest cmdBus user ("skill rename " ++ show sid ++ " " ++ shellQuote (rsrName req))
     pure NoContent
 
@@ -374,21 +390,22 @@ handleListImplications repo = do
     pure $ Map.fromList
         [ (toInt k, map toInt vs) | (k, vs) <- Map.toList impl ]
 
-handleAddImplication :: TopicBus CommandEvent -> Repository -> User -> Int -> AddImplicationReq -> Handler NoContent
+handleAddImplication :: TopicBus CommandEvent -> Repository -> User -> SkillId -> AddImplicationReq -> Handler NoContent
 handleAddImplication cmdBus repo user sid req = do
     requireAdmin user
-    sName <- liftIO $ lookupSkillName repo (SkillId sid)
-    implName <- liftIO $ lookupSkillName repo (SkillId (airImpliesSkillId req))
-    liftIO $ SW.addSkillImplication repo (SkillId sid) (SkillId (airImpliesSkillId req))
+    sName <- liftIO $ lookupSkillName repo sid
+    let implSid = SkillId (airImpliesSkillId req)
+    implName <- liftIO $ lookupSkillName repo implSid
+    liftIO $ SW.addSkillImplication repo sid implSid
     logRest cmdBus user ("skill implication " ++ shellQuote sName ++ " " ++ shellQuote implName)
     pure NoContent
 
-handleRemoveImplication :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
+handleRemoveImplication :: TopicBus CommandEvent -> Repository -> User -> SkillId -> SkillId -> Handler NoContent
 handleRemoveImplication cmdBus repo user sid impliedId = do
     requireAdmin user
-    sName <- liftIO $ lookupSkillName repo (SkillId sid)
-    implName <- liftIO $ lookupSkillName repo (SkillId impliedId)
-    liftIO $ SW.removeSkillImplication repo (SkillId sid) (SkillId impliedId)
+    sName <- liftIO $ lookupSkillName repo sid
+    implName <- liftIO $ lookupSkillName repo impliedId
+    liftIO $ SW.removeSkillImplication repo sid impliedId
     logRest cmdBus user ("skill remove-implication " ++ shellQuote sName ++ " " ++ shellQuote implName)
     pure NoContent
 
@@ -551,21 +568,21 @@ handleSetWorkerTemp cmdBus repo user wid req = do
 -- Worker skill grant / revoke
 -- -----------------------------------------------------------------
 
-handleGrantWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
+handleGrantWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> SkillId -> Handler NoContent
 handleGrantWorkerSkill cmdBus repo user wid sid = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    skName <- liftIO $ lookupSkillName repo (SkillId sid)
-    liftIO $ SW.grantWorkerSkill repo (WorkerId wid) (SkillId sid)
+    skName <- liftIO $ lookupSkillName repo sid
+    liftIO $ SW.grantWorkerSkill repo (WorkerId wid) sid
     logRest cmdBus user ("worker grant-skill " ++ shellQuote wName ++ " " ++ shellQuote skName)
     pure NoContent
 
-handleRevokeWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
+handleRevokeWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> SkillId -> Handler NoContent
 handleRevokeWorkerSkill cmdBus repo user wid sid = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    skName <- liftIO $ lookupSkillName repo (SkillId sid)
-    liftIO $ SW.revokeWorkerSkill repo (WorkerId wid) (SkillId sid)
+    skName <- liftIO $ lookupSkillName repo sid
+    liftIO $ SW.revokeWorkerSkill repo (WorkerId wid) sid
     logRest cmdBus user ("worker revoke-skill " ++ shellQuote wName ++ " " ++ shellQuote skName)
     pure NoContent
 

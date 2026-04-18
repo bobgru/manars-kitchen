@@ -192,6 +192,7 @@ sqlDeleteSkill conn (SkillId sid) = do
     execute conn "DELETE FROM skill_implications WHERE skill_id = ? OR implies_skill_id = ?" (sid, sid)
     execute conn "DELETE FROM worker_skills WHERE skill_id = ?" (Only sid)
     execute conn "DELETE FROM station_required_skills WHERE skill_id = ?" (Only sid)
+    execute conn "DELETE FROM worker_cross_training WHERE skill_id = ?" (Only sid)
     execute conn "DELETE FROM skills WHERE id = ?" (Only sid)
 
 sqlListSkills :: Connection -> IO [(SkillId, Skill)]

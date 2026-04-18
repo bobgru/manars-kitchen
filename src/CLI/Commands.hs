@@ -5,6 +5,8 @@ module CLI.Commands
     , shellQuote
     ) where
 
+import Domain.Types (SkillId(..))
+
 -- | All commands available in the REPL.
 data Command
     -- Schedule
@@ -28,14 +30,18 @@ data Command
     | StationSetHours Int Int Int   -- ^ station-id start-hour end-hour
     | StationCloseDay Int String   -- ^ station-id day-of-week
     | StationSetMultiHours Int Int Int  -- ^ station-id start-hour end-hour
-    | StationRequireSkill Int Int    -- ^ station-id skill-id
-    | SkillCreate Int String          -- ^ skill-id name
-    | SkillRename Int String          -- ^ skill-id new-name
+    | StationRequireSkill Int SkillId    -- ^ station-id skill-id
+    | StationRemoveRequiredSkill Int SkillId -- ^ station-id skill-id
+    | SkillCreate SkillId String          -- ^ skill-id name
+    | SkillRename SkillId String          -- ^ skill-id new-name
+    | SkillDelete SkillId                 -- ^ skill-id (safe delete)
+    | SkillForceDelete SkillId            -- ^ skill-id (remove refs + delete)
+    | SkillView SkillId                  -- ^ skill-id (detailed view)
     | SkillList
-    | SkillImplication Int Int       -- ^ skill-a skill-b (a implies b)
-    | SkillRemoveImplication Int Int -- ^ skill-a skill-b (remove a implies b)
-    | WorkerGrantSkill Int Int       -- ^ worker-id skill-id
-    | WorkerRevokeSkill Int Int
+    | SkillImplication SkillId SkillId       -- ^ skill-a skill-b (a implies b)
+    | SkillRemoveImplication SkillId SkillId -- ^ skill-a skill-b (remove a implies b)
+    | WorkerGrantSkill Int SkillId       -- ^ worker-id skill-id
+    | WorkerRevokeSkill Int SkillId
     -- Workers (admin)
     | WorkerSetHours Int Int         -- ^ worker-id hours
     | WorkerSetOvertime Int Bool     -- ^ worker-id on/off
@@ -75,8 +81,8 @@ data Command
     -- Seniority
     | WorkerSetSeniority Int Int    -- ^ worker-id level
     -- Cross-training goals
-    | WorkerSetCrossTraining Int Int    -- ^ worker-id skill-id
-    | WorkerClearCrossTraining Int Int  -- ^ worker-id skill-id
+    | WorkerSetCrossTraining Int SkillId    -- ^ worker-id skill-id
+    | WorkerClearCrossTraining Int SkillId  -- ^ worker-id skill-id
     -- Employment status
     | WorkerSetStatus Int String       -- ^ worker-id salaried|full-time|part-time|per-diem
     | WorkerSetOvertimeModel Int String -- ^ worker-id eligible|manual-only|exempt
@@ -138,7 +144,7 @@ data Command
     | WhatIfPin Int Int String Int            -- ^ worker-id station-id date hour
     | WhatIfAddWorker String [String] (Maybe Int)  -- ^ name skills [hours]
     | WhatIfWaiveOvertime Int                 -- ^ worker-id
-    | WhatIfGrantSkill Int Int                -- ^ worker-id skill-id
+    | WhatIfGrantSkill Int SkillId                -- ^ worker-id skill-id
     | WhatIfOverridePrefs Int [Int]           -- ^ worker-id station-ids
     | WhatIfRevert
     | WhatIfRevertAll
@@ -188,23 +194,31 @@ parseCommand input = case shellWords input of
     ["station", "set-multi-hours", sid, sh, eh]
         | all isDigit' [sid, sh, eh] -> StationSetMultiHours (read sid) (read sh) (read eh)
     ["station", "require-skill", sid, skid]
-        | all isDigit' [sid, skid] -> StationRequireSkill (read sid) (read skid)
+        | all isDigit' [sid, skid] -> StationRequireSkill (read sid) (SkillId (read skid))
+    ["station", "remove-required-skill", sid, skid]
+        | all isDigit' [sid, skid] -> StationRemoveRequiredSkill (read sid) (SkillId (read skid))
 
     ["skill", "create", sid, name]
-        | isDigit' sid -> SkillCreate (read sid) name
+        | isDigit' sid -> SkillCreate (SkillId (read sid)) name
     ["skill", "rename", sid, name]
-        | isDigit' sid -> SkillRename (read sid) name
+        | isDigit' sid -> SkillRename (SkillId (read sid)) name
+    ["skill", "delete", sid]
+        | isDigit' sid -> SkillDelete (SkillId (read sid))
+    ["skill", "force-delete", sid]
+        | isDigit' sid -> SkillForceDelete (SkillId (read sid))
+    ["skill", "view", sid]
+        | isDigit' sid -> SkillView (SkillId (read sid))
     ["skill", "list"]              -> SkillList
     ["skill", "implication", a, b]
-        | all isDigit' [a, b] -> SkillImplication (read a) (read b)
+        | all isDigit' [a, b] -> SkillImplication (SkillId (read a)) (SkillId (read b))
     ["skill", "remove-implication", a, b]
-        | all isDigit' [a, b] -> SkillRemoveImplication (read a) (read b)
+        | all isDigit' [a, b] -> SkillRemoveImplication (SkillId (read a)) (SkillId (read b))
     ["skill", "info"]              -> SkillInfo
 
     ["worker", "grant-skill", wid, sid]
-        | all isDigit' [wid, sid] -> WorkerGrantSkill (read wid) (read sid)
+        | all isDigit' [wid, sid] -> WorkerGrantSkill (read wid) (SkillId (read sid))
     ["worker", "revoke-skill", wid, sid]
-        | all isDigit' [wid, sid] -> WorkerRevokeSkill (read wid) (read sid)
+        | all isDigit' [wid, sid] -> WorkerRevokeSkill (read wid) (SkillId (read sid))
     ["worker", "set-hours", wid, h]
         | all isDigit' [wid, h] -> WorkerSetHours (read wid) (read h)
     ["worker", "set-overtime", wid, b]
@@ -265,9 +279,9 @@ parseCommand input = case shellWords input of
     ["worker", "set-seniority", wid, lvl]
         | all isDigit' [wid, lvl] -> WorkerSetSeniority (read wid) (read lvl)
     ["worker", "set-cross-training", wid, sid]
-        | all isDigit' [wid, sid] -> WorkerSetCrossTraining (read wid) (read sid)
+        | all isDigit' [wid, sid] -> WorkerSetCrossTraining (read wid) (SkillId (read sid))
     ["worker", "clear-cross-training", wid, sid]
-        | all isDigit' [wid, sid] -> WorkerClearCrossTraining (read wid) (read sid)
+        | all isDigit' [wid, sid] -> WorkerClearCrossTraining (read wid) (SkillId (read sid))
     ["worker", "avoid-pairing", w1, w2]
         | all isDigit' [w1, w2] -> WorkerAvoidPairing (read w1) (read w2)
     ["worker", "clear-avoid-pairing", w1, w2]
@@ -340,7 +354,7 @@ parseCommand input = case shellWords input of
     ["what-if", "waive-overtime", wid]
         | isDigit' wid -> WhatIfWaiveOvertime (read wid)
     ["what-if", "grant-skill", wid, sid]
-        | all isDigit' [wid, sid] -> WhatIfGrantSkill (read wid) (read sid)
+        | all isDigit' [wid, sid] -> WhatIfGrantSkill (read wid) (SkillId (read sid))
     ("what-if" : "override-prefs" : wid : sids)
         | isDigit' wid, not (null sids), all isDigit' sids
             -> WhatIfOverridePrefs (read wid) (map read sids)

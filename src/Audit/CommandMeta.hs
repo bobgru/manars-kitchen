@@ -10,8 +10,9 @@ module Audit.CommandMeta
     , etPin, etWhatIf, etCheckpoint, etImportExport
     ) where
 
-import Data.Char (isDigit)
-import Data.Maybe (catMaybes)
+import Data.Char    (isDigit)
+import Data.List    (intercalate, isPrefixOf)
+import Data.Maybe   (catMaybes)
 import CLI.Commands (shellWords)
 
 -- | Structured metadata for a logged command.
@@ -43,19 +44,19 @@ defaultMeta = CommandMeta
 etWorker, etStation, etSkill, etShift, etAbsence :: String
 etUser, etConfig, etSchedule, etDraft, etCalendar :: String
 etPin, etWhatIf, etCheckpoint, etImportExport :: String
-etWorker      = "worker"
-etStation     = "station"
-etSkill       = "skill"
-etShift       = "shift"
-etAbsence     = "absence"
-etUser        = "user"
-etConfig      = "config"
-etSchedule    = "schedule"
-etDraft       = "draft"
-etCalendar    = "calendar"
-etPin         = "pin"
-etWhatIf      = "what-if"
-etCheckpoint  = "checkpoint"
+etWorker       = "worker"
+etStation      = "station"
+etSkill        = "skill"
+etShift        = "shift"
+etAbsence      = "absence"
+etUser         = "user"
+etConfig       = "config"
+etSchedule     = "schedule"
+etDraft        = "draft"
+etCalendar     = "calendar"
+etPin          = "pin"
+etWhatIf       = "what-if"
+etCheckpoint   = "checkpoint"
 etImportExport = "import-export"
 
 -- | Classify a raw command string into structured metadata.
@@ -170,6 +171,11 @@ classifyStation op rest = case op of
             { cmEntityId = readMaybe sid, cmTargetId = readMaybe skid }
         (sid : _) -> (mutating etStation "require-skill") { cmEntityId = readMaybe sid }
         _         -> mutating etStation "require-skill"
+    "remove-required-skill" -> case rest of
+        (sid : skid : _) -> (mutating etStation "remove-required-skill")
+            { cmEntityId = readMaybe sid, cmTargetId = readMaybe skid }
+        (sid : _) -> (mutating etStation "remove-required-skill") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "remove-required-skill"
     "list" -> nonMutating etStation "list"
     _ -> nonMutating etStation op
 
@@ -182,6 +188,12 @@ classifySkill op rest = case op of
     "rename" -> case rest of
         (sid : _) -> (mutating etSkill "rename") { cmEntityId = readMaybe sid }
         _         -> mutating etSkill "rename"
+    "delete" -> case rest of
+        (sid : _) -> (mutating etSkill "delete") { cmEntityId = readMaybe sid }
+        _         -> mutating etSkill "delete"
+    "force-delete" -> case rest of
+        (sid : _) -> (mutating etSkill "force-delete") { cmEntityId = readMaybe sid }
+        _         -> mutating etSkill "force-delete"
     "implication" -> case rest of
         (a : b : _) -> (mutating etSkill "implication")
             { cmEntityId = readMaybe a, cmTargetId = readMaybe b }
@@ -190,6 +202,9 @@ classifySkill op rest = case op of
         (a : b : _) -> (mutating etSkill "remove-implication")
             { cmEntityId = readMaybe a, cmTargetId = readMaybe b }
         _ -> mutating etSkill "remove-implication"
+    "view" -> case rest of
+        (sid : _) -> (nonMutating etSkill "view") { cmEntityId = readMaybe sid }
+        _         -> nonMutating etSkill "view"
     "list" -> nonMutating etSkill "list"
     "info" -> nonMutating etSkill "info"
     _ -> nonMutating etSkill op
@@ -426,10 +441,10 @@ renderParts et op meta
     | et == etSchedule && op == "unassign" =
         [ Just "unassign", Just "?", fmap show (cmEntityId meta), fmap show (cmTargetId meta) ]
     -- Absence type commands use "absence-type" prefix
-    | et == etAbsence && "type-" `isPrefixOf'` op =
+    | et == etAbsence && "type-" `isPrefixOf` op =
         [ Just "absence-type", Just (drop 5 op) ]
         ++ idParts meta
-    | et == etAbsence && "vacation-" `isPrefixOf'` op =
+    | et == etAbsence && "vacation-" `isPrefixOf` op =
         [ Just "vacation", Just (drop 9 op) ]
         ++ idParts meta
     -- Pin: "pin <wid> <sid> ..." or "unpin <wid> <sid> ..."
@@ -531,22 +546,16 @@ isDate s = length s == 10
 dateOrNothing :: String -> Maybe String
 dateOrNothing s = if isDate s then Just s else Nothing
 
--- | Simple prefix check (avoids importing Data.List).
-isPrefixOf' :: String -> String -> Bool
-isPrefixOf' [] _          = True
-isPrefixOf' _ []          = False
-isPrefixOf' (a:as) (b:bs) = a == b && isPrefixOf' as bs
-
 -- | Encode a list of numeric strings as a JSON array of ints: "[1,2,4]"
 toJsonIntList :: [String] -> String
 toJsonIntList ss =
     let nums = [s | s <- ss, not (null s), all isDigit s]
-    in "[" ++ intercalate' "," nums ++ "]"
+    in "[" ++ intercalate "," nums ++ "]"
 
 -- | Encode a list of strings as a JSON array: "[\"a\",\"b\"]"
 toJsonStrList :: [String] -> String
 toJsonStrList ss =
-    "[" ++ intercalate' "," (map (\s -> "\"" ++ s ++ "\"") ss) ++ "]"
+    "[" ++ intercalate "," (map (\s -> "\"" ++ s ++ "\"") ss) ++ "]"
 
 -- | Parse a simple JSON list back into strings.
 -- Handles "[1,2,4]" -> ["1","2","4"] and "[\"a\",\"b\"]" -> ["a","b"]
@@ -558,12 +567,6 @@ parseJsonList s =
   where
     stripQuotes ('"' : rest) = reverse $ drop 1 $ reverse rest
     stripQuotes x = x
-
--- | Simple intercalate (avoids importing Data.List).
-intercalate' :: String -> [String] -> String
-intercalate' _ []     = ""
-intercalate' _ [x]    = x
-intercalate' sep (x:xs) = x ++ sep ++ intercalate' sep xs
 
 -- | Split a string on a separator character.
 splitOn' :: Char -> String -> [String]

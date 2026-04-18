@@ -6,6 +6,10 @@ module Service.Worker
     , renameSkill
     , listSkillImplications
     , removeSkillImplication
+    , SkillReferences(..)
+    , checkSkillReferences
+    , isUnreferenced
+    , safeDeleteSkill
       -- * Station entity operations
     , addStation
     , removeStation
@@ -52,10 +56,11 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import Data.Time (DayOfWeek(..))
-import Domain.Types (WorkerId, StationId, SkillId, DiffTime)
-import Domain.Skill (Skill, SkillContext(..))
+import Domain.Types (WorkerId(..), StationId(..), SkillId, DiffTime)
+import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.Pin (PinnedAssignment(..))
+import Auth.Types (User(..), Username(..))
 import Repo.Types (Repository(..))
 
 -- -----------------------------------------------------------------
@@ -107,6 +112,60 @@ removeSkillImplication repo skillA skillB = do
                then ctx { scSkillImplies = Map.delete skillA (scSkillImplies ctx) }
                else ctx { scSkillImplies = Map.insert skillA updated (scSkillImplies ctx) }
     repoSaveSkillCtx repo ctx'
+
+-- -----------------------------------------------------------------
+-- Skill reference checking (safe delete)
+-- -----------------------------------------------------------------
+
+data SkillReferences = SkillReferences
+    { srWorkers       :: ![(WorkerId, String)]
+    , srStations      :: ![(StationId, String)]
+    , srCrossTraining :: ![(WorkerId, String)]
+    , srImpliedBy     :: ![(SkillId, String)]
+    , srImplies       :: ![(SkillId, String)]
+    } deriving (Show)
+
+checkSkillReferences :: Repository -> SkillId -> IO SkillReferences
+checkSkillReferences repo sid = do
+    ctx <- repoLoadSkillCtx repo
+    wCtx <- repoLoadWorkerCtx repo
+    skills <- repoListSkills repo
+    users <- repoListUsers repo
+    stationPairs <- repoListStations repo
+    let skillNameMap = Map.fromList [(s, skillName sk) | (s, sk) <- skills]
+        lookupSkill s = Map.findWithDefault (show s) s skillNameMap
+        workerNameMap = Map.fromList
+            [(userWorkerId u, let Username n = userName u in n) | u <- users]
+        lookupWorker w = Map.findWithDefault (show w) w workerNameMap
+        stationNameMap = Map.fromList stationPairs
+        lookupStation s = Map.findWithDefault (show s) s stationNameMap
+        workers = [(w, lookupWorker w) | (w, sks) <- Map.toList (scWorkerSkills ctx), Set.member sid sks]
+        stations = [(s, lookupStation s) | (s, sks) <- Map.toList (scStationRequires ctx), Set.member sid sks]
+        crossTraining = [(w, lookupWorker w) | (w, sks) <- Map.toList (wcCrossTraining wCtx), Set.member sid sks]
+        impliedBy = [(s, lookupSkill s) | (s, imps) <- Map.toList (scSkillImplies ctx), Set.member sid imps, s /= sid]
+        implies = [(i, lookupSkill i) | i <- Set.toList (Map.findWithDefault Set.empty sid (scSkillImplies ctx))]
+    return SkillReferences
+        { srWorkers       = workers
+        , srStations      = stations
+        , srCrossTraining = crossTraining
+        , srImpliedBy     = impliedBy
+        , srImplies       = implies
+        }
+
+isUnreferenced :: SkillReferences -> Bool
+isUnreferenced refs =
+    null (srWorkers refs) && null (srStations refs) &&
+    null (srCrossTraining refs) && null (srImpliedBy refs) &&
+    null (srImplies refs)
+
+safeDeleteSkill :: Repository -> SkillId -> IO (Either SkillReferences ())
+safeDeleteSkill repo sid = do
+    refs <- checkSkillReferences repo sid
+    if isUnreferenced refs
+        then do
+            repoDeleteSkill repo sid
+            return (Right ())
+        else return (Left refs)
 
 -- -----------------------------------------------------------------
 -- Station entity CRUD

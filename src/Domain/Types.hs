@@ -22,6 +22,7 @@ import qualified Data.Set as Set
 import Data.Time (Day, TimeOfDay(..), DiffTime,
                   timeOfDayToTime, timeToTimeOfDay, fromGregorian)
 import Test.QuickCheck (Arbitrary(..), Gen, choose, listOf, suchThat)
+import Web.HttpApiData (FromHttpApiData(..), ToHttpApiData(..))
 
 -- | Terminal unit: a worker, identified by an opaque ID.
 -- Attributes (skills, status, preferences) live in a separate Context,
@@ -38,6 +39,12 @@ newtype StationId = StationId Int
 -- then possessing A means also possessing B.
 newtype SkillId = SkillId Int
     deriving (Eq, Ord, Show, Read)
+
+instance FromHttpApiData SkillId where
+    parseUrlPiece t = SkillId <$> parseUrlPiece t
+
+instance ToHttpApiData SkillId where
+    toUrlPiece (SkillId i) = toUrlPiece i
 
 -- | Terminal unit: an absence request, identified by an opaque ID.
 newtype AbsenceId = AbsenceId Int
