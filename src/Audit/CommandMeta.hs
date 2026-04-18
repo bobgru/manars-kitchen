@@ -12,6 +12,7 @@ module Audit.CommandMeta
 
 import Data.Char (isDigit)
 import Data.Maybe (catMaybes)
+import CLI.Commands (shellWords)
 
 -- | Structured metadata for a logged command.
 data CommandMeta = CommandMeta
@@ -59,7 +60,7 @@ etImportExport = "import-export"
 
 -- | Classify a raw command string into structured metadata.
 classify :: String -> CommandMeta
-classify input = case words input of
+classify input = case shellWords input of
     -- Schedule commands
     ("schedule" : op : rest) -> classifySchedule op rest
     -- Assignment commands
@@ -185,6 +186,10 @@ classifySkill op rest = case op of
         (a : b : _) -> (mutating etSkill "implication")
             { cmEntityId = readMaybe a, cmTargetId = readMaybe b }
         _ -> mutating etSkill "implication"
+    "remove-implication" -> case rest of
+        (a : b : _) -> (mutating etSkill "remove-implication")
+            { cmEntityId = readMaybe a, cmTargetId = readMaybe b }
+        _ -> mutating etSkill "remove-implication"
     "list" -> nonMutating etSkill "list"
     "info" -> nonMutating etSkill "info"
     _ -> nonMutating etSkill op

@@ -10,11 +10,14 @@ import GHC.IO.Handle (hDuplicate, hDuplicateTo)
 import System.IO (stdout, hFlush, hClose, hGetContents, hSetEncoding, utf8)
 import System.Process (createPipe)
 
+import Data.IORef (newIORef)
+
 import Auth.Types (User(..))
 import Repo.Types (Repository, SessionId(..))
 import Service.PubSub (AppBus(..), newAppBus)
 import CLI.App (mkAppState, handleCommand, registerAuditSubscriber)
 import CLI.Commands (Command(..), parseCommand)
+import CLI.Resolve (emptyContext, resolveInput)
 
 -- | Environment for command execution. Holds an MVar to serialize
 --   stdout capture across concurrent requests.
@@ -36,16 +39,18 @@ newExecuteEnv repo = do
 --   Thread-safe: concurrent calls are serialized via MVar.
 executeCommandText :: ExecuteEnv -> User -> String -> IO String
 executeCommandText env user input = do
-    let cmd = parseCommand input
-    case cmd of
-        Quit -> return "Use the browser logout button to end your session."
-        PasswordChange -> return "Password change is not supported in the web terminal."
-        _ -> captureStdout (eeLock env) $ do
-            -- Create a temporary AppState with default (empty) IORefs.
-            -- This makes the terminal stateless: context, checkpoints,
-            -- unfreezes, and hint sessions are not preserved between calls.
-            st <- mkAppState (eeRepo env) user (SessionId 0)
-            handleCommand st cmd
+    ctxRef <- newIORef emptyContext
+    resolved <- resolveInput (eeRepo env) ctxRef input
+    case resolved of
+        Left err -> return err
+        Right resolvedInput -> do
+            let cmd = parseCommand resolvedInput
+            case cmd of
+                Quit -> return "Use the browser logout button to end your session."
+                PasswordChange -> return "Password change is not supported in the web terminal."
+                _ -> captureStdout (eeLock env) $ do
+                    st <- mkAppState (eeRepo env) user (SessionId 0)
+                    handleCommand st cmd
 
 -- | Capture everything written to stdout during an IO action.
 --   Uses an MVar to ensure only one capture runs at a time.

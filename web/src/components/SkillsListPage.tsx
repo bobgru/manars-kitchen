@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router";
 import { fetchSkills, fetchImplications, type SkillInfo } from "../api/skills";
+import { useEntityEvents } from "../hooks/useSSE";
 
 /** Compute transitive closure from a direct implications map. */
 function transitiveClosure(
@@ -38,23 +39,24 @@ export default function SkillsListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [sk, impl] = await Promise.all([
-          fetchSkills(),
-          fetchImplications(),
-        ]);
-        setSkills(sk);
-        setImplications(impl);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setLoading(false);
-      }
+  const load = useCallback(async () => {
+    try {
+      const [sk, impl] = await Promise.all([
+        fetchSkills(),
+        fetchImplications(),
+      ]);
+      setSkills(sk);
+      setImplications(impl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
     }
-    load();
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEntityEvents("skill", load);
 
   if (loading) return <div className="page loading">Loading skills...</div>;
   if (error) return <div className="page msg-error">{error}</div>;

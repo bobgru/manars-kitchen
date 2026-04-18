@@ -47,7 +47,7 @@ module Server.Rpc
     ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (ToJSON(..), FromJSON(..), (.=), (.:), object, withObject)
+import Data.Aeson (ToJSON(..), FromJSON(..), (.=), (.:), (.:?), object, withObject)
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -56,7 +56,7 @@ import Network.Wai (Middleware, requestHeaders)
 import Servant
 import Text.Read (readMaybe)
 
-import Auth.Types (UserId(..), User(..))
+import Auth.Types (UserId(..), User(..), Username(..))
 import Domain.Skill (Skill)
 import Domain.Types (WorkerId(..), StationId(..), SkillId(..), AbsenceId(..), AbsenceTypeId(..), Schedule)
 import Domain.Hint (Hint)
@@ -82,7 +82,8 @@ import qualified Service.HintRebase as SHR
 import qualified Export.JSON as Exp
 import Server.Json
 import Server.Error
-import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishCommandWithClient)
+import CLI.Commands (shellQuote)
 import Server.Execute (ExecuteEnv(..), executeCommandText)
 
 -- -----------------------------------------------------------------
@@ -342,10 +343,16 @@ newtype RpcSessionResp = RpcSessionResp { rsrSessionId :: Int } deriving (Show)
 instance ToJSON RpcSessionResp where toJSON r = object ["sessionId" .= rsrSessionId r]
 instance FromJSON RpcSessionResp where parseJSON = withObject "RpcSessionResp" $ \v -> RpcSessionResp <$> v .: "sessionId"
 
--- | Request body for /rpc/execute — a raw command string.
-newtype ExecuteReq = ExecuteReq { erCommand :: String } deriving (Show)
-instance ToJSON ExecuteReq where toJSON r = object ["command" .= erCommand r]
-instance FromJSON ExecuteReq where parseJSON = withObject "ExecuteReq" $ \v -> ExecuteReq <$> v .: "command"
+-- | Request body for /rpc/execute — a raw command string with optional client ID.
+data ExecuteReq = ExecuteReq
+    { erCommand  :: String
+    , erClientId :: Maybe String
+    } deriving (Show)
+instance ToJSON ExecuteReq where
+    toJSON r = object ["command" .= erCommand r, "clientId" .= erClientId r]
+instance FromJSON ExecuteReq where
+    parseJSON = withObject "ExecuteReq" $ \v ->
+        ExecuteReq <$> v .: "command" <*> v .:? "clientId"
 
 -- -----------------------------------------------------------------
 -- RPC Server (handlers)
@@ -465,7 +472,7 @@ rpcCreateSkill cmdBus repo req = do
     case result of
         Left err -> throwApiError (Conflict err)
         Right () -> do
-            let cmd = "skill create " ++ show (csrId req) ++ " " ++ csrName req
+            let cmd = "skill create " ++ show (csrId req) ++ " " ++ shellQuote (csrName req)
             liftIO $ publishCommand cmdBus RPC "rpc" cmd
             pure RpcOk
 
@@ -479,7 +486,7 @@ rpcDeleteSkill cmdBus repo req = do
 rpcRenameSkill :: TopicBus CommandEvent -> Repository -> Int -> RenameSkillReq -> Handler RpcOk
 rpcRenameSkill cmdBus repo sid req = do
     liftIO $ repoRenameSkill repo (SkillId sid) (rsrName req)
-    let cmd = "skill rename " ++ show sid ++ " " ++ rsrName req
+    let cmd = "skill rename " ++ show sid ++ " " ++ shellQuote (rsrName req)
     liftIO $ publishCommand cmdBus RPC "rpc" cmd
     pure RpcOk
 
@@ -493,7 +500,7 @@ rpcListSkills repo _ = liftIO $ SW.listSkills repo
 rpcCreateStation :: TopicBus CommandEvent -> Repository -> CreateStationReq -> Handler RpcOk
 rpcCreateStation cmdBus repo req = do
     liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
-    logRpcBus cmdBus ("station add " ++ show (cstrId req) ++ " " ++ cstrName req)
+    logRpcBus cmdBus ("station add " ++ show (cstrId req) ++ " " ++ shellQuote (cstrName req))
     pure RpcOk
 
 rpcDeleteStation :: TopicBus CommandEvent -> Repository -> RpcStationId -> Handler RpcOk
@@ -527,13 +534,13 @@ rpcListStations repo _ = do
 rpcCreateShift :: TopicBus CommandEvent -> Repository -> CreateShiftReq -> Handler RpcOk
 rpcCreateShift cmdBus repo req = do
     liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
-    logRpcBus cmdBus ("shift create " ++ cshrName req)
+    logRpcBus cmdBus ("shift create " ++ shellQuote (cshrName req))
     pure RpcOk
 
 rpcDeleteShift :: TopicBus CommandEvent -> Repository -> RpcShiftName -> Handler RpcOk
 rpcDeleteShift cmdBus repo req = do
     liftIO $ repoDeleteShift repo (rsnName req)
-    logRpcBus cmdBus ("shift delete " ++ rsnName req)
+    logRpcBus cmdBus ("shift delete " ++ shellQuote (rsnName req))
     pure RpcOk
 
 rpcListShifts :: Repository -> RpcEmpty -> Handler [ShiftDef]
@@ -594,7 +601,7 @@ rpcAddCrossTraining cmdBus repo req = do
 rpcSetEmploymentStatus :: TopicBus CommandEvent -> Repository -> RpcWorkerEmploymentStatus -> Handler RpcOk
 rpcSetEmploymentStatus cmdBus repo req = do
     _ <- liftIO $ SW.setEmploymentStatus repo (WorkerId (rwesWid req)) (rwesStatus req)
-    logRpcBus cmdBus ("worker set-status " ++ show (rwesWid req) ++ " " ++ rwesStatus req)
+    logRpcBus cmdBus ("worker set-status " ++ show (rwesWid req) ++ " " ++ shellQuote (rwesStatus req))
     pure RpcOk
 
 rpcSetOvertimeModel :: TopicBus CommandEvent -> Repository -> RpcWorkerOvertimeModel -> Handler RpcOk
@@ -722,7 +729,7 @@ rpcViewSchedule repo req = do
 rpcDeleteSchedule :: TopicBus CommandEvent -> Repository -> RpcScheduleName -> Handler RpcOk
 rpcDeleteSchedule cmdBus repo req = do
     liftIO $ SS.deleteSchedule repo (rsnmName req)
-    logRpcBus cmdBus ("schedule delete " ++ rsnmName req)
+    logRpcBus cmdBus ("schedule delete " ++ shellQuote (rsnmName req))
     pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -756,7 +763,7 @@ rpcSetConfig cmdBus repo req = do
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown config key: " ++ rcsKey req))
         Just _  -> do
-            logRpcBus cmdBus ("config set " ++ rcsKey req ++ " " ++ show (rcsValue req))
+            logRpcBus cmdBus ("config set " ++ shellQuote (rcsKey req) ++ " " ++ show (rcsValue req))
             pure RpcOk
 
 rpcApplyPreset :: TopicBus CommandEvent -> Repository -> RpcPresetName -> Handler RpcOk
@@ -765,7 +772,7 @@ rpcApplyPreset cmdBus repo req = do
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown preset: " ++ rpnName req))
         Just _  -> do
-            logRpcBus cmdBus ("config preset " ++ rpnName req)
+            logRpcBus cmdBus ("config preset " ++ shellQuote (rpnName req))
             pure RpcOk
 
 rpcResetConfig :: TopicBus CommandEvent -> Repository -> RpcEmpty -> Handler RpcOk
@@ -780,7 +787,7 @@ rpcSetPayPeriod cmdBus repo req = do
         Nothing -> throwApiError (BadRequest ("Unknown pay period type: " ++ sprType req))
         Just pt -> do
             liftIO $ SCfg.savePayPeriodConfig repo (PayPeriodConfig pt (sprAnchorDate req))
-            logRpcBus cmdBus ("config set-pay-period " ++ sprType req)
+            logRpcBus cmdBus ("config set-pay-period " ++ shellQuote (sprType req))
             pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -797,19 +804,19 @@ rpcListAudit repo _ = liftIO $ repoGetAuditLog repo
 rpcCreateCheckpoint :: TopicBus CommandEvent -> Repository -> CreateCheckpointReq -> Handler RpcOk
 rpcCreateCheckpoint cmdBus repo req = do
     liftIO (repoSavepoint repo (ccrName req))
-    logRpcBus cmdBus ("checkpoint create " ++ ccrName req)
+    logRpcBus cmdBus ("checkpoint create " ++ shellQuote (ccrName req))
     pure RpcOk
 
 rpcCommitCheckpoint :: TopicBus CommandEvent -> Repository -> RpcCheckpointName -> Handler RpcOk
 rpcCommitCheckpoint cmdBus repo req = do
     liftIO (repoRelease repo (rcnName req))
-    logRpcBus cmdBus ("checkpoint commit " ++ rcnName req)
+    logRpcBus cmdBus ("checkpoint commit " ++ shellQuote (rcnName req))
     pure RpcOk
 
 rpcRollbackCheckpoint :: TopicBus CommandEvent -> Repository -> RpcCheckpointName -> Handler RpcOk
 rpcRollbackCheckpoint cmdBus repo req = do
     liftIO (repoRollbackTo repo (rcnName req))
-    logRpcBus cmdBus ("checkpoint rollback " ++ rcnName req)
+    logRpcBus cmdBus ("checkpoint rollback " ++ shellQuote (rcnName req))
     pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -833,7 +840,7 @@ rpcCreateAbsenceType cmdBus repo req = do
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
         ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpcBus cmdBus ("absence-type create " ++ show (catrId req) ++ " " ++ catrName req)
+    logRpcBus cmdBus ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (catrName req))
     pure RpcOk
 
 rpcDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> RpcAbsenceTypeId -> Handler RpcOk
@@ -899,7 +906,7 @@ rpcCreateUser cmdBus repo req = do
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
         Right _ -> do
-            logRpcBus cmdBus ("user create " ++ curUsername req)
+            logRpcBus cmdBus ("user create " ++ shellQuote (curUsername req))
             pure RpcOk
 
 rpcListUsers :: Repository -> RpcEmpty -> Handler [User]
@@ -912,7 +919,7 @@ rpcDeleteUser cmdBus repo req = do
         Nothing -> throwApiError (NotFound ("User not found: " ++ ruName req))
         Just u  -> do
             liftIO $ repoDeleteUser repo (userId u)
-            logRpcBus cmdBus ("user delete " ++ ruName req)
+            logRpcBus cmdBus ("user delete " ++ shellQuote (ruName req))
             pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -1013,8 +1020,9 @@ rpcResumeSession repo req = do
 rpcExecute :: TopicBus CommandEvent -> ExecuteEnv -> Repository -> User -> ExecuteReq -> Handler String
 rpcExecute cmdBus execEnv _repo user req = do
     let cmdStr = erCommand req
+        Username uname = userName user
     output <- liftIO $ executeCommandText execEnv user cmdStr
-    logRpcBus cmdBus cmdStr
+    liftIO $ publishCommandWithClient cmdBus RPC uname cmdStr (erClientId req)
     return output
 
 -- -----------------------------------------------------------------

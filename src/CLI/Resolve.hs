@@ -13,6 +13,7 @@ import Data.List (find, isPrefixOf)
 import Data.IORef
 import qualified Data.Map.Strict as Map
 import Repo.Types (Repository(..))
+import CLI.Commands (shellWords)
 import Auth.Types (User(..), Username(..))
 import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..))
 import Domain.Skill (Skill(..))
@@ -64,6 +65,7 @@ commandEntityMap =
     , (["station", "close-day"],           [Resolve EStation, Skip])
     , (["station", "require-skill"],       [Resolve EStation, Resolve ESkill])
     , (["skill", "implication"],           [Resolve ESkill, Resolve ESkill])
+    , (["skill", "remove-implication"],  [Resolve ESkill, Resolve ESkill])
     , (["assign"],                         [Skip, Resolve EWorker, Resolve EStation, Skip, Skip])
     , (["unassign"],                       [Skip, Resolve EWorker, Resolve EStation, Skip, Skip])
     , (["absence", "set-allowance"],       [Resolve EWorker, Resolve EAbsenceType, Skip])
@@ -96,7 +98,7 @@ findMapping ws =
 -- Returns the line with names replaced by IDs, or an error message.
 resolveInput :: Repository -> IORef SessionContext -> String -> IO (Either String String)
 resolveInput repo ctxRef input = do
-    let ws = words input
+    let ws = shellWords input
     case findMapping ws of
         Nothing -> return (Right input)  -- no resolution needed
         Just (prefixLen, specs) -> do

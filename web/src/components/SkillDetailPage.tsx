@@ -8,6 +8,7 @@ import {
   removeImplication,
   type SkillInfo,
 } from "../api/skills";
+import { useEntityEvents } from "../hooks/useSSE";
 
 /** Compute transitive closure for a single skill. */
 function effectiveSkills(
@@ -69,6 +70,8 @@ export default function SkillDetailPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEntityEvents("skill", loadData);
 
   if (loading) return <div className="page loading">Loading...</div>;
   if (error) return <div className="page msg-error">{error}</div>;

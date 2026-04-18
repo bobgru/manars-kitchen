@@ -127,6 +127,7 @@ test-suite manars-kitchen-test
                      , SessionSpec
                      , PubSubSpec
                      , ApiSpec
+                     , ShellWordsSpec
                      , CLI.RpcClient
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5

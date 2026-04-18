@@ -1195,6 +1195,10 @@ handleCommand st cmd = case cmd of
         SW.addSkillImplication (asRepo st) (SkillId a) (SkillId b)
         putStrLn ("Skill " ++ show a ++ " now implies Skill " ++ show b)
 
+    SkillRemoveImplication a b -> requireAdmin st $ do
+        SW.removeSkillImplication (asRepo st) (SkillId a) (SkillId b)
+        putStrLn ("Removed: Skill " ++ show a ++ " no longer implies Skill " ++ show b)
+
     SkillInfo -> do
         ctx <- repoLoadSkillCtx (asRepo st)
         putStr (displaySkillCtx ctx)
@@ -2189,6 +2193,7 @@ helpRegistry =
     , ("skill",    True,  "skill create <id> <name>",        "Create a skill")
     , ("skill",    False, "skill list",                      "List all skills")
     , ("skill",    True,  "skill implication <a> <b>",       "Skill A implies skill B")
+    , ("skill",    True,  "skill remove-implication <a> <b>", "Remove implication")
     , ("skill",    False, "skill info",                      "Show skill context")
     -- Station
     , ("station",  True,  "station add <id> <name>",         "Add a station")

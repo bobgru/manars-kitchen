@@ -1083,19 +1083,19 @@ spec = do
 
     describe "RPC Execute" $ do
         it "executes 'help' and returns output" $ withTestApp $ \env -> do
-            result <- runClientM (rpcExecuteC (ExecuteReq "help")) env
+            result <- runClientM (rpcExecuteC (ExecuteReq "help" Nothing)) env
             case result of
                 Left err -> expectationFailure (show err)
                 Right output -> output `shouldSatisfy` (not . null)
 
         it "executes 'help skill' and returns group help" $ withTestApp $ \env -> do
-            result <- runClientM (rpcExecuteC (ExecuteReq "help skill")) env
+            result <- runClientM (rpcExecuteC (ExecuteReq "help skill" Nothing)) env
             case result of
                 Left err -> expectationFailure (show err)
                 Right output -> output `shouldSatisfy` (not . null)
 
         it "returns error message for unknown command" $ withTestApp $ \env -> do
-            result <- runClientM (rpcExecuteC (ExecuteReq "nonexistent-command")) env
+            result <- runClientM (rpcExecuteC (ExecuteReq "nonexistent-command" Nothing)) env
             case result of
                 Left err -> expectationFailure (show err)
                 Right output -> do
@@ -1103,14 +1103,14 @@ spec = do
                     output `shouldSatisfy` \s -> "Unknown command" `isInfixOf` s
 
         it "executes 'skill list' and returns output" $ withTestApp $ \env -> do
-            result <- runClientM (rpcExecuteC (ExecuteReq "skill list")) env
+            result <- runClientM (rpcExecuteC (ExecuteReq "skill list" Nothing)) env
             case result of
                 Left err -> expectationFailure (show err)
                 Right _output -> pure ()
 
         it "requires authentication" $ withServer $ \_ port -> do
             env <- mkPlainEnv port
-            result <- runClientM (rpcExecuteC (ExecuteReq "help")) env
+            result <- runClientM (rpcExecuteC (ExecuteReq "help" Nothing)) env
             result `shouldFailWith` 401
 
     -- -----------------------------------------------------------------

@@ -5,6 +5,7 @@ import AppShell from "./components/AppShell";
 import DashboardPage from "./components/DashboardPage";
 import SkillsListPage from "./components/SkillsListPage";
 import SkillDetailPage from "./components/SkillDetailPage";
+import { SSEProvider } from "./hooks/useSSE";
 import "./App.css";
 
 function App() {
@@ -49,24 +50,26 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route
-          element={
-            <AppShell
-              username={username}
-              onLogout={handleLogout}
-              onSessionExpired={handleSessionExpired}
-            />
-          }
-        >
-          <Route index element={<DashboardPage />} />
-          <Route path="skills" element={<SkillsListPage />} />
-          <Route path="skills/:id" element={<SkillDetailPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <SSEProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route
+            element={
+              <AppShell
+                username={username}
+                onLogout={handleLogout}
+                onSessionExpired={handleSessionExpired}
+              />
+            }
+          >
+            <Route index element={<DashboardPage />} />
+            <Route path="skills" element={<SkillsListPage />} />
+            <Route path="skills/:id" element={<SkillDetailPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </SSEProvider>
   );
 }
 

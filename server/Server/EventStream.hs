@@ -15,7 +15,8 @@ import Network.Wai (Application, queryString, responseLBS, responseStream)
 
 import Auth.Types (User(..), Username(..))
 import Repo.Types (Repository(..))
-import Service.PubSub (AppBus(..), CommandEvent(..), Source(..), subscribe, unsubscribe, sourceString)
+import Audit.CommandMeta (CommandMeta(..))
+import Service.PubSub (AppBus(..), CommandEvent(..), subscribe, unsubscribe, sourceString)
 
 eventStreamApp :: Repository -> AppBus -> Application
 eventStreamApp repo bus req sendResponse = do
@@ -57,12 +58,16 @@ eventStreamApp repo bus req sendResponse = do
             ] $ \write flush ->
                 bracket
                     (subscribe cmdBus ".*" $ \_ event ->
-                        when (ceSource event == GUI && ceUsername event == uname) $
+                        when (cmIsMutation (ceMeta event) && ceUsername event == uname) $
                             writeChan chan $ byteString "data: "
                                 <> lazyByteString (encode $ object
-                                    [ "command"  .= ceCommand event
-                                    , "source"   .= sourceString (ceSource event)
-                                    , "username" .= ceUsername event
+                                    [ "command"    .= ceCommand event
+                                    , "source"     .= sourceString (ceSource event)
+                                    , "username"   .= ceUsername event
+                                    , "entityType" .= cmEntityType (ceMeta event)
+                                    , "operation"  .= cmOperation (ceMeta event)
+                                    , "entityId"   .= cmEntityId (ceMeta event)
+                                    , "clientId"   .= ceClientId event
                                     ])
                                 <> byteString "\n\n"
                     )

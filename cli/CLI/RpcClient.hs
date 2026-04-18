@@ -326,6 +326,9 @@ dispatchCommand env cmd = case cmd of
     SkillImplication _a _b ->
         putStrLn "Skill implication management is not yet supported via RPC."
 
+    SkillRemoveImplication _a _b ->
+        putStrLn "Skill implication management is not yet supported via RPC."
+
     WorkerGrantSkill wid sid -> requireAdmin env $
         runOk env (cGrantSkill (RpcWorkerSkill wid sid)) "Skill granted."
 

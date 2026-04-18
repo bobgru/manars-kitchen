@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, type KeyboardEvent, type ClipboardEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type ClipboardEvent } from "react";
 import { executeCommand } from "../api/execute";
 import { AuthError } from "../api/client";
+import { useAllEvents } from "../hooks/useSSE";
 
 interface TerminalProps {
   onSessionExpired: () => void;
@@ -39,21 +40,12 @@ export default function Terminal({ onSessionExpired }: TerminalProps) {
     inputRef.current?.focus();
   }, []);
 
-  // EventSource for GUI event echoing
-  useEffect(() => {
-    const token = sessionStorage.getItem("token");
-    if (!token) return;
-    const es = new EventSource(`/api/events?token=${token}`);
-    es.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setLines((prev) => [...prev, { type: "echo", text: `[echo] ${data.command}` }]);
-      } catch {
-        // ignore malformed messages
-      }
-    };
-    return () => es.close();
-  }, []);
+  const clientIdRef = useRef(crypto.randomUUID());
+
+  useAllEvents(useCallback((event) => {
+    if (event.clientId === clientIdRef.current) return;
+    setLines((prev) => [...prev, { type: "echo", text: `[echo] ${event.command}` }]);
+  }, []));
 
   async function runCommand(cmd: string) {
     const trimmed = cmd.trim();
@@ -63,7 +55,7 @@ export default function Terminal({ onSessionExpired }: TerminalProps) {
 
     setLoading(true);
     try {
-      const output = await executeCommand(trimmed);
+      const output = await executeCommand(trimmed, clientIdRef.current);
       if (output) {
         setLines((prev) => [...prev, { type: "output", text: output }]);
       }

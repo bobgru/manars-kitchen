@@ -1,10 +1,10 @@
 import { apiFetch } from "./client";
 
-export async function executeCommand(command: string): Promise<string> {
+export async function executeCommand(command: string, clientId?: string): Promise<string> {
   const response = await apiFetch("/rpc/execute", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ command }),
+    body: JSON.stringify({ command, clientId }),
   });
 
   if (!response.ok) {

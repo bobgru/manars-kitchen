@@ -14,6 +14,7 @@ module Service.PubSub
     , publish
     , buildTopic
     , publishCommand
+    , publishCommandWithClient
     , sourceString
     ) where
 
@@ -55,6 +56,7 @@ data CommandEvent = CommandEvent
     , ceMeta     :: !CommandMeta
     , ceSource   :: !Source
     , ceUsername  :: !String
+    , ceClientId :: !(Maybe String)
     }
 
 -- | Application-level container holding typed channels.
@@ -107,10 +109,15 @@ buildTopic meta = Topic $ intercalate' "." $ catMaybes
 
 -- | Build and publish a CommandEvent from a raw command string.
 publishCommand :: TopicBus CommandEvent -> Source -> String -> String -> IO ()
-publishCommand bus source username cmdStr = do
+publishCommand bus source username cmdStr =
+    publishCommandWithClient bus source username cmdStr Nothing
+
+-- | Build and publish a CommandEvent with an optional client identifier.
+publishCommandWithClient :: TopicBus CommandEvent -> Source -> String -> String -> Maybe String -> IO ()
+publishCommandWithClient bus source username cmdStr clientId = do
     let meta  = classify cmdStr
         topic = buildTopic meta
-        event = CommandEvent cmdStr meta source username
+        event = CommandEvent cmdStr meta source username clientId
     publish bus topic event
 
 -- | Convert Source to the string used in the audit_log source column.

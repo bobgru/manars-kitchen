@@ -39,6 +39,7 @@ import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
 import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
 import Server.Execute (ExecuteEnv(..))
+import CLI.Commands (shellQuote)
 
 -- | Publish a command event from a REST handler.
 logRest :: TopicBus CommandEvent -> User -> String -> Handler ()
@@ -211,7 +212,7 @@ handleDeleteSchedule :: TopicBus CommandEvent -> Repository -> User -> String ->
 handleDeleteSchedule cmdBus repo user name = do
     requireAdmin user
     liftIO $ SS.deleteSchedule repo name
-    logRest cmdBus user ("schedule delete " ++ name)
+    logRest cmdBus user ("schedule delete " ++ shellQuote name)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -348,7 +349,7 @@ handleCreateSkill cmdBus repo user req = do
     case result of
         Left err -> throwApiError (Conflict err)
         Right () -> do
-            logRest cmdBus user ("skill create " ++ csrName req)
+            logRest cmdBus user ("skill create " ++ shellQuote (csrName req))
             pure NoContent
 
 handleDeleteSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
@@ -356,15 +357,14 @@ handleDeleteSkill cmdBus repo user sid = do
     requireAdmin user
     sName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.removeSkill repo (SkillId sid)
-    logRest cmdBus user ("skill delete " ++ sName)
+    logRest cmdBus user ("skill delete " ++ shellQuote sName)
     pure NoContent
 
 handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> RenameSkillReq -> Handler NoContent
 handleRenameSkill cmdBus repo user sid req = do
     requireAdmin user
-    oldName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.renameSkill repo (SkillId sid) (rsrName req)
-    logRest cmdBus user ("skill rename " ++ oldName ++ " " ++ rsrName req)
+    logRest cmdBus user ("skill rename " ++ show sid ++ " " ++ shellQuote (rsrName req))
     pure NoContent
 
 handleListImplications :: Repository -> Handler (Map.Map Int [Int])
@@ -380,7 +380,7 @@ handleAddImplication cmdBus repo user sid req = do
     sName <- liftIO $ lookupSkillName repo (SkillId sid)
     implName <- liftIO $ lookupSkillName repo (SkillId (airImpliesSkillId req))
     liftIO $ SW.addSkillImplication repo (SkillId sid) (SkillId (airImpliesSkillId req))
-    logRest cmdBus user ("skill implication " ++ sName ++ " " ++ implName)
+    logRest cmdBus user ("skill implication " ++ shellQuote sName ++ " " ++ shellQuote implName)
     pure NoContent
 
 handleRemoveImplication :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
@@ -389,7 +389,7 @@ handleRemoveImplication cmdBus repo user sid impliedId = do
     sName <- liftIO $ lookupSkillName repo (SkillId sid)
     implName <- liftIO $ lookupSkillName repo (SkillId impliedId)
     liftIO $ SW.removeSkillImplication repo (SkillId sid) (SkillId impliedId)
-    logRest cmdBus user ("skill remove-implication " ++ sName ++ " " ++ implName)
+    logRest cmdBus user ("skill remove-implication " ++ shellQuote sName ++ " " ++ shellQuote implName)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -400,7 +400,7 @@ handleCreateStation :: TopicBus CommandEvent -> Repository -> User -> CreateStat
 handleCreateStation cmdBus repo user req = do
     requireAdmin user
     liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
-    logRest cmdBus user ("station add " ++ cstrName req)
+    logRest cmdBus user ("station add " ++ shellQuote (cstrName req))
     pure NoContent
 
 handleDeleteStation :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
@@ -408,7 +408,7 @@ handleDeleteStation cmdBus repo user sid = do
     requireAdmin user
     sName <- liftIO $ lookupStationName repo (StationId sid)
     liftIO $ SW.removeStation repo (StationId sid)
-    logRest cmdBus user ("station remove " ++ sName)
+    logRest cmdBus user ("station remove " ++ shellQuote sName)
     pure NoContent
 
 handleSetStationHours :: TopicBus CommandEvent -> Repository -> User -> Int -> SetStationHoursReq -> Handler NoContent
@@ -416,7 +416,7 @@ handleSetStationHours cmdBus repo user sid req = do
     requireAdmin user
     sName <- liftIO $ lookupStationName repo (StationId sid)
     liftIO $ SW.setStationHours repo (StationId sid) (sshrStart req) (sshrEnd req)
-    logRest cmdBus user ("station set-hours " ++ sName ++ " " ++ show (sshrStart req) ++ " " ++ show (sshrEnd req))
+    logRest cmdBus user ("station set-hours " ++ shellQuote sName ++ " " ++ show (sshrStart req) ++ " " ++ show (sshrEnd req))
     pure NoContent
 
 handleSetStationClosure :: TopicBus CommandEvent -> Repository -> User -> Int -> SetStationClosureReq -> Handler NoContent
@@ -424,7 +424,7 @@ handleSetStationClosure cmdBus repo user sid req = do
     requireAdmin user
     sName <- liftIO $ lookupStationName repo (StationId sid)
     liftIO $ SW.closeStationDay repo (StationId sid) (sscrDay req)
-    logRest cmdBus user ("station close-day " ++ sName ++ " " ++ show (sscrDay req))
+    logRest cmdBus user ("station close-day " ++ shellQuote sName ++ " " ++ show (sscrDay req))
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -435,14 +435,14 @@ handleCreateShift :: TopicBus CommandEvent -> Repository -> User -> CreateShiftR
 handleCreateShift cmdBus repo user req = do
     requireAdmin user
     liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
-    logRest cmdBus user ("shift create " ++ cshrName req ++ " " ++ show (cshrStart req) ++ " " ++ show (cshrEnd req))
+    logRest cmdBus user ("shift create " ++ shellQuote (cshrName req) ++ " " ++ show (cshrStart req) ++ " " ++ show (cshrEnd req))
     pure NoContent
 
 handleDeleteShift :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleDeleteShift cmdBus repo user name = do
     requireAdmin user
     liftIO $ repoDeleteShift repo name
-    logRest cmdBus user ("shift delete " ++ name)
+    logRest cmdBus user ("shift delete " ++ shellQuote name)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -454,7 +454,7 @@ handleSetWorkerHours cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setMaxHours repo (WorkerId wid) (fromIntegral (swhrHours req))
-    logRest cmdBus user ("worker set-hours " ++ wName ++ " " ++ show (swhrHours req))
+    logRest cmdBus user ("worker set-hours " ++ shellQuote wName ++ " " ++ show (swhrHours req))
     pure NoContent
 
 handleSetWorkerOvertime :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerOvertimeReq -> Handler NoContent
@@ -462,7 +462,7 @@ handleSetWorkerOvertime cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     _ <- liftIO $ SW.setOvertimeOptIn repo (WorkerId wid) (sworOptIn req)
-    logRest cmdBus user ("worker set-overtime " ++ wName ++ " " ++ show (sworOptIn req))
+    logRest cmdBus user ("worker set-overtime " ++ shellQuote wName ++ " " ++ show (sworOptIn req))
     pure NoContent
 
 handleSetWorkerPrefs :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerPrefsReq -> Handler NoContent
@@ -471,7 +471,7 @@ handleSetWorkerPrefs cmdBus repo user wid req = do
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setStationPreferences repo (WorkerId wid)
         (map StationId (swprStationIds req))
-    logRest cmdBus user ("worker set-prefs " ++ wName)
+    logRest cmdBus user ("worker set-prefs " ++ shellQuote wName)
     pure NoContent
 
 handleSetWorkerVariety :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerVarietyReq -> Handler NoContent
@@ -479,7 +479,7 @@ handleSetWorkerVariety cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setVarietyPreference repo (WorkerId wid) (swvrPrefer req)
-    logRest cmdBus user ("worker set-variety " ++ wName ++ " " ++ show (swvrPrefer req))
+    logRest cmdBus user ("worker set-variety " ++ shellQuote wName ++ " " ++ show (swvrPrefer req))
     pure NoContent
 
 handleSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerShiftPrefsReq -> Handler NoContent
@@ -487,7 +487,7 @@ handleSetWorkerShiftPrefs cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setShiftPreferences repo (WorkerId wid) (swsprShifts req)
-    logRest cmdBus user ("worker set-shift-pref " ++ wName)
+    logRest cmdBus user ("worker set-shift-pref " ++ shellQuote wName)
     pure NoContent
 
 handleSetWorkerWeekendOnly :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerWeekendOnlyReq -> Handler NoContent
@@ -495,7 +495,7 @@ handleSetWorkerWeekendOnly cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setWeekendOnly repo (WorkerId wid) (swwoVal req)
-    logRest cmdBus user ("worker set-weekend-only " ++ wName ++ " " ++ show (swwoVal req))
+    logRest cmdBus user ("worker set-weekend-only " ++ shellQuote wName ++ " " ++ show (swwoVal req))
     pure NoContent
 
 handleSetWorkerSeniority :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerSeniorityReq -> Handler NoContent
@@ -503,7 +503,7 @@ handleSetWorkerSeniority cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setSeniority repo (WorkerId wid) (swsrLevel req)
-    logRest cmdBus user ("worker set-seniority " ++ wName ++ " " ++ show (swsrLevel req))
+    logRest cmdBus user ("worker set-seniority " ++ shellQuote wName ++ " " ++ show (swsrLevel req))
     pure NoContent
 
 handleSetWorkerCrossTraining :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerCrossTrainingReq -> Handler NoContent
@@ -512,7 +512,7 @@ handleSetWorkerCrossTraining cmdBus repo user wid req = do
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     skName <- liftIO $ lookupSkillName repo (SkillId (swctrSkillId req))
     liftIO $ SW.addCrossTraining repo (WorkerId wid) (SkillId (swctrSkillId req))
-    logRest cmdBus user ("worker set-cross-training " ++ wName ++ " " ++ skName)
+    logRest cmdBus user ("worker set-cross-training " ++ shellQuote wName ++ " " ++ shellQuote skName)
     pure NoContent
 
 handleSetWorkerEmploymentStatus :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerEmploymentStatusReq -> Handler NoContent
@@ -520,7 +520,7 @@ handleSetWorkerEmploymentStatus cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     _ <- liftIO $ SW.setEmploymentStatus repo (WorkerId wid) (swesStatus req)
-    logRest cmdBus user ("worker set-status " ++ wName ++ " " ++ swesStatus req)
+    logRest cmdBus user ("worker set-status " ++ shellQuote wName ++ " " ++ swesStatus req)
     pure NoContent
 
 handleSetWorkerOvertimeModel :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerOvertimeModelReq -> Handler NoContent
@@ -528,7 +528,7 @@ handleSetWorkerOvertimeModel cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setOvertimeModel repo (WorkerId wid) (swomModel req)
-    logRest cmdBus user ("worker set-overtime-model " ++ wName)
+    logRest cmdBus user ("worker set-overtime-model " ++ shellQuote wName)
     pure NoContent
 
 handleSetWorkerPayTracking :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerPayTrackingReq -> Handler NoContent
@@ -536,7 +536,7 @@ handleSetWorkerPayTracking cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setPayPeriodTracking repo (WorkerId wid) (swptTracking req)
-    logRest cmdBus user ("worker set-pay-tracking " ++ wName)
+    logRest cmdBus user ("worker set-pay-tracking " ++ shellQuote wName)
     pure NoContent
 
 handleSetWorkerTemp :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerTempReq -> Handler NoContent
@@ -544,7 +544,7 @@ handleSetWorkerTemp cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     liftIO $ SW.setTempFlag repo (WorkerId wid) (swtTemp req)
-    logRest cmdBus user ("worker set-temp " ++ wName ++ " " ++ show (swtTemp req))
+    logRest cmdBus user ("worker set-temp " ++ shellQuote wName ++ " " ++ show (swtTemp req))
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -557,7 +557,7 @@ handleGrantWorkerSkill cmdBus repo user wid sid = do
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     skName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.grantWorkerSkill repo (WorkerId wid) (SkillId sid)
-    logRest cmdBus user ("worker grant-skill " ++ wName ++ " " ++ skName)
+    logRest cmdBus user ("worker grant-skill " ++ shellQuote wName ++ " " ++ shellQuote skName)
     pure NoContent
 
 handleRevokeWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> Int -> Handler NoContent
@@ -566,7 +566,7 @@ handleRevokeWorkerSkill cmdBus repo user wid sid = do
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     skName <- liftIO $ lookupSkillName repo (SkillId sid)
     liftIO $ SW.revokeWorkerSkill repo (WorkerId wid) (SkillId sid)
-    logRest cmdBus user ("worker revoke-skill " ++ wName ++ " " ++ skName)
+    logRest cmdBus user ("worker revoke-skill " ++ shellQuote wName ++ " " ++ shellQuote skName)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -579,7 +579,7 @@ handleAvoidPairing cmdBus repo user wid req = do
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     otherName <- liftIO $ lookupWorkerName repo (WorkerId (wprOtherWorkerId req))
     liftIO $ SW.addAvoidPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
-    logRest cmdBus user ("worker avoid-pairing " ++ wName ++ " " ++ otherName)
+    logRest cmdBus user ("worker avoid-pairing " ++ shellQuote wName ++ " " ++ shellQuote otherName)
     pure NoContent
 
 handlePreferPairing :: TopicBus CommandEvent -> Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
@@ -588,7 +588,7 @@ handlePreferPairing cmdBus repo user wid req = do
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
     otherName <- liftIO $ lookupWorkerName repo (WorkerId (wprOtherWorkerId req))
     liftIO $ SW.addPreferPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
-    logRest cmdBus user ("worker prefer-pairing " ++ wName ++ " " ++ otherName)
+    logRest cmdBus user ("worker prefer-pairing " ++ shellQuote wName ++ " " ++ shellQuote otherName)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -604,7 +604,7 @@ handleAddPin cmdBus repo user pin = do
     wName <- liftIO $ lookupWorkerName repo (pinWorker pin)
     sName <- liftIO $ lookupStationName repo (pinStation pin)
     liftIO $ SW.addPin repo pin
-    logRest cmdBus user ("pin " ++ wName ++ " " ++ sName)
+    logRest cmdBus user ("pin " ++ shellQuote wName ++ " " ++ shellQuote sName)
     pure NoContent
 
 handleRemovePin :: TopicBus CommandEvent -> Repository -> User -> PinnedAssignment -> Handler NoContent
@@ -613,7 +613,7 @@ handleRemovePin cmdBus repo user pin = do
     wName <- liftIO $ lookupWorkerName repo (pinWorker pin)
     sName <- liftIO $ lookupStationName repo (pinStation pin)
     liftIO $ SW.removePin repo pin
-    logRest cmdBus user ("unpin " ++ wName ++ " " ++ sName)
+    logRest cmdBus user ("unpin " ++ shellQuote wName ++ " " ++ shellQuote sName)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -651,7 +651,7 @@ handleApplyPreset cmdBus repo user name = do
     case result of
         Nothing -> throwApiError (BadRequest ("Unknown preset: " ++ name))
         Just _  -> do
-            logRest cmdBus user ("config preset " ++ name)
+            logRest cmdBus user ("config preset " ++ shellQuote name)
             pure NoContent
 
 handleResetConfig :: TopicBus CommandEvent -> Repository -> User -> Handler NoContent
@@ -669,7 +669,7 @@ handleSetPayPeriod cmdBus repo user req = do
         Just pt -> do
             liftIO $ SCfg.savePayPeriodConfig repo
                 (PayPeriodConfig pt (sprAnchorDate req))
-            logRest cmdBus user ("config set-pay-period " ++ sprType req)
+            logRest cmdBus user ("config set-pay-period " ++ shellQuote (sprType req))
             pure NoContent
 
 -- -----------------------------------------------------------------
@@ -689,21 +689,21 @@ handleCreateCheckpoint :: TopicBus CommandEvent -> Repository -> User -> CreateC
 handleCreateCheckpoint cmdBus repo user req = do
     requireAdmin user
     liftIO $ repoSavepoint repo (ccrName req)
-    logRest cmdBus user ("checkpoint create " ++ ccrName req)
+    logRest cmdBus user ("checkpoint create " ++ shellQuote (ccrName req))
     pure NoContent
 
 handleCommitCheckpoint :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleCommitCheckpoint cmdBus repo user name = do
     requireAdmin user
     liftIO $ repoRelease repo name
-    logRest cmdBus user ("checkpoint commit " ++ name)
+    logRest cmdBus user ("checkpoint commit " ++ shellQuote name)
     pure NoContent
 
 handleRollbackCheckpoint :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleRollbackCheckpoint cmdBus repo user name = do
     requireAdmin user
     liftIO $ repoRollbackTo repo name
-    logRest cmdBus user ("checkpoint rollback " ++ name)
+    logRest cmdBus user ("checkpoint rollback " ++ shellQuote name)
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -735,7 +735,7 @@ handleCreateAbsenceType cmdBus repo user req = do
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
         ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRest cmdBus user ("absence-type create " ++ show (catrId req) ++ " " ++ catrName req)
+    logRest cmdBus user ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (catrName req))
     pure NoContent
 
 handleDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
@@ -775,7 +775,7 @@ handleCreateUser cmdBus repo user req = do
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
         Right _ -> do
-            logRest cmdBus user ("user create " ++ curUsername req)
+            logRest cmdBus user ("user create " ++ shellQuote (curUsername req))
             pure NoContent
 
 handleDeleteUser :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
@@ -786,7 +786,7 @@ handleDeleteUser cmdBus repo user uname = do
         Nothing -> throwApiError (NotFound ("User not found: " ++ uname))
         Just u  -> do
             liftIO $ repoDeleteUser repo (userId u)
-            logRest cmdBus user ("user delete " ++ uname)
+            logRest cmdBus user ("user delete " ++ shellQuote uname)
             pure NoContent
 
 -- -----------------------------------------------------------------
