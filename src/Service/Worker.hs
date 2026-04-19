@@ -69,9 +69,9 @@ import Repo.Types (Repository(..))
 -- -----------------------------------------------------------------
 
 -- | Register a new skill with a name and description.
--- Returns Left with error message if the skill ID already exists.
-addSkill :: Repository -> SkillId -> String -> String -> IO (Either String ())
-addSkill repo sid name desc = repoCreateSkill repo sid name desc
+-- Returns Left with error message if the skill name already exists.
+addSkill :: Repository -> String -> String -> IO (Either String ())
+addSkill repo name desc = repoCreateSkill repo name desc
 
 -- | Remove a skill from the system (also removes from workers/stations/implications).
 removeSkill :: Repository -> SkillId -> IO ()

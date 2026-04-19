@@ -6,6 +6,7 @@ module CLI.Commands
     ) where
 
 import Domain.Types (SkillId(..))
+import Utils (shellWords, shellQuote)
 
 -- | All commands available in the REPL.
 data Command
@@ -32,7 +33,7 @@ data Command
     | StationSetMultiHours Int Int Int  -- ^ station-id start-hour end-hour
     | StationRequireSkill Int SkillId    -- ^ station-id skill-id
     | StationRemoveRequiredSkill Int SkillId -- ^ station-id skill-id
-    | SkillCreate SkillId String          -- ^ skill-id name
+    | SkillCreate String                  -- ^ name
     | SkillRename SkillId String          -- ^ skill-id new-name
     | SkillDelete SkillId                 -- ^ skill-id (safe delete)
     | SkillForceDelete SkillId            -- ^ skill-id (remove refs + delete)
@@ -198,8 +199,7 @@ parseCommand input = case shellWords input of
     ["station", "remove-required-skill", sid, skid]
         | all isDigit' [sid, skid] -> StationRemoveRequiredSkill (read sid) (SkillId (read skid))
 
-    ["skill", "create", sid, name]
-        | isDigit' sid -> SkillCreate (SkillId (read sid)) name
+    ["skill", "create", name] -> SkillCreate name
     ["skill", "rename", sid, name]
         | isDigit' sid -> SkillRename (SkillId (read sid)) name
     ["skill", "delete", sid]
@@ -414,31 +414,3 @@ parseAddWorker (name : rest) =
     in if isDigit' lastTok && not (null initToks)
        then WhatIfAddWorker name initToks (Just (read lastTok))
        else WhatIfAddWorker name rest Nothing
-
-shellWords :: String -> [String]
-shellWords = go [] . dropWhile (== ' ')
-  where
-    go acc [] = reverse acc
-    go acc (q:cs) | q == '"' || q == '\'' = let (tok, rest) = quoted q cs
-                                            in go (tok : acc) (dropWhile (== ' ') rest)
-    go acc cs = let (tok, rest) = break (== ' ') cs
-                in go (tok : acc) (dropWhile (== ' ') rest)
-
-    quoted q = collect []
-      where
-        collect buf []            = (reverse buf, [])
-        collect buf ('\\':c:rest) = collect (c : buf) rest
-        collect buf (c:rest)
-            | c == q    = (reverse buf, rest)
-            | otherwise = collect (c : buf) rest
-
-shellQuote :: String -> String
-shellQuote s
-    | null s                 = "\"\""
-    | not (any needsQuoting s) = s
-    | otherwise              = "\"" ++ concatMap esc s ++ "\""
-  where
-    needsQuoting c = c == ' ' || c == '"' || c == '\'' || c == '\\'
-    esc '"'  = "\\\""
-    esc '\\' = "\\\\"
-    esc c    = [c]

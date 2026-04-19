@@ -42,7 +42,7 @@ import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
 import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
 import Server.Execute (ExecuteEnv(..), executeCommandText)
-import CLI.Commands (shellQuote)
+import Utils (shellQuote)
 
 -- | Publish a command event from a REST handler.
 logRest :: TopicBus CommandEvent -> User -> String -> Handler ()
@@ -349,7 +349,7 @@ handleGetConfig repo = liftIO $ SCfg.listConfigParams repo
 handleCreateSkill :: TopicBus CommandEvent -> Repository -> User -> CreateSkillReq -> Handler NoContent
 handleCreateSkill cmdBus repo user req = do
     requireAdmin user
-    result <- liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
+    result <- liftIO $ SW.addSkill repo (csrName req) (csrDescription req)
     case result of
         Left err -> throwApiError (Conflict err)
         Right () -> do

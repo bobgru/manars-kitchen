@@ -468,11 +468,11 @@ logRpcBus cmdBus cmd = liftIO $ publishCommand cmdBus RPC "rpc" cmd
 
 rpcCreateSkill :: TopicBus CommandEvent -> Repository -> CreateSkillReq -> Handler RpcOk
 rpcCreateSkill cmdBus repo req = do
-    result <- liftIO $ SW.addSkill repo (SkillId (csrId req)) (csrName req) (csrDescription req)
+    result <- liftIO $ SW.addSkill repo (csrName req) (csrDescription req)
     case result of
         Left err -> throwApiError (Conflict err)
         Right () -> do
-            let cmd = "skill create " ++ show (csrId req) ++ " " ++ shellQuote (csrName req)
+            let cmd = "skill create " ++ shellQuote (csrName req)
             liftIO $ publishCommand cmdBus RPC "rpc" cmd
             pure RpcOk
 

@@ -302,7 +302,7 @@ applyImport repo dat = do
     pure msgs
   where
     importSkill (ExportSkill sid nm desc) = do
-        _ <- repoCreateSkill repo (SkillId sid) nm desc
+        _ <- repoCreateSkill repo nm desc
         pure ("Imported skill " ++ show sid ++ ": " ++ nm)
 
     importStation (ExportStation sid nm reqSkills mSh mEh) = do

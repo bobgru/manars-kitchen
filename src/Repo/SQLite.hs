@@ -39,6 +39,7 @@ import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..
 import Repo.Schema (initSchema)
 import Repo.Serialize
 import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
+import Utils (shellQuote)
 
 -- | Create a Repository backed by a SQLite database at the given path.
 -- Creates the schema if it doesn't exist.
@@ -175,16 +176,16 @@ toUser i n h r w = User
 -- Skills (entity CRUD — preserves name/description)
 -- =====================================================================
 
-sqlCreateSkill :: Connection -> SkillId -> String -> String -> IO (Either String ())
-sqlCreateSkill conn (SkillId sid) name desc = do
-    existing <- query conn "SELECT name FROM skills WHERE id = ?" (Only sid) :: IO [[String]]
+sqlCreateSkill :: Connection -> String -> String -> IO (Either String ())
+sqlCreateSkill conn name desc = do
+    existing <- query conn "SELECT name FROM skills WHERE name = ?" (Only name) :: IO [[String]]
     case existing of
-        ([existingName]:_) -> return $ Left $
-            "Skill " ++ show sid ++ " already exists (\"" ++ existingName ++ "\"). Use 'skill rename " ++ show sid ++ " <new-name>' to rename."
+        [_]:_ -> return $ Left $
+            "Skill " ++ name ++ " already exists. Use 'skill rename " ++ shellQuote name ++ " <new-name>' to rename."
         _ -> do
             execute conn
-                "INSERT INTO skills (id, name, description) VALUES (?, ?, ?)"
-                (sid, name, desc)
+                "INSERT INTO skills (name, description) VALUES (?, ?)"
+                (name, desc)
             return $ Right ()
 
 sqlDeleteSkill :: Connection -> SkillId -> IO ()

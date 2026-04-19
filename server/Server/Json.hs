@@ -536,17 +536,16 @@ instance FromJSON AuditEntry where
 -- -----------------------------------------------------------------
 
 data CreateSkillReq = CreateSkillReq
-    { csrId          :: !Int
-    , csrName        :: !String
+    { csrName        :: !String
     , csrDescription :: !String
     } deriving (Show)
 
 instance ToJSON CreateSkillReq where
-    toJSON r = object ["id" .= csrId r, "name" .= csrName r, "description" .= csrDescription r]
+    toJSON r = object ["name" .= csrName r, "description" .= csrDescription r]
 
 instance FromJSON CreateSkillReq where
     parseJSON = withObject "CreateSkillReq" $ \v ->
-        CreateSkillReq <$> v .: "id" <*> v .: "name" <*> v .: "description"
+        CreateSkillReq <$> v .: "name" <*> v .: "description"
 
 data RenameSkillReq = RenameSkillReq
     { rsrName :: !String

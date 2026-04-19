@@ -67,6 +67,7 @@ import CLI.Resolve
     ( EntityKind(..), EntityRef(..), SessionContext
     , emptyContext, resolveInput, lookupByName, entityKindName
     )
+import Utils (shellQuote)
 
 -- | Tracks hint session with persistence metadata.
 data HintState = HintState
@@ -1182,11 +1183,11 @@ handleCommand st cmd = case cmd of
         SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.delete skid current)
         putStrLn ("Station " ++ show sid ++ " no longer requires " ++ show skid)
 
-    SkillCreate sid name -> requireAdmin st $ do
-        result <- SW.addSkill (asRepo st) sid name ""
+    SkillCreate name -> requireAdmin st $ do
+        result <- SW.addSkill (asRepo st) name ""
         case result of
             Left err -> putStrLn $ "Error: " ++ err
-            Right () -> putStrLn ("Created " ++ show sid ++ " (" ++ name ++ ")")
+            Right () -> putStrLn $ "Created " ++ shellQuote name
 
     SkillRename sid name -> requireAdmin st $ do
         repoRenameSkill (asRepo st) sid name
