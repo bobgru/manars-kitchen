@@ -26,6 +26,8 @@ import Data.List (sortBy, intercalate, nub, sort)
 import Data.Ord (comparing)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time
     ( Day, DayOfWeek(..), TimeOfDay(..)
     , formatTime, defaultTimeLocale, dayOfWeek
@@ -513,9 +515,9 @@ showSkillSet s
 
 displaySkillView :: SkillId -> Skill -> SkillContext -> WorkerContext
                  -> Map.Map WorkerId String -> Map.Map StationId String
-                 -> Map.Map SkillId String -> String
+                 -> Map.Map SkillId Text -> String
 displaySkillView sid sk sctx wctx workerNames stationNames skillNames =
-    let namedSkill skid = Map.findWithDefault (showSkill skid) skid skillNames
+    let namedSkill skid = Map.findWithDefault (T.pack $ showSkill skid) skid skillNames
         namedWorker wid = Map.findWithDefault (showWorker wid) wid workerNames
         namedStation stid = Map.findWithDefault (showStation stid) stid stationNames
         workers = [ (wid, namedWorker wid)
@@ -535,19 +537,19 @@ displaySkillView sid sk sctx wctx workerNames stationNames skillNames =
                         | (wid, skills) <- Map.toList (wcCrossTraining wctx)
                         , Set.member sid skills ]
     in unlines $ concat
-        [ [namedSkill sid ++ " (" ++ show sid ++ ")"]
-        , if null (skillDescription sk) then []
-          else ["  Description: " ++ skillDescription sk]
+        [ [T.unpack (namedSkill sid) ++ " (" ++ show sid ++ ")"]
+        , if T.null (skillDescription sk) then []
+          else ["  Description: " ++ T.unpack (skillDescription sk)]
         , ["  Workers: " ++ if null workers then "(none)"
            else intercalate ", " [name | (_, name) <- workers]]
         , ["  Stations: " ++ if null stations then "(none)"
            else intercalate ", " [name | (_, name) <- stations]]
         , if null implies then []
-          else ["  Implies: " ++ intercalate ", " [name | (_, name) <- implies]]
+          else ["  Implies: " ++ intercalate ", " [T.unpack name | (_, name) <- implies]]
         , if null impliedBy then []
-          else ["  Implied by: " ++ intercalate ", " [name | (_, name) <- impliedBy]]
+          else ["  Implied by: " ++ intercalate ", " [T.unpack name | (_, name) <- impliedBy]]
         , if Set.null eff then []
-          else ["  Effective skills: " ++ intercalate ", " [namedSkill s' | s' <- Set.toList eff]]
+          else ["  Effective skills: " ++ intercalate ", " [T.unpack (namedSkill s') | s' <- Set.toList eff]]
         , if null crossTraining then []
           else ["  Cross-training: " ++ intercalate ", " [name | (_, name) <- crossTraining]]
         ]

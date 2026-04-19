@@ -11,6 +11,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (toJSON, encode)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Data.Text as T
 import Data.Time (Day)
 import Servant
 
@@ -53,7 +54,7 @@ lookupSkillName :: Repository -> SkillId -> IO String
 lookupSkillName repo sid = do
     skills <- repoListSkills repo
     case lookup sid skills of
-        Just sk -> return (skillName sk)
+        Just sk -> return (T.unpack (skillName sk))
         Nothing -> let SkillId i = sid in return (show i)
 
 -- | Look up a station name by ID; returns the ID as a string if not found.

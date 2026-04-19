@@ -23,6 +23,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text (Text)
 import Test.Hspec
 import Test.QuickCheck
 
@@ -38,8 +39,8 @@ import Domain.Schedule (assign, bySlot)
 -- | A skill has a name and description. Further attributes may be
 -- added later.
 data Skill = Skill
-    { skillName        :: !String
-    , skillDescription :: !String
+    { skillName        :: !Text
+    , skillDescription :: !Text
     } deriving (Eq, Ord, Show, Read)
 
 -- | Reference data for skill-based reasoning.

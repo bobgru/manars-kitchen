@@ -54,13 +54,14 @@ module Service.Worker
 import Data.List (nub, sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-
+import qualified Data.Text as T
 import Data.Time (DayOfWeek(..))
-import Domain.Types (WorkerId(..), StationId(..), SkillId, DiffTime)
-import Domain.Skill (Skill(..), SkillContext(..))
-import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
-import Domain.Pin (PinnedAssignment(..))
+
 import Auth.Types (User(..), Username(..))
+import Domain.Pin (PinnedAssignment(..))
+import Domain.Skill (Skill(..), SkillContext(..))
+import Domain.Types (WorkerId(..), StationId(..), SkillId, DiffTime)
+import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Repo.Types (Repository(..))
 
 -- -----------------------------------------------------------------
@@ -133,7 +134,7 @@ checkSkillReferences repo sid = do
     users <- repoListUsers repo
     stationPairs <- repoListStations repo
     let skillNameMap = Map.fromList [(s, skillName sk) | (s, sk) <- skills]
-        lookupSkill s = Map.findWithDefault (show s) s skillNameMap
+        lookupSkill s = Map.findWithDefault (T.pack $ show s) s skillNameMap
         workerNameMap = Map.fromList
             [(userWorkerId u, let Username n = userName u in n) | u <- users]
         lookupWorker w = Map.findWithDefault (show w) w workerNameMap
@@ -142,8 +143,8 @@ checkSkillReferences repo sid = do
         workers = [(w, lookupWorker w) | (w, sks) <- Map.toList (scWorkerSkills ctx), Set.member sid sks]
         stations = [(s, lookupStation s) | (s, sks) <- Map.toList (scStationRequires ctx), Set.member sid sks]
         crossTraining = [(w, lookupWorker w) | (w, sks) <- Map.toList (wcCrossTraining wCtx), Set.member sid sks]
-        impliedBy = [(s, lookupSkill s) | (s, imps) <- Map.toList (scSkillImplies ctx), Set.member sid imps, s /= sid]
-        implies = [(i, lookupSkill i) | i <- Set.toList (Map.findWithDefault Set.empty sid (scSkillImplies ctx))]
+        impliedBy = [(s, T.unpack (lookupSkill s)) | (s, imps) <- Map.toList (scSkillImplies ctx), Set.member sid imps, s /= sid]
+        implies = [(i, T.unpack (lookupSkill i)) | i <- Set.toList (Map.findWithDefault Set.empty sid (scSkillImplies ctx))]
     return SkillReferences
         { srWorkers       = workers
         , srStations      = stations

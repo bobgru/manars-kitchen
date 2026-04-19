@@ -12,6 +12,7 @@ import Data.Char (toLower, isDigit)
 import Data.List (find, isPrefixOf)
 import Data.IORef
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
 import Repo.Types (Repository(..))
 import CLI.Commands (shellWords)
 import Auth.Types (User(..), Username(..))
@@ -163,7 +164,7 @@ lookupByName repo ESkill name = do
     skills <- repoListSkills repo
     let matches = [ sid
                   | (SkillId sid, sk) <- skills
-                  , map toLower (skillName sk) == map toLower name
+                  , map toLower (T.unpack $ skillName sk) == map toLower name
                   ]
     case matches of
         [sid] -> return (Right (show sid))

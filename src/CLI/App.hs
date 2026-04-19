@@ -17,6 +17,7 @@ import Data.IORef
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Text as T
 import Data.Time
     ( Day, DayOfWeek(..), TimeOfDay(..), parseTimeM, defaultTimeLocale
     , addDays, fromGregorian, toGregorian, gregorianMonthLength, dayOfWeek
@@ -341,7 +342,7 @@ handleCommand st cmd = case cmd of
                         [ (StationId sid, sname)
                         | (StationId sid, sname) <- stations ]
                     skillNames = Map.fromList
-                        [ (sid, skillName sk)
+                        [ (sid, T.unpack (skillName sk))
                         | (sid, sk) <- skills ]
                 putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
@@ -721,7 +722,7 @@ handleCommand st cmd = case cmd of
                                 [ (StationId sid, sname)
                                 | (StationId sid, sname) <- stations ]
                             skillNames = Map.fromList
-                                [ (sid, skillName sk)
+                                [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
                         putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
@@ -844,7 +845,7 @@ handleCommand st cmd = case cmd of
                                 [ (StationId sid, sname)
                                 | (StationId sid, sname) <- stations ]
                             skillNames = Map.fromList
-                                [ (sid, skillName sk)
+                                [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
                         putStr (displayDiagnosis workerNames stationNames skillNames result diags)
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
@@ -1221,7 +1222,7 @@ handleCommand st cmd = case cmd of
         if null skills
             then putStrLn "  (no skills)"
             else mapM_ (\(sid, sk) ->
-                putStrLn ("  " ++ show sid ++ ": " ++ Domain.Skill.skillName sk)
+                putStrLn ("  " ++ show sid ++ ": " ++ T.unpack (skillName sk))
                 ) skills
 
     SkillImplication a b -> requireAdmin st $ do
@@ -1876,7 +1877,7 @@ loadNameMaps st = do
             [ (StationId sid, sname)
             | (StationId sid, sname) <- stations ]
         skillNames = Map.fromList
-            [ (sid, skillName sk)
+            [ (sid, T.unpack (skillName sk))
             | (sid, sk) <- skills ]
     return (workerNames, stationNames, skillNames)
 

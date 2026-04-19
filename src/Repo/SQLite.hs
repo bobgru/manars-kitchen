@@ -4,41 +4,41 @@ module Repo.SQLite
     ( mkSQLiteRepo
     ) where
 
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.String (fromString)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Time (Day, UTCTime)
+import Data.Time.Format (parseTimeM, defaultTimeLocale)
 import Database.SQLite.Simple
+import Numeric (showHex)
+import System.Random (randomRIO)
 
+import Audit.CommandMeta (classify, CommandMeta(..))
 import Auth.Types (UserId(..), Username(..), Role(..), User(..))
+import Data.Time (DayOfWeek(..))
+import Domain.Absence
+    ( AbsenceType(..)
+    , AbsenceRequest(..), AbsenceContext(..)
+    )
+import Domain.Hint (Hint, encodeHints, decodeHints)
+import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodType)
+import Domain.Pin (PinnedAssignment(..), PinSpec(..))
+import Domain.SchedulerConfig (SchedulerConfig, configToMap, configFromMap)
+import Domain.Shift (ShiftDef(..))
+import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Types
     ( WorkerId(..), StationId(..), SkillId(..)
     , AbsenceId(..), AbsenceTypeId(..)
     , Slot(..), Assignment(..), Schedule(..)
     )
-import Data.Time (DayOfWeek(..))
-import Domain.Shift (ShiftDef(..))
-import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
-import Domain.SchedulerConfig (SchedulerConfig, configToMap, configFromMap)
-import Domain.Pin (PinnedAssignment(..), PinSpec(..))
-import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodType)
-import Domain.Absence
-    ( AbsenceType(..)
-    , AbsenceRequest(..), AbsenceContext(..)
-    )
-import Data.Time (Day)
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
-import Domain.Hint (Hint, encodeHints, decodeHints)
-import qualified Data.ByteString.Lazy as BL
-import Data.Text.Encoding (encodeUtf8, decodeUtf8)
-import qualified Data.Text as T
-import Data.Time (UTCTime)
-import Data.Time.Format (parseTimeM, defaultTimeLocale)
-import Numeric (showHex)
-import System.Random (randomRIO)
 import Repo.Schema (initSchema)
 import Repo.Serialize
-import Audit.CommandMeta (classify, CommandMeta(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
 
 -- | Create a Repository backed by a SQLite database at the given path.
 -- Creates the schema if it doesn't exist.
@@ -198,7 +198,7 @@ sqlDeleteSkill conn (SkillId sid) = do
 sqlListSkills :: Connection -> IO [(SkillId, Skill)]
 sqlListSkills conn = do
     rows <- query_ conn "SELECT id, name, description FROM skills ORDER BY id"
-        :: IO [(Int, String, String)]
+        :: IO [(Int, Text, Text)]
     return [(SkillId sid, Skill name desc) | (sid, name, desc) <- rows]
 
 sqlRenameSkill :: Connection -> SkillId -> String -> IO ()

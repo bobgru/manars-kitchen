@@ -22,6 +22,7 @@ import Data.Aeson.Encode.Pretty (encodePretty)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified Data.Text as T
 import Data.Time (Day, DayOfWeek(..), TimeOfDay(..), formatTime, defaultTimeLocale, parseTimeM)
 import GHC.Generics (Generic)
 
@@ -211,7 +212,7 @@ gatherExport :: Repository -> Maybe String -> IO ExportData
 gatherExport repo mSchedName = do
     -- Skills
     skillList <- repoListSkills repo
-    let expSk = [ ExportSkill sid nm desc
+    let expSk = [ ExportSkill sid (T.unpack nm) (T.unpack desc)
                  | (SkillId sid, Skill nm desc) <- skillList ]
 
     -- Skill context (for implications, station requirements, worker skills)

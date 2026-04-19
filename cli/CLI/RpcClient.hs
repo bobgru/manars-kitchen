@@ -8,6 +8,7 @@ module CLI.RpcClient
     , dispatchCommand
     ) where
 
+import qualified Data.Text as T
 import Data.Time (Day, fromGregorian, toGregorian, gregorianMonthLength)
 import Data.Time.Clock (getCurrentTime, utctDay)
 import Network.HTTP.Client (newManager, defaultManagerSettings)
@@ -326,7 +327,7 @@ dispatchCommand env cmd = case cmd of
         result <- run env (cListSkills RpcEmpty)
         case result of
             Right skills -> mapM_ (\(SkillId i, sk) ->
-                putStrLn ("  " ++ show i ++ ": " ++ skillName sk)) skills
+                putStrLn ("  " ++ show i ++ ": " ++ T.unpack (skillName sk))) skills
             Left err -> putStrLn err
 
     SkillImplication _a _b ->
