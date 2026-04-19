@@ -89,7 +89,7 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Skills (entity CRUD)
       -- ---------------------------------------------------------------
-    , repoCreateSkill    :: SkillId -> String -> String -> IO (Either String ())
+    , repoCreateSkill    :: String -> String -> IO (Either String ())
       -- ^ id, name, description; Left if skill ID already exists
     , repoDeleteSkill    :: SkillId -> IO ()
     , repoListSkills     :: IO [(SkillId, Skill)]

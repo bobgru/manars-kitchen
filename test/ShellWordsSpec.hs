@@ -51,7 +51,7 @@ spec = do
             parseCommand "skill rename 1 \"pizza oven\"" `shouldBe` SkillRename (SkillId 1) "pizza oven"
 
         it "parses skill create with quoted multi-word name" $
-            parseCommand "skill create 3 \"hot grill\"" `shouldBe` SkillCreate (SkillId 3) "hot grill"
+            parseCommand "skill create \"hot grill\"" `shouldBe` SkillCreate "hot grill"
 
         it "parses station add with quoted multi-word name" $
             parseCommand "station add 5 \"prep area\"" `shouldBe` StationAdd 5 "prep area"

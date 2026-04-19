@@ -589,7 +589,7 @@ spec = do
 
         it "generate populates schedule" $ withSeededApp $ \repo env -> do
             -- Add a skill, station, and worker so the scheduler has something to do
-            _ <- SW.addSkill repo (SkillId 1) "grill" ""
+            _ <- SW.addSkill repo "grill" ""
             SW.addStation repo (StationId 1) "grill"
             SW.grantWorkerSkill repo (WorkerId 1) (SkillId 1)
             SW.setStationRequiredSkills repo (StationId 1)
@@ -656,12 +656,12 @@ spec = do
 
     describe "Skill CRUD" $ do
         it "create and list skill" $ withTestApp $ \env -> do
-            Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "Grill skills")) env
             Right skills <- runClientM listSkillsC env
             length skills `shouldBe` 1
 
         it "create and delete skill" $ withTestApp $ \env -> do
-            Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "Grill skills")) env
             Right _ <- runClientM (deleteSkillC (SkillId 1)) env
             Right skills <- runClientM listSkillsC env
             length skills `shouldBe` 0
@@ -695,7 +695,7 @@ spec = do
             pure ()
 
         it "grant and revoke worker skill" $ withSeededApp $ \repo env -> do
-            _ <- SW.addSkill repo (SkillId 1) "grill" ""
+            _ <- SW.addSkill repo "grill" ""
             Right _ <- runClientM (grantWorkerSkillC 1 (SkillId 1)) env
             Right _ <- runClientM (revokeWorkerSkillC 1 (SkillId 1)) env
             pure ()
@@ -740,13 +740,13 @@ spec = do
 
     describe "RPC Skill CRUD" $ do
         it "create and list skills via RPC" $ withTestApp $ \env -> do
-            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq "grill" "Grill skills")) env
             Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
             length skills `shouldBe` 1
 
         it "create rejects duplicate skill ID" $ withTestApp $ \env -> do
-            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
-            result <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "pastry" "Pastry skills")) env
+            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq "grill" "Grill skills")) env
+            result <- runClientM (rpcCreateSkillC (CreateSkillReq "pastry" "Pastry skills")) env
             case result of
                 Left (FailureResponse _ resp) ->
                     statusCode (responseStatusCode resp) `shouldBe` 409
@@ -754,7 +754,7 @@ spec = do
                 Right _ -> expectationFailure "expected error for duplicate skill ID"
 
         it "rename skill via RPC" $ withTestApp $ \env -> do
-            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+            Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq "grill" "Grill skills")) env
             Right _ <- runClientM (_rpcRenameSkillC 1 (RenameSkillReq "broiler")) env
             Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
             length skills `shouldBe` 1
@@ -799,7 +799,7 @@ spec = do
     describe "CLI remote mode" $ do
         it "skill create via dispatchCommand creates server-side skill" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (SkillCreate (SkillId 1) "grill")
+                dispatchCommand rpc (SkillCreate "grill")
                 Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
                 length skills `shouldBe` 1
 
@@ -826,14 +826,14 @@ spec = do
 
         it "skill rename via dispatchCommand renames server-side skill" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (SkillCreate (SkillId 1) "grill")
+                dispatchCommand rpc (SkillCreate "grill")
                 dispatchCommand rpc (SkillRename (SkillId 1) "broiler")
                 Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
                 length skills `shouldBe` 1
 
         it "RPC commands produce audit entries with source=rpc" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (SkillCreate (SkillId 1) "grill")
+                dispatchCommand rpc (SkillCreate "grill")
                 dispatchCommand rpc (StationAdd 1 "kitchen")
                 Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
@@ -841,7 +841,7 @@ spec = do
 
         it "REST commands produce audit entries with source=gui" $
             withTestApp $ \env -> do
-                Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "Grill skills")) env
+                Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "Grill skills")) env
                 Right entries <- runClientM getAuditLogC env
                 let guiEntries = filter (\e -> aeSource e == "gui") entries
                 length guiEntries `shouldSatisfy` (>= 1)
@@ -954,7 +954,7 @@ spec = do
                 token <- loginAs env "admin" "pass"
                 aEnv <- mkAuthEnv token port
                 -- Admin-only: create skill
-                Right _ <- runClientM (createSkillC (CreateSkillReq 1 "grill" "")) aEnv
+                Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "")) aEnv
                 -- Admin-only: audit log
                 Right _ <- runClientM getAuditLogC aEnv
                 -- Admin-only: list users
@@ -968,7 +968,7 @@ spec = do
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
                 -- Try admin-only endpoints
-                result1 <- runClientM (createSkillC (CreateSkillReq 1 "grill" "")) wEnv
+                result1 <- runClientM (createSkillC (CreateSkillReq "grill" "")) wEnv
                 result1 `shouldFailWith` 403
                 result2 <- runClientM getAuditLogC wEnv
                 result2 `shouldFailWith` 403
@@ -1137,7 +1137,7 @@ spec = do
         it "streams GUI events to authenticated client" $
             withServer $ \repo port -> do
                 _ <- register repo "admin" "password" Admin (WorkerId 1)
-                _ <- SW.addSkill repo (SkillId 1) "grill" ""
+                _ <- SW.addSkill repo "grill" ""
                 pEnv <- mkPlainEnv port
                 token <- loginAs pEnv "admin" "password"
                 aEnv <- mkAuthEnv token port

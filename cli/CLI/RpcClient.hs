@@ -311,8 +311,8 @@ dispatchCommand env cmd = case cmd of
         putStrLn "Direct unassignment is not supported in remote mode."
 
     -- Skills
-    SkillCreate (SkillId sid) name -> requireAdmin env $
-        runOk env (cCreateSkill (CreateSkillReq sid name "")) "Skill created."
+    SkillCreate name -> requireAdmin env $
+        runOk env (cCreateSkill (CreateSkillReq name "")) "Skill created."
 
     SkillRename (SkillId sid) name -> requireAdmin env $
         runOk env (cRenameSkill sid (RenameSkillReq name)) ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
