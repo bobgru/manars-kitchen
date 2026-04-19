@@ -87,8 +87,8 @@ getConfigC       :: ClientM [(String, Double)]
 createSkillC     :: CreateSkillReq -> ClientM NoContent
 deleteSkillC     :: SkillId -> ClientM NoContent
 _forceDeleteSkillC :: SkillId -> ClientM NoContent
-_renameSkillC    :: SkillId -> RenameSkillReq -> ClientM NoContent
-_listImplicationsC :: ClientM (Map.Map Int [Int])
+renameSkillC    :: SkillId -> RenameSkillReq -> ClientM NoContent
+_listImplicationsC :: ClientM (Map.Map SkillId [SkillId])
 _addImplicationC :: SkillId -> AddImplicationReq -> ClientM NoContent
 _removeImplicationC :: SkillId -> SkillId -> ClientM NoContent
 
@@ -167,7 +167,6 @@ _applyHintsC :: HintSessionRef -> ClientM NoContent
 _rebaseHintsC :: HintSessionRef -> ClientM RebaseResultResp
 
 logoutC
-    :<|> listSkillsC
     :<|> listStationsC
     :<|> listShiftsC
     :<|> listSchedulesC
@@ -188,10 +187,11 @@ logoutC
     :<|> rejectAbsenceC
     :<|> getConfigC
     -- New endpoints
+    :<|> listSkillsC
     :<|> createSkillC
     :<|> deleteSkillC
     :<|> _forceDeleteSkillC
-    :<|> _renameSkillC
+    :<|> renameSkillC
     :<|> _listImplicationsC
     :<|> _addImplicationC
     :<|> _removeImplicationC
@@ -1163,7 +1163,7 @@ spec = do
                 threadDelay 500000
 
                 -- Rename skill via REST — triggers GUI event
-                Right _ <- runClientM (_renameSkillC (SkillId 1) (RenameSkillReq "broiler")) aEnv
+                Right _ <- runClientM (renameSkillC (SkillId 1) (RenameSkillReq "broiler")) aEnv
 
                 -- Wait for the SSE event to arrive
                 threadDelay 1000000

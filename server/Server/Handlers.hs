@@ -78,7 +78,6 @@ server execEnv cmdBus repo user =
     -- Logout
          handleLogout repo user
     -- Original endpoints
-    :<|> handleListSkills repo
     :<|> handleListStations repo
     :<|> handleListShifts repo
     :<|> handleListSchedules repo
@@ -99,6 +98,7 @@ server execEnv cmdBus repo user =
     :<|> handleRejectAbsence cmdBus repo user
     :<|> handleGetConfig repo
     -- Skill CRUD
+    :<|> handleListSkills repo
     :<|> handleCreateSkill cmdBus repo user
     :<|> handleDeleteSkill cmdBus repo user
     :<|> handleForceDeleteSkill execEnv repo user
@@ -383,12 +383,8 @@ handleRenameSkill cmdBus repo user sid req = do
     logRest cmdBus user ("skill rename " ++ show sid ++ " " ++ shellQuote (rsrName req))
     pure NoContent
 
-handleListImplications :: Repository -> Handler (Map.Map Int [Int])
-handleListImplications repo = do
-    impl <- liftIO $ SW.listSkillImplications repo
-    let toInt (SkillId i) = i
-    pure $ Map.fromList
-        [ (toInt k, map toInt vs) | (k, vs) <- Map.toList impl ]
+handleListImplications :: Repository -> Handler (Map.Map SkillId [SkillId])
+handleListImplications repo = liftIO $ SW.listSkillImplications repo
 
 handleAddImplication :: TopicBus CommandEvent -> Repository -> User -> SkillId -> AddImplicationReq -> Handler NoContent
 handleAddImplication cmdBus repo user sid req = do

@@ -299,21 +299,9 @@ statements =
 -- column already exists (e.g., on a freshly created database).
 migrations :: [Query]
 migrations =
-    [ "ALTER TABLE drafts ADD COLUMN last_validated_at TEXT NOT NULL DEFAULT (datetime('now'))"
-    , "ALTER TABLE worker_hours RENAME COLUMN max_weekly_seconds TO max_period_seconds"
-    -- Structured audit log columns (idempotent via tryExec)
-    , "ALTER TABLE audit_log ADD COLUMN entity_type TEXT"
-    , "ALTER TABLE audit_log ADD COLUMN operation TEXT"
-    , "ALTER TABLE audit_log ADD COLUMN entity_id INTEGER"
-    , "ALTER TABLE audit_log ADD COLUMN target_id INTEGER"
-    , "ALTER TABLE audit_log ADD COLUMN date_from TEXT"
-    , "ALTER TABLE audit_log ADD COLUMN date_to TEXT"
-    , "ALTER TABLE audit_log ADD COLUMN is_mutation INTEGER NOT NULL DEFAULT 1"
-    , "ALTER TABLE audit_log ADD COLUMN params TEXT"
-    , "ALTER TABLE audit_log ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'"
+    [
     -- Session auth token
-    , "ALTER TABLE sessions ADD COLUMN token TEXT NOT NULL DEFAULT ''"
-    , "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token)"
+      "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token)"
     -- Session idle timeout default
     , "INSERT OR IGNORE INTO scheduler_config (key, value) VALUES ('session_idle_timeout_minutes', 30)"
     ]

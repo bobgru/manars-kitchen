@@ -58,13 +58,13 @@ module Server.Json
     ) where
 
 import Data.Aeson
-    ( ToJSON(..), FromJSON(..), (.=), (.:), (.:?)
+    ( ToJSONKey(..), ToJSON(..), FromJSONKey (..), FromJSON(..), (.=), (.:), (.:?)
     , object, withObject, withText
     )
 import qualified Data.Aeson.Types
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Text (unpack)
+import Data.Text (pack, unpack)
 import Data.Time
     ( Day, DayOfWeek(..), TimeOfDay(..)
     , formatTime, defaultTimeLocale, parseTimeM
@@ -103,8 +103,17 @@ instance FromJSON StationId where
 instance ToJSON SkillId where
     toJSON (SkillId i) = toJSON i
 
+instance ToJSONKey SkillId where
+    toJSONKey = Data.Aeson.Types.toJSONKeyText (\(SkillId i) -> pack (show i)) 
+
 instance FromJSON SkillId where
     parseJSON v = SkillId <$> parseJSON v
+
+instance FromJSONKey SkillId where
+    fromJSONKey = Data.Aeson.Types.FromJSONKeyTextParser $ \t -> do
+        case reads (unpack t) of
+            [(i, "")] -> pure (SkillId i)
+            _         -> fail("invalid SkillId key: " ++ unpack t)
 
 instance ToJSON AbsenceId where
     toJSON (AbsenceId i) = toJSON i

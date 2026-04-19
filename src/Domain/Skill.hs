@@ -89,12 +89,12 @@ effectiveSkills :: SkillContext -> Set SkillId -> Set SkillId
 effectiveSkills ctx = close
   where
     close skills =
-        let expanded = Set.foldl' (\acc sk ->
-                Set.union acc (Map.findWithDefault Set.empty sk (scSkillImplies ctx)))
-                skills skills
-        in if expanded == skills
-           then skills
-           else close expanded
+      let mergeSkills acc sk =
+            Set.union acc (Map.findWithDefault Set.empty sk (scSkillImplies ctx))
+          expanded = Set.foldl' mergeSkills skills skills
+      in if expanded == skills
+         then skills
+         else close expanded
 
 -- | All effective skills for a given worker.
 workerEffectiveSkills :: SkillContext -> WorkerId -> Set SkillId

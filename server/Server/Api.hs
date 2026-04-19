@@ -43,8 +43,6 @@ type RawAPI =
     -- Logout (requires auth, placed here since it's under the protected block)
          "api" :> "logout" :> PostNoContent
 
-    -- Skills (read)
-    :<|> "api" :> "skills" :> Get '[JSON] [(SkillId, Skill)]
     -- Stations (read)
     :<|> "api" :> "stations" :> Get '[JSON] [(Int, String)]
     -- Shifts (read)
@@ -79,12 +77,13 @@ type RawAPI =
     -- -----------------------------------------------------------------
     -- Skill CRUD
     -- -----------------------------------------------------------------
+    :<|> "api" :> "skills" :> Get '[JSON] [(SkillId, Skill)]
     :<|> "api" :> "skills" :> ReqBody '[JSON] CreateSkillReq :> PostNoContent
     :<|> "api" :> "skills" :> Capture "id" SkillId :> DeleteNoContent
     :<|> "api" :> "skills" :> Capture "id" SkillId :> "force" :> DeleteNoContent
     :<|> "api" :> "skills" :> Capture "id" SkillId :> ReqBody '[JSON] RenameSkillReq :> PutNoContent
     -- Skill implications
-    :<|> "api" :> "skills" :> "implications" :> Get '[JSON] (Map Int [Int])
+    :<|> "api" :> "skills" :> "implications" :> Get '[JSON] (Map SkillId [SkillId])
     :<|> "api" :> "skills" :> Capture "id" SkillId :> "implications"
          :> ReqBody '[JSON] AddImplicationReq :> PostNoContent
     :<|> "api" :> "skills" :> Capture "id" SkillId :> "implications"
