@@ -1,18 +1,8 @@
-Imports are broken unless you start from a clean database. The entity IDs in the import data
-need to be mapped to the IDs assigned when created. This became a problem when I removed the
-ID as an argument for a new skill, relying on the autoincrementing ID in the database.
-
 Import doesn't trigger refresh of GUI.
 
 Import doesn't cause echo of commands in the terminal pane, but maybe it shouldn't.
 
-Don't ask for skill ID in the GUI when creating a new skill.
-
 Force-delete doesn't echo anything to the terminal pane. It should echo all the commands from the expansion.
-
-Use Text everywhere instead of String.
-
-Use newtypes for entity IDs instead of Ints.
 
 Should cmOperation be an enum instead of a String?
 
