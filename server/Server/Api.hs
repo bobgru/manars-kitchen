@@ -14,6 +14,7 @@ module Server.Api
 
 import Data.Map.Strict (Map)
 import Data.Proxy (Proxy(..))
+import Data.Text (Text)
 import Data.Time (Day)
 import Servant.API
 import Servant.Server.Experimental.Auth (AuthServerData)
@@ -44,11 +45,11 @@ type RawAPI =
          "api" :> "logout" :> PostNoContent
 
     -- Stations (read)
-    :<|> "api" :> "stations" :> Get '[JSON] [(Int, String)]
+    :<|> "api" :> "stations" :> Get '[JSON] [(Int, Text)]
     -- Shifts (read)
     :<|> "api" :> "shifts" :> Get '[JSON] [ShiftDef]
     -- Schedules
-    :<|> "api" :> "schedules" :> Get '[JSON] [String]
+    :<|> "api" :> "schedules" :> Get '[JSON] [Text]
     :<|> "api" :> "schedules" :> Capture "name" String :> Get '[JSON] Schedule
     :<|> "api" :> "schedules" :> Capture "name" String :> DeleteNoContent
     -- Drafts
@@ -77,17 +78,17 @@ type RawAPI =
     -- -----------------------------------------------------------------
     -- Skill CRUD
     -- -----------------------------------------------------------------
-    :<|> "api" :> "skills" :> Get '[JSON] [(SkillId, Skill)]
+    :<|> "api" :> "skills" :> Get '[JSON] [Skill]
     :<|> "api" :> "skills" :> ReqBody '[JSON] CreateSkillReq :> PostNoContent
-    :<|> "api" :> "skills" :> Capture "id" SkillId :> DeleteNoContent
-    :<|> "api" :> "skills" :> Capture "id" SkillId :> "force" :> DeleteNoContent
-    :<|> "api" :> "skills" :> Capture "id" SkillId :> ReqBody '[JSON] RenameSkillReq :> PutNoContent
+    :<|> "api" :> "skills" :> Capture "name" Text :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "name" Text :> "force" :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "name" Text :> ReqBody '[JSON] RenameSkillReq :> PutNoContent
     -- Skill implications
-    :<|> "api" :> "skills" :> "implications" :> Get '[JSON] (Map SkillId [SkillId])
-    :<|> "api" :> "skills" :> Capture "id" SkillId :> "implications"
+    :<|> "api" :> "skills" :> "implications" :> Get '[JSON] (Map Text [Text])
+    :<|> "api" :> "skills" :> Capture "name" Text :> "implications"
          :> ReqBody '[JSON] AddImplicationReq :> PostNoContent
-    :<|> "api" :> "skills" :> Capture "id" SkillId :> "implications"
-         :> Capture "impliedId" SkillId :> DeleteNoContent
+    :<|> "api" :> "skills" :> Capture "name" Text :> "implications"
+         :> Capture "impliedName" Text :> DeleteNoContent
 
     -- -----------------------------------------------------------------
     -- Station CRUD

@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module AuditSpec (spec) where
 
 import Test.Hspec
@@ -28,11 +30,11 @@ spec = do
                 cmIsMutation m `shouldBe` False
 
         describe "station commands" $ do
-            it "classifies station add with entity ID" $ do
-                let m = classify "station add 1 grill"
+            it "classifies station add" $ do
+                let m = classify "station add grill"
                 cmEntityType m `shouldBe` Just "station"
                 cmOperation m `shouldBe` Just "add"
-                cmEntityId m `shouldBe` Just 1
+                cmEntityId m `shouldBe` Nothing
                 cmIsMutation m `shouldBe` True
 
             it "classifies station require-skill with two IDs" $ do
@@ -44,10 +46,10 @@ spec = do
 
         describe "skill commands" $ do
             it "classifies skill create" $ do
-                let m = classify "skill create 4 pastry"
+                let m = classify "skill create pastry"
                 cmEntityType m `shouldBe` Just "skill"
                 cmOperation m `shouldBe` Just "create"
-                cmEntityId m `shouldBe` Just 4
+                cmEntityId m `shouldBe` Nothing
                 cmIsMutation m `shouldBe` True
 
             it "classifies skill implication with two IDs" $ do
@@ -182,8 +184,8 @@ spec = do
     -- 8.2: render round-trip tests
     describe "render" $ do
         it "round-trips station add" $ do
-            let m = classify "station add 1 grill"
-            render m `shouldBe` "station add 1"
+            let m = classify "station add grill"
+            render m `shouldBe` "station add"
 
         it "round-trips worker grant-skill" $ do
             render (classify "worker grant-skill 3 5") `shouldBe` "worker grant-skill 3 5"
@@ -228,8 +230,8 @@ spec = do
                     cmIsMutation meta `shouldBe` isMutating cmd
 
         -- Mutating commands
-        testConsistency "station add 1 grill"
-        testConsistency "skill create 4 pastry"
+        testConsistency "station add grill"
+        testConsistency "skill create pastry"
         testConsistency "worker grant-skill 3 5"
         testConsistency "worker set-hours 3 40"
         testConsistency "worker set-prefs 3 1 2 4"
@@ -273,9 +275,9 @@ spec = do
     -- 8.4: Every mutating command has non-Nothing cmEntityType
     describe "mutating commands have entity type" $ do
         let mutatingCommands =
-                [ "station add 1 grill"
+                [ "station add grill"
                 , "station remove 1"
-                , "skill create 4 pastry"
+                , "skill create pastry"
                 , "skill implication 1 2"
                 , "worker grant-skill 3 5"
                 , "worker set-hours 3 40"
@@ -313,14 +315,14 @@ spec = do
     -- 8.5: Integration test
     describe "integration: log and read structured audit entries" $ do
         it "logs a command and reads back structured fields" $ withTestRepo $ \repo -> do
-            repoLogCommand repo "admin" "skill create 4 pastry"
+            repoLogCommand repo "admin" "skill create pastry"
             entries <- repoGetAuditLog repo
             case entries of
                 [ae] -> do
-                    aeCommand ae `shouldBe` Just "skill create 4 pastry"
+                    aeCommand ae `shouldBe` Just "skill create pastry"
                     aeEntityType ae `shouldBe` Just "skill"
                     aeOperation ae `shouldBe` Just "create"
-                    aeEntityId ae `shouldBe` Just 4
+                    aeEntityId ae `shouldBe` Nothing
                     aeIsMutation ae `shouldBe` True
                     aeSource ae `shouldBe` "cli"
                 _ -> expectationFailure $

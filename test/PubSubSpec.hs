@@ -133,15 +133,15 @@ spec = do
         it "publishes a CommandEvent with correct fields" $ do
             bus <- newTopicBus
             ref <- newIORef Nothing
-            _ <- subscribe bus "skill\\.create\\..*" $ \topic event ->
+            _ <- subscribe bus "skill\\.create.*" $ \topic event ->
                 writeIORef ref (Just (topic, event))
-            publishCommand bus RPC "admin" "skill create 4 pastry"
+            publishCommand bus RPC "admin" "skill create pastry"
             result <- readIORef ref
             case result of
                 Nothing -> expectationFailure "expected event to be delivered"
                 Just (topic, event) -> do
-                    topic `shouldBe` Topic "skill.create.4"
-                    ceCommand event `shouldBe` "skill create 4 pastry"
+                    topic `shouldBe` Topic "skill.create"
+                    ceCommand event `shouldBe` "skill create pastry"
                     ceSource event `shouldBe` RPC
                     ceUsername event `shouldBe` "admin"
 

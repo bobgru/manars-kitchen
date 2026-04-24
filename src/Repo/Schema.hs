@@ -39,8 +39,8 @@ statements =
 
       -- Stations
     , "CREATE TABLE IF NOT EXISTS stations (\
-      \  id INTEGER PRIMARY KEY,\
-      \  name TEXT NOT NULL DEFAULT '',\
+      \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      \  name TEXT NOT NULL UNIQUE,\
       \  min_staff INTEGER NOT NULL DEFAULT 1,\
       \  max_staff INTEGER NOT NULL DEFAULT 1\
       \)"

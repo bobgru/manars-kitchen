@@ -44,7 +44,7 @@ import Domain.Absence
 import Domain.Diagnosis (Diagnosis(..))
 import Domain.Scheduler (Unfilled(..), UnfilledKind(..), ScheduleResult(..))
 import Domain.Hint (Hint(..), Session(..))
-import Auth.Types (User(..), UserId(..), Username(..), Role(..))
+import Auth.Types (User(..), Username(..), Role(..))
 
 -- -----------------------------------------------------------------
 -- Tabular schedule view
@@ -433,9 +433,8 @@ displayScheduleByDay sched day =
 displayUsers :: [User] -> String
 displayUsers [] = "  (no users)"
 displayUsers users = unlines
-    [ "  " ++ show uid ++ ". " ++ uname ++ " [" ++ showRole role ++ "] -> " ++ showWorker wid
-    | User { userId = UserId uid, userName = Username uname
-           , userRole = role, userWorkerId = wid } <- users ]
+    [ "  " ++ T.unpack uname ++ " [" ++ showRole role ++ "]"
+    | User { userName = Username uname, userRole = role } <- users ]
   where
     showRole Admin  = "admin"
     showRole Normal = "normal"
@@ -570,7 +569,7 @@ displayWorkerCtx ctx = unlines $ concat
       ++ [ "  " ++ showWorker wid | wid <- Set.toList (wcPrefersVariety ctx) ]
     , if Map.null (wcShiftPrefs ctx) then [] else
       ["Shift preferences:"]
-      ++ [ "  " ++ showWorker wid ++ ": " ++ intercalate ", " prefs
+      ++ [ "  " ++ showWorker wid ++ ": " ++ intercalate ", " (map T.unpack prefs)
          | (wid, prefs) <- Map.toList (wcShiftPrefs ctx) ]
     , if Set.null (wcWeekendOnly ctx) then [] else
       ["Weekend-only:"]

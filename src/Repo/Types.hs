@@ -11,6 +11,7 @@ module Repo.Types
 import Auth.Types (UserId, Role, User)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 import Data.Time (Day, UTCTime)
 import Domain.Types (WorkerId, StationId, SkillId, Schedule)
 import Domain.Shift (ShiftDef)
@@ -27,24 +28,24 @@ newtype SessionId = SessionId Int
     deriving (Eq, Ord, Show)
 
 -- | Opaque authentication token (64-character hex string).
-type Token = String
+type Token = Text
 
 -- | Metadata for a draft session.
 data DraftInfo = DraftInfo
     { diId             :: !Int
     , diDateFrom       :: !Day
     , diDateTo         :: !Day
-    , diCreatedAt      :: !String
-    , diLastValidatedAt :: !String
+    , diCreatedAt      :: !Text
+    , diLastValidatedAt :: !Text
     } deriving (Show, Eq)
 
 -- | Metadata for a calendar history commit.
 data CalendarCommit = CalendarCommit
     { ccId          :: !Int
-    , ccCommittedAt :: !String
+    , ccCommittedAt :: !Text
     , ccDateFrom    :: !Day
     , ccDateTo      :: !Day
-    , ccNote        :: !String
+    , ccNote        :: !Text
     } deriving (Show)
 
 -- | Structured audit log entry.
@@ -77,11 +78,11 @@ data Repository = Repository
     { -- ---------------------------------------------------------------
       -- Users
       -- ---------------------------------------------------------------
-      repoCreateUser     :: String -> String -> Role -> WorkerId -> IO UserId
+      repoCreateUser     :: Text -> Text -> Role -> WorkerId -> IO UserId
       -- ^ username, password hash, role, worker id
     , repoGetUser        :: UserId -> IO (Maybe User)
-    , repoGetUserByName  :: String -> IO (Maybe User)
-    , repoUpdatePassword :: UserId -> String -> IO ()
+    , repoGetUserByName  :: Text -> IO (Maybe User)
+    , repoUpdatePassword :: UserId -> Text -> IO ()
       -- ^ user id, new password hash
     , repoListUsers      :: IO [User]
     , repoDeleteUser     :: UserId -> IO ()
@@ -89,11 +90,11 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Skills (entity CRUD)
       -- ---------------------------------------------------------------
-    , repoCreateSkill    :: String -> String -> IO (Either String ())
-      -- ^ id, name, description; Left if skill ID already exists
+    , repoCreateSkill    :: Text -> Text -> IO (Either String ())
+      -- ^ name, description; Left if skill name already exists
     , repoDeleteSkill    :: SkillId -> IO ()
     , repoListSkills     :: IO [(SkillId, Skill)]
-    , repoRenameSkill    :: SkillId -> String -> IO ()
+    , repoRenameSkill    :: SkillId -> Text -> IO ()
       -- ^ id, new name
     , repoListSkillImplications :: IO [(SkillId, SkillId)]
       -- ^ all (skill_id, implies_skill_id) pairs
@@ -103,11 +104,9 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Stations (entity CRUD)
       -- ---------------------------------------------------------------
-    , repoCreateStation  :: StationId -> String -> IO ()
-      -- ^ id, name
+    , repoCreateStation  :: Text -> IO StationId
     , repoDeleteStation  :: StationId -> IO ()
-    , repoListStations   :: IO [(StationId, String)]
-      -- ^ (id, name)
+    , repoListStations   :: IO [(StationId, Text)]
 
       -- ---------------------------------------------------------------
       -- Skill context (relational data)
@@ -141,17 +140,17 @@ data Repository = Repository
       -- Shifts
       -- ---------------------------------------------------------------
     , repoSaveShift      :: ShiftDef -> IO ()
-    , repoDeleteShift    :: String -> IO ()
+    , repoDeleteShift    :: Text -> IO ()
     , repoLoadShifts     :: IO [ShiftDef]
 
       -- ---------------------------------------------------------------
       -- Schedules
       -- ---------------------------------------------------------------
-    , repoSaveSchedule   :: String -> Schedule -> IO ()
+    , repoSaveSchedule   :: Text -> Schedule -> IO ()
       -- ^ Save a schedule under a name (overwrites if exists).
-    , repoLoadSchedule   :: String -> IO (Maybe Schedule)
-    , repoListSchedules  :: IO [String]
-    , repoDeleteSchedule :: String -> IO ()
+    , repoLoadSchedule   :: Text -> IO (Maybe Schedule)
+    , repoListSchedules  :: IO [Text]
+    , repoDeleteSchedule :: Text -> IO ()
 
       -- ---------------------------------------------------------------
       -- Scheduler config
@@ -176,11 +175,11 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Audit log
       -- ---------------------------------------------------------------
-    , repoLogCommand     :: String -> String -> IO ()
+    , repoLogCommand     :: Text -> Text -> IO ()
       -- ^ username, command string (source='cli')
-    , repoLogRpcCommand  :: String -> String -> IO ()
+    , repoLogRpcCommand  :: Text -> Text -> IO ()
       -- ^ username, command string (source='rpc')
-    , repoLogCommandWithSource :: String -> String -> String -> IO ()
+    , repoLogCommandWithSource :: Text -> Text -> Text -> IO ()
       -- ^ username, command string, source (e.g. "cli", "rpc", "demo")
     , repoGetAuditLog    :: IO [AuditEntry]
       -- ^ returns structured audit entries
@@ -194,7 +193,7 @@ data Repository = Repository
       -- ^ Save calendar assignments for a date range (delete existing in range, insert new)
     , repoLoadCalendar   :: Day -> Day -> IO Schedule
       -- ^ Load calendar assignments by date range
-    , repoSaveCommit     :: Day -> Day -> String -> Schedule -> IO Int
+    , repoSaveCommit     :: Day -> Day -> Text -> Schedule -> IO Int
       -- ^ Save a history commit with snapshot of old assignments, return commit id
     , repoListCommits    :: IO [CalendarCommit]
       -- ^ List calendar commits in reverse chronological order
@@ -218,7 +217,7 @@ data Repository = Repository
       -- ^ Save assignments for a draft (replace existing)
     , repoLoadDraftAssignments :: Int -> IO Schedule
       -- ^ Load assignments for a draft
-    , repoCalendarCommitsAfter :: String -> IO [CalendarCommit]
+    , repoCalendarCommitsAfter :: Text -> IO [CalendarCommit]
       -- ^ List calendar commits with committed_at after the given timestamp
     , repoUpdateDraftValidatedAt :: Int -> IO ()
       -- ^ Update a draft's last_validated_at to current time
@@ -226,11 +225,11 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Checkpoint (SQLite savepoints)
       -- ---------------------------------------------------------------
-    , repoSavepoint      :: String -> IO ()
+    , repoSavepoint      :: Text -> IO ()
       -- ^ Create a savepoint with the given name
-    , repoRelease        :: String -> IO ()
+    , repoRelease        :: Text -> IO ()
       -- ^ Release (commit) a savepoint
-    , repoRollbackTo     :: String -> IO ()
+    , repoRollbackTo     :: Text -> IO ()
       -- ^ Rollback to a savepoint (savepoint remains active)
 
       -- ---------------------------------------------------------------

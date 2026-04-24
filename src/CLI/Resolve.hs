@@ -151,10 +151,11 @@ resolveOne repo _ctx kind token
 lookupByName :: Repository -> EntityKind -> String -> IO (Either String String)
 lookupByName repo EWorker name = do
     users <- repoListUsers repo
-    let matches = [ userWorkerId u
+    let nameLower = T.toLower (T.pack name)
+        matches = [ userWorkerId u
                   | u <- users
                   , let Username uname = userName u
-                  , map toLower uname == map toLower name
+                  , T.toLower uname == nameLower
                   ]
     case matches of
         [WorkerId wid] -> return (Right (show wid))
@@ -172,9 +173,10 @@ lookupByName repo ESkill name = do
         _     -> return (Left ("Ambiguous skill: " ++ name))
 lookupByName repo EStation name = do
     stations <- repoListStations repo
-    let matches = [ sid
+    let nameLower = T.toLower (T.pack name)
+        matches = [ sid
                   | (StationId sid, sname) <- stations
-                  , map toLower sname == map toLower name
+                  , T.toLower sname == nameLower
                   ]
     case matches of
         [sid] -> return (Right (show sid))

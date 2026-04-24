@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Domain.Shift
     ( -- * Types
       ShiftDef(..)
@@ -15,6 +16,7 @@ module Domain.Shift
 
 import Data.List (sortBy)
 import Data.Ord (comparing)
+import Data.Text (Text)
 import qualified Data.Map.Strict as Map
 import Data.Time (Day, DayOfWeek(..), TimeOfDay(..), fromGregorian, dayOfWeek)
 import Test.Hspec
@@ -27,7 +29,7 @@ import Domain.Types (Slot(..))
 
 -- | A named block of consecutive hours.
 data ShiftDef = ShiftDef
-    { sdName  :: !String   -- ^ e.g., "morning", "midday", "afternoon"
+    { sdName  :: !Text     -- ^ e.g., "morning", "midday", "afternoon"
     , sdStart :: !Int      -- ^ start hour (inclusive)
     , sdEnd   :: !Int      -- ^ end hour (exclusive)
     } deriving (Eq, Ord, Show, Read)

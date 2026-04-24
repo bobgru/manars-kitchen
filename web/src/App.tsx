@@ -64,7 +64,7 @@ function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="skills" element={<SkillsListPage />} />
-            <Route path="skills/:id" element={<SkillDetailPage />} />
+            <Route path="skills/:name" element={<SkillDetailPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

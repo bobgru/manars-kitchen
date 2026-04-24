@@ -5,15 +5,13 @@ module Service.Calendar
     , viewCommit
     ) where
 
+import Data.Text (Text)
 import Data.Time (Day)
 
 import Domain.Types (Schedule(..))
 import Repo.Types (Repository(..), CalendarCommit)
 
--- | Snapshot existing calendar assignments in the date range, then overwrite
--- with the new schedule. The snapshot is stored as a history commit with the
--- given note.
-commitToCalendar :: Repository -> Day -> Day -> String -> Schedule -> IO ()
+commitToCalendar :: Repository -> Day -> Day -> Text -> Schedule -> IO ()
 commitToCalendar repo dateFrom dateTo note newSchedule = do
     -- 1. Load the existing assignments that will be replaced
     existing <- repoLoadCalendar repo dateFrom dateTo

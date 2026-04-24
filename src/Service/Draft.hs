@@ -15,7 +15,7 @@ module Service.Draft
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-
+import Data.Text (Text)
 import Data.Time (Day, DiffTime)
 
 import Domain.Types
@@ -139,7 +139,7 @@ generateDraft repo draftId workers = do
 
 -- | Commit a draft to the calendar: load draft assignments, call
 -- commitToCalendar, delete draft.
-commitDraft :: Repository -> Int -> String -> IO (Either String ())
+commitDraft :: Repository -> Int -> Text -> IO (Either String ())
 commitDraft repo draftId note = do
     mDraft <- repoGetDraft repo draftId
     case mDraft of

@@ -101,7 +101,7 @@ mkAppState repo user sid = do
 registerAuditSubscriber :: TopicBus CommandEvent -> Repository -> IO SubscriptionId
 registerAuditSubscriber cmdBus repo =
     subscribe cmdBus ".*" $ \_topic event ->
-        repoLogCommandWithSource repo (ceUsername event) (ceCommand event) (sourceString (ceSource event))
+        repoLogCommandWithSource repo (T.pack $ ceUsername event) (T.pack $ ceCommand event) (T.pack $ sourceString (ceSource event))
 
 registerTerminalEcho :: TopicBus CommandEvent -> IO SubscriptionId
 registerTerminalEcho cmdBus =
@@ -113,7 +113,7 @@ runRepl :: AppState -> IO ()
 runRepl st = do
     let Username uname = userName (asUser st)
         role = if userRole (asUser st) == Admin then "admin" else "user"
-    putStr (uname ++ " [" ++ role ++ "]> ")
+    putStr (T.unpack uname ++ " [" ++ role ++ "]> ")
     hFlush stdout
     line <- getLine
     -- Quick-parse for commands that don't need resolution
@@ -139,7 +139,7 @@ runRepl st = do
                 Right resolvedLine -> do
                     let cmd = parseCommand resolvedLine
                     when (isMutating cmd) $ do
-                        publishCommand (busCommands (asBus st)) CLI uname line
+                        publishCommand (busCommands (asBus st)) CLI (T.unpack uname) line
                         repoTouchSession (asRepo st) (asSessionId st)
                     handleCommand st cmd
                     -- Mark hint session as stale if a mutating command ran
@@ -234,10 +234,10 @@ handleCommand st cmd = case cmd of
         names <- repoListSchedules (asRepo st)
         if null names
             then putStrLn "  (no schedules)"
-            else mapM_ (\n -> putStrLn ("  " ++ n)) names
+            else mapM_ (\n -> putStrLn ("  " ++ T.unpack n)) names
 
     ScheduleView name -> do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just s  -> do
@@ -245,16 +245,16 @@ handleCommand st cmd = case cmd of
                 stations <- SW.listStations (asRepo st)
                 skillCtx <- repoLoadSkillCtx (asRepo st)
                 let workerNames = Map.fromList
-                        [ (userWorkerId u, uname)
+                        [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, sname)
+                        [ (StationId sid, T.unpack sname)
                         | (StationId sid, sname) <- stations ]
                 putStr (displayScheduleTable workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
     ScheduleViewCompact name -> do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just s  -> do
@@ -262,46 +262,46 @@ handleCommand st cmd = case cmd of
                 stations <- SW.listStations (asRepo st)
                 skillCtx <- repoLoadSkillCtx (asRepo st)
                 let workerNames = Map.fromList
-                        [ (userWorkerId u, uname)
+                        [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, sname)
+                        [ (StationId sid, T.unpack sname)
                         | (StationId sid, sname) <- stations ]
                 putStr (displayScheduleCompact workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
     ScheduleViewByWorker name -> do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just s  -> putStr (displayScheduleByWorker s)
 
     ScheduleViewByStation name -> do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just s  -> putStr (displayScheduleByStation s)
 
     ScheduleDelete name -> requireAdmin st $ do
-        repoDeleteSchedule (asRepo st) name
+        repoDeleteSchedule (asRepo st) (T.pack name)
         putStrLn ("Deleted schedule: " ++ name)
 
     ScheduleHours name -> do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just sched -> do
                 users <- repoListUsers (asRepo st)
                 workerCtx <- repoLoadWorkerCtx (asRepo st)
                 let workerNames = Map.fromList
-                        [ (userWorkerId u, uname)
+                        [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                 putStr (displayWorkerHours workerNames
                            (wcMaxPeriodHours workerCtx)
                            sched)
 
     ScheduleDiagnose name -> do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just sched -> do
@@ -337,10 +337,10 @@ handleCommand st cmd = case cmd of
                     result = Scheduler.buildScheduleFrom sched ctx
                     diags = Diagnosis.diagnose result ctx
                     workerNames = Map.fromList
-                        [ (userWorkerId u, uname)
+                        [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, sname)
+                        [ (StationId sid, T.unpack sname)
                         | (StationId sid, sname) <- stations ]
                     skillNames = Map.fromList
                         [ (sid, T.unpack (skillName sk))
@@ -348,26 +348,27 @@ handleCommand st cmd = case cmd of
                 putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
     ScheduleClear name -> requireAdmin st $ do
-        ms <- repoLoadSchedule (asRepo st) name
+        ms <- repoLoadSchedule (asRepo st) (T.pack name)
         case ms of
             Nothing -> putStrLn "Schedule not found."
             Just _  -> do
-                repoSaveSchedule (asRepo st) name (Schedule Set.empty)
+                repoSaveSchedule (asRepo st) (T.pack name) (Schedule Set.empty)
                 putStrLn ("Cleared schedule: " ++ name)
 
     CmdAssign sched wid sid dateStr hr -> requireAdmin st $ do
         case parseDay dateStr of
             Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
             Just day -> do
-                ms <- repoLoadSchedule (asRepo st) sched
+                ms <- repoLoadSchedule (asRepo st) (T.pack sched)
                 case ms of
                     Nothing -> putStrLn "Schedule not found."
                     Just (Schedule as) -> do
                         let slot = Slot day (TimeOfDay hr 0 0) 3600
                             a = Assignment (WorkerId wid) (StationId sid) slot
                             sched' = Schedule (Set.insert a as)
-                        repoSaveSchedule (asRepo st) sched sched'
-                        putStrLn ("Assigned Worker " ++ show wid
+                        repoSaveSchedule (asRepo st) (T.pack sched) sched'
+                        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+                        putStrLn ("Assigned " ++ wname
                                  ++ " to Station " ++ show sid
                                  ++ " at " ++ dateStr ++ " " ++ show hr ++ ":00")
 
@@ -375,15 +376,16 @@ handleCommand st cmd = case cmd of
         case parseDay dateStr of
             Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
             Just day -> do
-                ms <- repoLoadSchedule (asRepo st) sched
+                ms <- repoLoadSchedule (asRepo st) (T.pack sched)
                 case ms of
                     Nothing -> putStrLn "Schedule not found."
                     Just (Schedule as) -> do
                         let slot = Slot day (TimeOfDay hr 0 0) 3600
                             a = Assignment (WorkerId wid) (StationId sid) slot
                             sched' = Schedule (Set.delete a as)
-                        repoSaveSchedule (asRepo st) sched sched'
-                        putStrLn ("Unassigned Worker " ++ show wid
+                        repoSaveSchedule (asRepo st) (T.pack sched) sched'
+                        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+                        putStrLn ("Unassigned " ++ wname
                                  ++ " from Station " ++ show sid
                                  ++ " at " ++ dateStr ++ " " ++ show hr ++ ":00")
 
@@ -447,7 +449,7 @@ handleCommand st cmd = case cmd of
                             unfilled = Scheduler.srUnfilled result
                             truly = length [u | u <- unfilled, Scheduler.unfilledKind u == Scheduler.TrulyUnfilled]
                             under = length unfilled - truly
-                        repoSaveSchedule (asRepo st) name sched
+                        repoSaveSchedule (asRepo st) (T.pack name) sched
                         putStrLn ("Saved. " ++ show (Set.size (unSchedule sched)) ++ " assignments, "
                                  ++ show truly ++ " unfilled, "
                                  ++ show under ++ " understaffed positions.")
@@ -488,7 +490,7 @@ handleCommand st cmd = case cmd of
                     let dateRange = show (diDateFrom d) ++ " to " ++ show (diDateTo d)
                     in putStrLn (padRight 6 (show (diId d))
                                 ++ padRight 26 dateRange
-                                ++ diCreatedAt d)
+                                ++ T.unpack (diCreatedAt d))
                     ) drafts
 
     DraftOpen didStr -> do
@@ -506,16 +508,16 @@ handleCommand st cmd = case cmd of
                         users <- repoListUsers (asRepo st)
                         stations <- SW.listStations (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList stations
+                            stationNames = Map.fromList [(s, T.unpack n) | (s, n) <- stations]
                         displayViolationReport d workerNames stationNames violations
                         putStrLn ""
                 -- Load (possibly updated) draft assignments
                 sched <- repoLoadDraftAssignments (asRepo st) did
                 putStrLn ("Draft #" ++ show (diId d))
                 putStrLn ("  Date range: " ++ show (diDateFrom d) ++ " to " ++ show (diDateTo d))
-                putStrLn ("  Created at: " ++ diCreatedAt d)
+                putStrLn ("  Created at: " ++ T.unpack (diCreatedAt d))
                 putStrLn ("  Assignments: " ++ show (Set.size (unSchedule sched)))
                 -- Check for persisted hint session
                 mPersistedHs <- repoLoadHintSession (asRepo st) (asSessionId st) did
@@ -562,10 +564,10 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, sname)
+                                [ (StationId sid, T.unpack sname)
                                 | (StationId sid, sname) <- stations ]
                         putStr (displayScheduleTable workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
@@ -583,10 +585,10 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, sname)
+                                [ (StationId sid, T.unpack sname)
                                 | (StationId sid, sname) <- stations ]
                         putStr (displayScheduleCompact workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
@@ -617,7 +619,7 @@ handleCommand st cmd = case cmd of
             Right did -> do
                 -- Load draft metadata before commit (commit deletes the draft)
                 mDraft <- Draft.loadDraft (asRepo st) did
-                let note = maybe "" id mNote
+                let note = T.pack (maybe "" id mNote)
                 result <- Draft.commitDraft (asRepo st) did note
                 case result of
                     Left err  -> putStrLn ("Error: " ++ err)
@@ -672,7 +674,7 @@ handleCommand st cmd = case cmd of
                         users <- repoListUsers (asRepo st)
                         workerCtx <- repoLoadWorkerCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                         putStr (displayWorkerHours workerNames
                                    (wcMaxPeriodHours workerCtx) sched)
@@ -717,10 +719,10 @@ handleCommand st cmd = case cmd of
                             result = Scheduler.buildScheduleFrom sched ctx
                             diags = Diagnosis.diagnose result ctx
                             workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, sname)
+                                [ (StationId sid, T.unpack sname)
                                 | (StationId sid, sname) <- stations ]
                             skillNames = Map.fromList
                                 [ (sid, T.unpack (skillName sk))
@@ -739,10 +741,10 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, sname)
+                                [ (StationId sid, T.unpack sname)
                                 | (StationId sid, sname) <- stations ]
                         putStr (displayScheduleTable workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
@@ -777,10 +779,10 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, sname)
+                                [ (StationId sid, T.unpack sname)
                                 | (StationId sid, sname) <- stations ]
                         putStr (displayScheduleCompact workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
@@ -796,7 +798,7 @@ handleCommand st cmd = case cmd of
                         users <- repoListUsers (asRepo st)
                         workerCtx <- repoLoadWorkerCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                         putStr (displayWorkerHours workerNames
                                    (wcMaxPeriodHours workerCtx) sched)
@@ -840,10 +842,10 @@ handleCommand st cmd = case cmd of
                             result = Scheduler.buildScheduleFrom sched ctx
                             diags = Diagnosis.diagnose result ctx
                             workerNames = Map.fromList
-                                [ (userWorkerId u, uname)
+                                [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, sname)
+                                [ (StationId sid, T.unpack sname)
                                 | (StationId sid, sname) <- stations ]
                             skillNames = Map.fromList
                                 [ (sid, T.unpack (skillName sk))
@@ -854,11 +856,11 @@ handleCommand st cmd = case cmd of
     CalendarDoCommit name startStr endStr mNote -> requireAdmin st $
         case (parseDay startStr, parseDay endStr) of
             (Just s, Just e) -> do
-                ms <- repoLoadSchedule (asRepo st) name
+                ms <- repoLoadSchedule (asRepo st) (T.pack name)
                 case ms of
                     Nothing -> putStrLn ("Schedule not found: " ++ name)
                     Just sched -> do
-                        let note = maybe "" id mNote
+                        let note = T.pack (maybe "" id mNote)
                         Cal.commitToCalendar (asRepo st) s e note sched
                         let n = Set.size (unSchedule sched)
                         putStrLn ("Committed " ++ show n ++ " assignments from '"
@@ -880,8 +882,8 @@ handleCommand st cmd = case cmd of
                     let dateRange = show (ccDateFrom c) ++ " to " ++ show (ccDateTo c)
                     in putStrLn (padRight idW (show (ccId c))
                                 ++ padRight dateW dateRange
-                                ++ padRight 22 (ccCommittedAt c)
-                                ++ ccNote c)
+                                ++ padRight 22 (T.unpack (ccCommittedAt c))
+                                ++ T.unpack (ccNote c))
                     ) commits
 
     CalendarHistoryView cidStr -> do
@@ -1140,65 +1142,69 @@ handleCommand st cmd = case cmd of
                 return ()
 
     -- Stations (admin)
-    StationAdd sid name -> requireAdmin st $ do
-        SW.addStation (asRepo st) (StationId sid) name
-        putStrLn ("Added Station " ++ show sid ++ " (" ++ name ++ ")")
+    StationAdd name -> requireAdmin st $ do
+        _sid <- SW.addStation (asRepo st) (T.pack name)
+        putStrLn ("Added station: " ++ name)
 
     StationList -> do
         stations <- SW.listStations (asRepo st)
         if null stations
             then putStrLn "  (no stations)"
-            else mapM_ (\(StationId sid, name) ->
-                putStrLn ("  Station " ++ show sid ++ ": " ++ name)
+            else mapM_ (\(_sid, name) ->
+                putStrLn ("  " ++ T.unpack name)
                 ) stations
 
     StationRemove sid -> requireAdmin st $ do
         SW.removeStation (asRepo st) (StationId sid)
-        putStrLn ("Removed Station " ++ show sid)
+        putStrLn ("Removed station " ++ show sid)
 
     StationSetHours sid sh eh -> requireAdmin st $ do
         SW.setStationHours (asRepo st) (StationId sid) sh eh
-        putStrLn ("Set Station " ++ show sid ++ " hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
+        putStrLn ("Set station hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
 
     StationSetMultiHours sid sh eh -> requireAdmin st $ do
         SW.setMultiStationHours (asRepo st) (StationId sid) sh eh
-        putStrLn ("Set Station " ++ show sid ++ " multi-station hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
+        putStrLn ("Set station multi-station hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
 
     StationCloseDay sid dayStr -> requireAdmin st $
         case parseDayOfWeek dayStr of
             Nothing -> putStrLn ("Unknown day: " ++ dayStr)
             Just dow -> do
                 SW.closeStationDay (asRepo st) (StationId sid) dow
-                putStrLn ("Station " ++ show sid ++ " closed on " ++ dayStr)
+                putStrLn ("Station closed on " ++ dayStr)
 
     StationRequireSkill sid skid -> requireAdmin st $ do
         ctx <- repoLoadSkillCtx (asRepo st)
         let current = Map.findWithDefault Set.empty (StationId sid) (scStationRequires ctx)
         SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.insert skid current)
-        putStrLn ("Station " ++ show sid ++ " now requires " ++ show skid)
+        sname <- lookupSkillName (asRepo st) skid
+        putStrLn ("Station now requires skill " ++ sname)
 
     StationRemoveRequiredSkill sid skid -> requireAdmin st $ do
         ctx <- repoLoadSkillCtx (asRepo st)
         let current = Map.findWithDefault Set.empty (StationId sid) (scStationRequires ctx)
         SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.delete skid current)
-        putStrLn ("Station " ++ show sid ++ " no longer requires " ++ show skid)
+        sname <- lookupSkillName (asRepo st) skid
+        putStrLn ("Station no longer requires skill " ++ sname)
 
     SkillCreate name -> requireAdmin st $ do
-        result <- SW.addSkill (asRepo st) name ""
+        result <- SW.addSkill (asRepo st) (T.pack name) T.empty
         case result of
             Left err -> putStrLn $ "Error: " ++ err
             Right () -> putStrLn $ "Created " ++ shellQuote name
 
     SkillRename sid name -> requireAdmin st $ do
-        repoRenameSkill (asRepo st) sid name
-        putStrLn ("Renamed " ++ show sid ++ " to \"" ++ name ++ "\"")
+        oldName <- lookupSkillName (asRepo st) sid
+        repoRenameSkill (asRepo st) sid (T.pack name)
+        putStrLn ("Renamed " ++ oldName ++ " to \"" ++ name ++ "\"")
 
     SkillDelete sid -> requireAdmin st $ do
+        sname <- lookupSkillName (asRepo st) sid
         result <- SW.safeDeleteSkill (asRepo st) sid
         case result of
-            Right () -> putStrLn ("Deleted " ++ show sid)
+            Right () -> putStrLn ("Deleted " ++ sname)
             Left refs -> do
-                putStrLn ("Error: " ++ show sid ++ " is still referenced:")
+                putStrLn ("Error: " ++ sname ++ " is still referenced:")
                 displaySkillRefs refs
 
     SkillForceDelete sid -> requireAdmin st $ do
@@ -1222,29 +1228,35 @@ handleCommand st cmd = case cmd of
         skills <- SW.listSkills (asRepo st)
         if null skills
             then putStrLn "  (no skills)"
-            else mapM_ (\(sid, sk) ->
-                putStrLn ("  " ++ show sid ++ ": " ++ T.unpack (skillName sk))
+            else mapM_ (\(_sid, sk) ->
+                putStrLn ("  " ++ T.unpack (skillName sk))
                 ) skills
 
     SkillImplication a b -> requireAdmin st $ do
         SW.addSkillImplication (asRepo st) a b
-        putStrLn (show a ++ " now implies " ++ show b)
+        aname <- lookupSkillName (asRepo st) a
+        bname <- lookupSkillName (asRepo st) b
+        putStrLn (aname ++ " now implies " ++ bname)
 
     SkillRemoveImplication a b -> requireAdmin st $ do
         SW.removeSkillImplication (asRepo st) a b
-        putStrLn ("Removed: " ++ show a ++ " no longer implies " ++ show b)
+        aname <- lookupSkillName (asRepo st) a
+        bname <- lookupSkillName (asRepo st) b
+        putStrLn ("Removed: " ++ aname ++ " no longer implies " ++ bname)
 
     SkillView sid -> do
         skills <- repoListSkills (asRepo st)
         case lookup sid skills of
-            Nothing -> putStrLn ("Unknown skill: " ++ show sid)
+            Nothing -> do
+                sname <- lookupSkillName (asRepo st) sid
+                putStrLn ("Unknown skill: " ++ sname)
             Just sk -> do
                 ctx <- repoLoadSkillCtx (asRepo st)
                 wctx <- repoLoadWorkerCtx (asRepo st)
                 users <- repoListUsers (asRepo st)
                 stations <- repoListStations (asRepo st)
-                let workerNames = Map.fromList [(userWorkerId u, let Username n = userName u in n) | u <- users]
-                    stationNames = Map.fromList stations
+                let workerNames = Map.fromList [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
+                    stationNames = Map.fromList [(s, T.unpack n) | (s, n) <- stations]
                     skillNames = Map.fromList [(s, skillName sk') | (s, sk') <- skills]
                 putStr (displaySkillView sid sk ctx wctx workerNames stationNames skillNames)
 
@@ -1255,38 +1267,49 @@ handleCommand st cmd = case cmd of
     -- Worker skills (admin)
     WorkerGrantSkill wid sid -> requireAdmin st $ do
         SW.grantWorkerSkill (asRepo st) (WorkerId wid) sid
-        putStrLn ("Granted " ++ show sid ++ " to Worker " ++ show wid)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        sname <- lookupSkillName (asRepo st) sid
+        putStrLn ("Granted " ++ sname ++ " to " ++ wname)
 
     WorkerRevokeSkill wid sid -> requireAdmin st $ do
         SW.revokeWorkerSkill (asRepo st) (WorkerId wid) sid
-        putStrLn ("Revoked " ++ show sid ++ " from Worker " ++ show wid)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        sname <- lookupSkillName (asRepo st) sid
+        putStrLn ("Revoked " ++ sname ++ " from " ++ wname)
 
     -- Worker context (admin)
     WorkerSetHours wid h -> requireAdmin st $ do
         SW.setMaxHours (asRepo st) (WorkerId wid) (fromIntegral (h * 3600))
-        putStrLn ("Set Worker " ++ show wid ++ " max hours: " ++ show h ++ "h/period")
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn ("Set " ++ wname ++ " max hours: " ++ show h ++ "h/period")
 
     WorkerSetOvertime wid b -> requireAdmin st $ do
         mWarn <- SW.setOvertimeOptIn (asRepo st) (WorkerId wid) b
         case mWarn of
             Just warning -> putStrLn warning
-            Nothing -> putStrLn ("Worker " ++ show wid ++ " overtime: " ++ if b then "on" else "off")
+            Nothing -> do
+                wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+                putStrLn (wname ++ " overtime: " ++ if b then "on" else "off")
 
     WorkerSetPrefs wid sids -> requireAdmin st $ do
         SW.setStationPreferences (asRepo st) (WorkerId wid) (map StationId sids)
-        putStrLn ("Set Worker " ++ show wid ++ " preferences")
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn ("Set " ++ wname ++ " preferences")
 
     WorkerSetVariety wid b -> requireAdmin st $ do
         SW.setVarietyPreference (asRepo st) (WorkerId wid) b
-        putStrLn ("Worker " ++ show wid ++ " variety: " ++ if b then "on" else "off")
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn (wname ++ " variety: " ++ if b then "on" else "off")
 
     WorkerSetShiftPref wid names -> requireAdmin st $ do
-        SW.setShiftPreferences (asRepo st) (WorkerId wid) names
-        putStrLn ("Set Worker " ++ show wid ++ " shift prefs: " ++ unwords names)
+        SW.setShiftPreferences (asRepo st) (WorkerId wid) (map T.pack names)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn ("Set " ++ wname ++ " shift prefs: " ++ unwords names)
 
     WorkerSetWeekendOnly wid b -> requireAdmin st $ do
         SW.setWeekendOnly (asRepo st) (WorkerId wid) b
-        putStrLn ("Worker " ++ show wid ++ " weekend-only: " ++ if b then "on" else "off")
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn (wname ++ " weekend-only: " ++ if b then "on" else "off")
 
     WorkerInfo -> do
         ctx <- repoLoadWorkerCtx (asRepo st)
@@ -1294,36 +1317,50 @@ handleCommand st cmd = case cmd of
 
     WorkerSetSeniority wid lvl -> requireAdmin st $ do
         SW.setSeniority (asRepo st) (WorkerId wid) lvl
-        putStrLn ("Set Worker " ++ show wid ++ " seniority level: " ++ show lvl)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn ("Set " ++ wname ++ " seniority level: " ++ show lvl)
 
     WorkerSetCrossTraining wid sid -> requireAdmin st $ do
         SW.addCrossTraining (asRepo st) (WorkerId wid) sid
-        putStrLn ("Added cross-training goal: Worker " ++ show wid ++ " -> " ++ show sid)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        sname <- lookupSkillName (asRepo st) sid
+        putStrLn ("Added cross-training goal: " ++ wname ++ " -> " ++ sname)
 
     WorkerClearCrossTraining wid sid -> requireAdmin st $ do
         SW.removeCrossTraining (asRepo st) (WorkerId wid) sid
-        putStrLn ("Removed cross-training goal: Worker " ++ show wid ++ " -> " ++ show sid)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        sname <- lookupSkillName (asRepo st) sid
+        putStrLn ("Removed cross-training goal: " ++ wname ++ " -> " ++ sname)
 
     WorkerAvoidPairing w1 w2 -> requireAdmin st $ do
         SW.addAvoidPairing (asRepo st) (WorkerId w1) (WorkerId w2)
-        putStrLn ("Workers " ++ show w1 ++ " and " ++ show w2 ++ " will avoid concurrent assignment")
+        n1 <- lookupWorkerName (asRepo st) (WorkerId w1)
+        n2 <- lookupWorkerName (asRepo st) (WorkerId w2)
+        putStrLn (n1 ++ " and " ++ n2 ++ " will avoid concurrent assignment")
 
     WorkerClearAvoidPairing w1 w2 -> requireAdmin st $ do
         SW.removeAvoidPairing (asRepo st) (WorkerId w1) (WorkerId w2)
-        putStrLn ("Cleared avoid-pairing: Workers " ++ show w1 ++ " and " ++ show w2)
+        n1 <- lookupWorkerName (asRepo st) (WorkerId w1)
+        n2 <- lookupWorkerName (asRepo st) (WorkerId w2)
+        putStrLn ("Cleared avoid-pairing: " ++ n1 ++ " and " ++ n2)
 
     WorkerPreferPairing w1 w2 -> requireAdmin st $ do
         SW.addPreferPairing (asRepo st) (WorkerId w1) (WorkerId w2)
-        putStrLn ("Workers " ++ show w1 ++ " and " ++ show w2 ++ " prefer concurrent assignment")
+        n1 <- lookupWorkerName (asRepo st) (WorkerId w1)
+        n2 <- lookupWorkerName (asRepo st) (WorkerId w2)
+        putStrLn (n1 ++ " and " ++ n2 ++ " prefer concurrent assignment")
 
     WorkerClearPreferPairing w1 w2 -> requireAdmin st $ do
         SW.removePreferPairing (asRepo st) (WorkerId w1) (WorkerId w2)
-        putStrLn ("Cleared prefer-pairing: Workers " ++ show w1 ++ " and " ++ show w2)
+        n1 <- lookupWorkerName (asRepo st) (WorkerId w1)
+        n2 <- lookupWorkerName (asRepo st) (WorkerId w2)
+        putStrLn ("Cleared prefer-pairing: " ++ n1 ++ " and " ++ n2)
 
     -- Employment status
     WorkerSetStatus wid status -> requireAdmin st $ do
         msg <- SW.setEmploymentStatus (asRepo st) (WorkerId wid) status
-        putStrLn ("Worker " ++ show wid ++ ": " ++ msg)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn (wname ++ ": " ++ msg)
 
     WorkerSetOvertimeModel wid model -> requireAdmin st $ do
         case model of
@@ -1332,7 +1369,8 @@ handleCommand st cmd = case cmd of
             "exempt"      -> SW.setOvertimeModel (asRepo st) (WorkerId wid) OTExempt
             _ -> do putStrLn ("Unknown overtime model: " ++ model ++ ". Use eligible|manual-only|exempt.")
                     return ()
-        putStrLn ("Worker " ++ show wid ++ " overtime model: " ++ model)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn (wname ++ " overtime model: " ++ model)
 
     WorkerSetPayTracking wid tracking -> requireAdmin st $ do
         case tracking of
@@ -1340,11 +1378,13 @@ handleCommand st cmd = case cmd of
             "exempt"   -> SW.setPayPeriodTracking (asRepo st) (WorkerId wid) PPExempt
             _ -> do putStrLn ("Unknown pay tracking: " ++ tracking ++ ". Use standard|exempt.")
                     return ()
-        putStrLn ("Worker " ++ show wid ++ " pay tracking: " ++ tracking)
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn (wname ++ " pay tracking: " ++ tracking)
 
     WorkerSetTemp wid b -> requireAdmin st $ do
         SW.setTempFlag (asRepo st) (WorkerId wid) b
-        putStrLn ("Worker " ++ show wid ++ " temp: " ++ if b then "on" else "off")
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn (wname ++ " temp: " ++ if b then "on" else "off")
 
     -- Pinned assignments
     PinAdd wid sid dayStr specStr -> requireAdmin st $
@@ -1353,10 +1393,11 @@ handleCommand st cmd = case cmd of
             Just dow -> do
                 let spec = if all (`elem` "0123456789") specStr
                            then PinSlot (read specStr)
-                           else PinShift specStr
+                           else PinShift (T.pack specStr)
                     pin = PinnedAssignment (WorkerId wid) (StationId sid) dow spec
                 SW.addPin (asRepo st) pin
-                putStrLn ("Pinned Worker " ++ show wid ++ " at Station " ++ show sid
+                wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+                putStrLn ("Pinned " ++ wname ++ " at Station " ++ show sid
                          ++ " on " ++ dayStr ++ " " ++ specStr)
 
     PinRemove wid sid dayStr specStr -> requireAdmin st $
@@ -1365,18 +1406,20 @@ handleCommand st cmd = case cmd of
             Just dow -> do
                 let spec = if all (`elem` "0123456789") specStr
                            then PinSlot (read specStr)
-                           else PinShift specStr
+                           else PinShift (T.pack specStr)
                     pin = PinnedAssignment (WorkerId wid) (StationId sid) dow spec
                 SW.removePin (asRepo st) pin
-                putStrLn ("Unpinned Worker " ++ show wid ++ " at Station " ++ show sid
+                wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+                putStrLn ("Unpinned " ++ wname ++ " at Station " ++ show sid
                          ++ " on " ++ dayStr ++ " " ++ specStr)
 
     PinList -> do
         pins <- SW.listPins (asRepo st)
         if null pins
             then putStrLn "  (no pinned assignments)"
-            else mapM_ (\p ->
-                putStrLn ("  Worker " ++ show (let WorkerId w = pinWorker p in w)
+            else mapM_ (\p -> do
+                wname <- lookupWorkerName (asRepo st) (pinWorker p)
+                putStrLn ("  " ++ wname
                          ++ " @ Station " ++ show (let StationId s = pinStation p in s)
                          ++ " on " ++ showDayOfWeek (pinDay p)
                          ++ " " ++ showPinSpec (pinSpec p))
@@ -1444,7 +1487,7 @@ handleCommand st cmd = case cmd of
 
     -- Shifts (admin)
     ShiftCreate name sh eh -> requireAdmin st $ do
-        repoSaveShift (asRepo st) (ShiftDef name sh eh)
+        repoSaveShift (asRepo st) (ShiftDef (T.pack name) sh eh)
         putStrLn ("Created shift: " ++ name ++ " (" ++ show sh ++ ":00-" ++ show eh ++ ":00)")
 
     ShiftList -> do
@@ -1452,12 +1495,12 @@ handleCommand st cmd = case cmd of
         if null shifts
             then putStrLn "  (no shifts configured — using defaults)"
             else mapM_ (\sd ->
-                putStrLn ("  " ++ sdName sd ++ ": "
+                putStrLn ("  " ++ T.unpack (sdName sd) ++ ": "
                          ++ show (sdStart sd) ++ ":00-" ++ show (sdEnd sd) ++ ":00")
                 ) shifts
 
     ShiftDelete name -> requireAdmin st $ do
-        repoDeleteShift (asRepo st) name
+        repoDeleteShift (asRepo st) (T.pack name)
         putStrLn ("Deleted shift: " ++ name)
 
     -- Absence types (admin)
@@ -1477,7 +1520,8 @@ handleCommand st cmd = case cmd of
         let ctx' = ctx { acYearlyAllowance =
                 Map.insert (WorkerId wid, AbsenceTypeId tid) days (acYearlyAllowance ctx) }
         repoSaveAbsenceCtx (asRepo st) ctx'
-        putStrLn ("Set Worker " ++ show wid ++ " allowance for type " ++ show tid
+        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
+        putStrLn ("Set " ++ wname ++ " allowance for type " ++ show tid
                   ++ ": " ++ show days ++ " days")
 
     -- Absence approval (admin)
@@ -1534,7 +1578,7 @@ handleCommand st cmd = case cmd of
         let nextWid = if null users
                       then 1
                       else maximum [w | User { userWorkerId = WorkerId w } <- users] + 1
-        result <- register (asRepo st) name pass r (WorkerId nextWid)
+        result <- register (asRepo st) (T.pack name) (T.pack pass) r (WorkerId nextWid)
         case result of
             Right (UserId uid) -> putStrLn ("Created user #" ++ show uid
                                             ++ " (Worker " ++ show nextWid ++ ")")
@@ -1564,7 +1608,7 @@ handleCommand st cmd = case cmd of
                  ++ show nSch ++ " schedule(s)")
 
     CmdExportSchedule name file -> requireAdmin st $ do
-        dat <- Export.gatherExport (asRepo st) (Just name)
+        dat <- Export.gatherExport (asRepo st) (Just (T.pack name))
         BL.writeFile file (Export.encodeExport dat)
         let nAssign = sum $ map length $ Map.elems (Export.expSchedules dat)
         putStrLn ("Exported schedule '" ++ name ++ "' to " ++ file
@@ -1614,7 +1658,7 @@ handleCommand st cmd = case cmd of
                 putStrLn ("Wiping database and replaying " ++ show (length entries) ++ " commands...")
                 repoWipeAll (asRepo st)
                 -- Re-create default admin
-                _ <- register (asRepo st) "admin" "admin" Admin (WorkerId 1)
+                _ <- register (asRepo st) (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
                 putStrLn "Created default admin user (admin/admin), Worker 1"
                 replayCommands fastReplay st (map auditEntryToTriple entries)
                 putStrLn "Demo complete."
@@ -1633,7 +1677,7 @@ handleCommand st cmd = case cmd of
         new <- getLine
         hSetEcho stdin True
         putStrLn ""
-        result <- changePassword (asRepo st) (userId (asUser st)) old new
+        result <- changePassword (asRepo st) (userId (asUser st)) (T.pack old) (T.pack new)
         case result of
             Right () -> putStrLn "Password changed."
             Left WrongOldPassword -> putStrLn "Wrong old password."
@@ -1872,10 +1916,10 @@ loadNameMaps st = do
     stations <- SW.listStations (asRepo st)
     skills <- SW.listSkills (asRepo st)
     let workerNames = Map.fromList
-            [ (userWorkerId u, uname)
+            [ (userWorkerId u, T.unpack uname)
             | u <- users, let Username uname = userName u ]
         stationNames = Map.fromList
-            [ (StationId sid, sname)
+            [ (StationId sid, T.unpack sname)
             | (StationId sid, sname) <- stations ]
         skillNames = Map.fromList
             [ (sid, T.unpack (skillName sk))
@@ -1909,7 +1953,7 @@ showDayOfWeek Sunday    = "sunday"
 
 showPinSpec :: PinSpec -> String
 showPinSpec (PinSlot h)   = show h ++ ":00"
-showPinSpec (PinShift sn) = sn ++ " shift"
+showPinSpec (PinShift sn) = T.unpack sn ++ " shift"
 
 parseDayOfWeek :: String -> Maybe DayOfWeek
 parseDayOfWeek s = case map toLower s of
@@ -2007,12 +2051,11 @@ auditEntryToMeta ae = Meta.CommandMeta
 runDemo :: Repository -> Int -> [String] -> IO ()
 runDemo repo delayUs cmdLines = do
     -- Create default admin
-    result <- register repo "admin" "admin" Admin (WorkerId 1)
+    result <- register repo (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
     case result of
         Right _  -> putStrLn "Created default admin user (admin/admin)"
         Left err -> putStrLn ("Warning: " ++ show err)
-    -- Load admin user for AppState
-    mUser <- repoGetUserByName repo "admin"
+    mUser <- repoGetUserByName repo (T.pack "admin")
     case mUser of
         Nothing -> putStrLn "ERROR: admin user not found after creation"
         Just adminUser -> do
@@ -2096,7 +2139,7 @@ handleCheckpointCreate st mName = do
     let name = case mName of
             Just n  -> n
             Nothing -> "checkpoint-" ++ show (length stack + 1)
-    repoSavepoint (asRepo st) name
+    repoSavepoint (asRepo st) (T.pack name)
     writeIORef (asCheckpoints st) (name : stack)
     putStrLn ("Checkpoint created: " ++ name)
 
@@ -2106,7 +2149,7 @@ handleCheckpointCommit st = do
     case stack of
         [] -> putStrLn "No active checkpoint."
         (name : rest) -> do
-            repoRelease (asRepo st) name
+            repoRelease (asRepo st) (T.pack name)
             writeIORef (asCheckpoints st) rest
             putStrLn ("Checkpoint committed: " ++ name)
 
@@ -2117,13 +2160,13 @@ handleCheckpointRollback st mName = do
         [] -> putStrLn "No active checkpoint."
         (top : _) -> case mName of
             Nothing -> do
-                repoRollbackTo (asRepo st) top
+                repoRollbackTo (asRepo st) (T.pack top)
                 putStrLn ("Rolled back to: " ++ top)
             Just target ->
                 if target `elem` stack
                 then do
                     -- Rollback to the named checkpoint, discard newer ones
-                    repoRollbackTo (asRepo st) target
+                    repoRollbackTo (asRepo st) (T.pack target)
                     let trimmed = dropWhile (/= target) stack
                     writeIORef (asCheckpoints st) trimmed
                     putStrLn ("Rolled back to: " ++ target)
@@ -2370,16 +2413,16 @@ helpGroups =
 
 displaySkillRefs :: SW.SkillReferences -> IO ()
 displaySkillRefs refs = do
-    forM_ (SW.srWorkers refs) $ \(wid, name) ->
-        putStrLn ("  Worker " ++ show wid ++ " (" ++ name ++ ") has this skill")
-    forM_ (SW.srStations refs) $ \(stid, name) ->
-        putStrLn ("  Station " ++ show stid ++ " (" ++ name ++ ") requires this skill")
-    forM_ (SW.srCrossTraining refs) $ \(wid, name) ->
-        putStrLn ("  Worker " ++ show wid ++ " (" ++ name ++ ") cross-training toward this skill")
-    forM_ (SW.srImpliedBy refs) $ \(sid, name) ->
-        putStrLn ("  " ++ show sid ++ " (" ++ name ++ ") implies this skill")
-    forM_ (SW.srImplies refs) $ \(sid, name) ->
-        putStrLn ("  This skill implies " ++ show sid ++ " (" ++ name ++ ")")
+    forM_ (SW.srWorkers refs) $ \(_wid, name) ->
+        putStrLn ("  " ++ name ++ " has this skill")
+    forM_ (SW.srStations refs) $ \(_stid, name) ->
+        putStrLn ("  " ++ name ++ " requires this skill")
+    forM_ (SW.srCrossTraining refs) $ \(_wid, name) ->
+        putStrLn ("  " ++ name ++ " cross-training toward this skill")
+    forM_ (SW.srImpliedBy refs) $ \(_sid, name) ->
+        putStrLn ("  " ++ name ++ " implies this skill")
+    forM_ (SW.srImplies refs) $ \(_sid, name) ->
+        putStrLn ("  This skill implies " ++ name)
 
 printHelpSummary :: Role -> IO ()
 printHelpSummary role = do
@@ -2417,6 +2460,20 @@ when :: Bool -> IO () -> IO ()
 when True  action = action
 when False _      = return ()
 
+lookupWorkerName :: Repository -> WorkerId -> IO String
+lookupWorkerName repo wid = do
+    users <- repoListUsers repo
+    case [u | u <- users, userWorkerId u == wid] of
+        (u:_) -> let Username uname = userName u in return (T.unpack uname)
+        []    -> let WorkerId w = wid in return ("Worker " ++ show w)
+
+lookupSkillName :: Repository -> SkillId -> IO String
+lookupSkillName repo sid = do
+    skills <- repoListSkills repo
+    case [sk | (sid', sk) <- skills, sid' == sid] of
+        (sk:_) -> return (T.unpack (skillName sk))
+        []     -> let SkillId s = sid in return ("Skill " ++ show s)
+
 -- -----------------------------------------------------------------
 -- Draft validation display
 -- -----------------------------------------------------------------
@@ -2437,7 +2494,7 @@ displayViolationReport draft workerNames stationNames violations = do
             in Map.insertWith (++) w [v] acc) Map.empty violations
     mapM_ (\(wid@(WorkerId widN), vs) -> do
         let wName = Map.findWithDefault ("Worker " ++ show widN) wid workerNames
-        putStrLn ("  " ++ wName ++ " (Worker " ++ show widN ++ "):")
+        putStrLn ("  " ++ wName ++ ":")
         mapM_ (\v ->
             let a = dvAssignment v
                 s = assignSlot a

@@ -1,9 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module SessionSpec (spec) where
 
 import Test.Hspec
 import Control.Concurrent (threadDelay)
 import System.Directory (removeFile, doesFileExist)
 
+import Data.Text (Text)
 import Auth.Types (UserId, Role(..))
 import Domain.Types (WorkerId(..))
 import Repo.SQLite (mkSQLiteRepo)
@@ -71,7 +74,7 @@ withTestRepo action = do
     removeFile path
 
 -- | Helper: create a test user and return their UserId.
-createTestUser :: Repository -> String -> IO UserId
+createTestUser :: Repository -> Text -> IO UserId
 createTestUser repo name = do
     result <- register repo name "password" Admin (WorkerId 1)
     case result of

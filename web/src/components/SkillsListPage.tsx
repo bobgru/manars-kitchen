@@ -13,22 +13,22 @@ import { useEntityEvents } from "../hooks/useSSE";
 
 /** Compute transitive closure from a direct implications map. */
 function transitiveClosure(
-  direct: Record<number, number[]>
-): Record<number, Set<number>> {
-  const result: Record<number, Set<number>> = {};
-  for (const [id, implied] of Object.entries(direct)) {
-    result[Number(id)] = new Set(implied);
+  direct: Record<string, string[]>
+): Record<string, Set<string>> {
+  const result: Record<string, Set<string>> = {};
+  for (const [name, implied] of Object.entries(direct)) {
+    result[name] = new Set(implied);
   }
   let changed = true;
   while (changed) {
     changed = false;
-    for (const [id, skills] of Object.entries(result)) {
+    for (const [name, skills] of Object.entries(result)) {
       for (const sk of [...skills]) {
         const transitive = result[sk];
         if (transitive) {
           for (const t of transitive) {
-            if (!result[Number(id)].has(t)) {
-              result[Number(id)].add(t);
+            if (!result[name].has(t)) {
+              result[name].add(t);
               changed = true;
             }
           }
@@ -41,19 +41,17 @@ function transitiveClosure(
 
 export default function SkillsListPage() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
-  const [implications, setImplications] = useState<Record<number, number[]>>(
+  const [implications, setImplications] = useState<Record<string, string[]>>(
     {}
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [showCreate, setShowCreate] = useState(false);
-  const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
   const [createError, setCreateError] = useState("");
 
   const [deleteConfirm, setDeleteConfirm] = useState<{
-    skillId: number;
     skillName: string;
     refs: SkillReferences;
   } | null>(null);
@@ -80,28 +78,25 @@ export default function SkillsListPage() {
   if (loading) return <div className="page loading">Loading skills...</div>;
   if (error) return <div className="page msg-error">{error}</div>;
 
-  const nameById: Record<number, string> = {};
-  for (const s of skills) nameById[s.id] = s.name;
-
   const closure = transitiveClosure(implications);
 
-  function renderImplications(skillId: number) {
-    const direct = implications[skillId] || [];
+  function renderImplications(skillName: string) {
+    const direct = implications[skillName] || [];
     if (direct.length === 0) return <span className="text-muted">(none)</span>;
 
     const directSet = new Set(direct);
-    const allImplied = closure[skillId] || new Set<number>();
-    const transitiveOnly = [...allImplied].filter((id) => !directSet.has(id));
+    const allImplied = closure[skillName] || new Set<string>();
+    const transitiveOnly = [...allImplied].filter((n) => !directSet.has(n));
 
     return (
       <>
         <span className="impl-direct">
-          {direct.map((id) => nameById[id] || `#${id}`).join(", ")}
+          {direct.join(", ")}
         </span>
         {transitiveOnly.length > 0 && (
           <span className="impl-transitive">
             {" "}
-            ({transitiveOnly.map((id) => nameById[id] || `#${id}`).join(", ")})
+            ({transitiveOnly.join(", ")})
           </span>
         )}
       </>
@@ -110,15 +105,13 @@ export default function SkillsListPage() {
 
   async function handleCreate() {
     setCreateError("");
-    const id = parseInt(newId, 10);
-    if (isNaN(id) || !newName.trim()) {
-      setCreateError("ID (number) and name are required.");
+    if (!newName.trim()) {
+      setCreateError("Name is required.");
       return;
     }
     try {
-      await createSkill(id, newName.trim());
+      await createSkill(newName.trim());
       setShowCreate(false);
-      setNewId("");
       setNewName("");
       load();
     } catch (err) {
@@ -128,12 +121,11 @@ export default function SkillsListPage() {
 
   async function handleDelete(skill: SkillInfo) {
     try {
-      const result = await deleteSkill(skill.id);
+      const result = await deleteSkill(skill.name);
       if (result.ok) {
         load();
       } else {
         setDeleteConfirm({
-          skillId: skill.id,
           skillName: skill.name,
           refs: result.references,
         });
@@ -146,7 +138,7 @@ export default function SkillsListPage() {
   async function handleForceDelete() {
     if (!deleteConfirm) return;
     try {
-      await forceDeleteSkill(deleteConfirm.skillId);
+      await forceDeleteSkill(deleteConfirm.skillName);
       setDeleteConfirm(null);
       load();
     } catch (err) {
@@ -174,13 +166,6 @@ export default function SkillsListPage() {
       )}
       {showCreate && (
         <div className="inline-form">
-          <input
-            type="number"
-            placeholder="ID"
-            value={newId}
-            onChange={(e) => setNewId(e.target.value)}
-            style={{ width: "60px" }}
-          />
           <input
             type="text"
             placeholder="Name"
@@ -215,11 +200,11 @@ export default function SkillsListPage() {
           </thead>
           <tbody>
             {skills.map((s) => (
-              <tr key={s.id}>
+              <tr key={s.name}>
                 <td>
-                  <Link to={`/skills/${s.id}`}>{s.name}</Link>
+                  <Link to={`/skills/${encodeURIComponent(s.name)}`}>{s.name}</Link>
                 </td>
-                <td>{renderImplications(s.id)}</td>
+                <td>{renderImplications(s.name)}</td>
                 <td>
                   <button
                     className="btn btn-danger btn-sm"

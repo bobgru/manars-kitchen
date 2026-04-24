@@ -1,9 +1,13 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module HintE2ESpec (spec) where
 
 import Test.Hspec
 import System.Directory (removeFile, doesFileExist)
 import Data.Time (TimeOfDay(..), fromGregorian)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import Auth.Types (UserId, Role(..))
 import Domain.Types (WorkerId(..), StationId(..), SkillId(..), Slot(..))
 import Domain.Hint (Hint(..))
@@ -141,7 +145,7 @@ spec = do
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
                 -- Simulate draft commit appearing in audit log
-                repoLogCommand repo "dave" ("draft commit " ++ show did)
+                repoLogCommand repo "dave" (T.pack ("draft commit " ++ show did))
                 since <- repoAuditSince repo cp
                 let result = rebaseSession did since hints
                 case result of
@@ -207,7 +211,7 @@ withTestRepo action = do
     removeFile path
 
 -- | Helper: create a test user and return their UserId.
-createTestUser :: Repository -> String -> IO UserId
+createTestUser :: Repository -> Text -> IO UserId
 createTestUser repo name = do
     result <- register repo name "password" Admin (WorkerId 1)
     case result of

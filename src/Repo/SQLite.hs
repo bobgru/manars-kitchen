@@ -125,7 +125,7 @@ mkSQLiteRepo path = do
 -- Users
 -- =====================================================================
 
-sqlCreateUser :: Connection -> String -> String -> Role -> WorkerId -> IO UserId
+sqlCreateUser :: Connection -> Text -> Text -> Role -> WorkerId -> IO UserId
 sqlCreateUser conn name passHash role (WorkerId wid) = do
     execute conn
         "INSERT INTO users (username, password_hash, role, worker_id) VALUES (?, ?, ?, ?)"
@@ -141,7 +141,7 @@ sqlGetUser conn (UserId uid) = do
         [(i, n, h, r, w)] -> Just (toUser i n h r w)
         _                 -> Nothing
 
-sqlGetUserByName :: Connection -> String -> IO (Maybe User)
+sqlGetUserByName :: Connection -> Text -> IO (Maybe User)
 sqlGetUserByName conn name = do
     rows <- query conn
         "SELECT id, username, password_hash, role, worker_id FROM users WHERE username = ?"
@@ -150,7 +150,7 @@ sqlGetUserByName conn name = do
         [(i, n, h, r, w)] -> Just (toUser i n h r w)
         _                 -> Nothing
 
-sqlUpdatePassword :: Connection -> UserId -> String -> IO ()
+sqlUpdatePassword :: Connection -> UserId -> Text -> IO ()
 sqlUpdatePassword conn (UserId uid) passHash =
     execute conn "UPDATE users SET password_hash = ? WHERE id = ?" (passHash, uid)
 
@@ -163,7 +163,7 @@ sqlDeleteUser :: Connection -> UserId -> IO ()
 sqlDeleteUser conn (UserId uid) =
     execute conn "DELETE FROM users WHERE id = ?" (Only uid)
 
-toUser :: Int -> String -> String -> String -> Int -> User
+toUser :: Int -> Text -> Text -> Text -> Int -> User
 toUser i n h r w = User
     { userId       = UserId i
     , userName     = Username n
@@ -176,12 +176,12 @@ toUser i n h r w = User
 -- Skills (entity CRUD — preserves name/description)
 -- =====================================================================
 
-sqlCreateSkill :: Connection -> String -> String -> IO (Either String ())
+sqlCreateSkill :: Connection -> Text -> Text -> IO (Either String ())
 sqlCreateSkill conn name desc = do
-    existing <- query conn "SELECT name FROM skills WHERE name = ?" (Only name) :: IO [[String]]
+    existing <- query conn "SELECT name FROM skills WHERE name = ?" (Only name) :: IO [[Text]]
     case existing of
         [_]:_ -> return $ Left $
-            "Skill " ++ name ++ " already exists. Use 'skill rename " ++ shellQuote name ++ " <new-name>' to rename."
+            "Skill " ++ T.unpack name ++ " already exists. Use 'skill rename " ++ shellQuote (T.unpack name) ++ " <new-name>' to rename."
         _ -> do
             execute conn
                 "INSERT INTO skills (name, description) VALUES (?, ?)"
@@ -202,7 +202,7 @@ sqlListSkills conn = do
         :: IO [(Int, Text, Text)]
     return [(SkillId sid, Skill name desc) | (sid, name, desc) <- rows]
 
-sqlRenameSkill :: Connection -> SkillId -> String -> IO ()
+sqlRenameSkill :: Connection -> SkillId -> Text -> IO ()
 sqlRenameSkill conn (SkillId sid) newName =
     execute conn "UPDATE skills SET name = ? WHERE id = ?" (newName, sid)
 
@@ -222,21 +222,23 @@ sqlRemoveSkillImplication conn (SkillId s) (SkillId i) =
 -- Stations (entity CRUD)
 -- =====================================================================
 
-sqlCreateStation :: Connection -> StationId -> String -> IO ()
-sqlCreateStation conn (StationId sid) name =
+sqlCreateStation :: Connection -> Text -> IO StationId
+sqlCreateStation conn name = do
     execute conn
-        "INSERT OR REPLACE INTO stations (id, name) VALUES (?, ?)"
-        (sid, name)
+        "INSERT INTO stations (name) VALUES (?)"
+        (Only name)
+    rowId <- lastInsertRowId conn
+    return (StationId (fromIntegral rowId))
 
 sqlDeleteStation :: Connection -> StationId -> IO ()
 sqlDeleteStation conn (StationId sid) = do
     execute conn "DELETE FROM station_required_skills WHERE station_id = ?" (Only sid)
     execute conn "DELETE FROM stations WHERE id = ?" (Only sid)
 
-sqlListStations :: Connection -> IO [(StationId, String)]
+sqlListStations :: Connection -> IO [(StationId, Text)]
 sqlListStations conn = do
     rows <- query_ conn "SELECT id, name FROM stations ORDER BY id"
-        :: IO [(Int, String)]
+        :: IO [(Int, Text)]
     return [(StationId sid, name) | (sid, name) <- rows]
 
 -- =====================================================================
@@ -252,12 +254,8 @@ sqlSaveSkillCtx conn ctx = withTransaction conn $ do
     execute_ conn "DELETE FROM station_open_hours"
     execute_ conn "DELETE FROM station_multi_hours"
 
-    -- Ensure stations exist (preserve station names)
-    mapM_ (\(StationId sid) ->
-        execute conn
-            "INSERT OR IGNORE INTO stations (id, name) VALUES (?, ?)"
-            (sid, "" :: String)
-        ) (Set.toList (scAllStations ctx))
+    -- Stations are created via repoCreateStation (auto-increment);
+    -- scAllStations tracks which ones exist for the skill context.
 
     -- Skill implications
     mapM_ (\(SkillId sid, implies) ->
@@ -452,7 +450,7 @@ sqlLoadWorkerCtx conn = do
     -- Shift preferences
     spRows <- query_ conn
         "SELECT worker_id, shift_name FROM worker_shift_prefs ORDER BY worker_id, rank"
-        :: IO [(Int, String)]
+        :: IO [(Int, Text)]
     let shiftPrefs = Map.fromListWith (++) [(WorkerId w, [s]) | (w, s) <- spRows]
 
     -- Weekend-only
@@ -581,7 +579,7 @@ sqlLoadAbsenceCtx conn = do
     -- Absence requests
     rRows <- query_ conn
         "SELECT id, worker_id, type_id, start_day, end_day, status FROM absence_requests"
-        :: IO [(Int, Int, Int, String, String, String)]
+        :: IO [(Int, Int, Int, Text, Text, Text)]
     let requests = Map.fromList
             [(AbsenceId aid, AbsenceRequest
                 { arId       = AbsenceId aid
@@ -622,21 +620,21 @@ sqlSaveShift conn sd =
         "INSERT OR REPLACE INTO shifts (name, start_hour, end_hour) VALUES (?, ?, ?)"
         (sdName sd, sdStart sd, sdEnd sd)
 
-sqlDeleteShift :: Connection -> String -> IO ()
+sqlDeleteShift :: Connection -> Text -> IO ()
 sqlDeleteShift conn name =
     execute conn "DELETE FROM shifts WHERE name = ?" (Only name)
 
 sqlLoadShifts :: Connection -> IO [ShiftDef]
 sqlLoadShifts conn = do
     rows <- query_ conn "SELECT name, start_hour, end_hour FROM shifts ORDER BY start_hour, name"
-        :: IO [(String, Int, Int)]
+        :: IO [(Text, Int, Int)]
     return [ShiftDef name sh eh | (name, sh, eh) <- rows]
 
 -- =====================================================================
 -- Schedules
 -- =====================================================================
 
-sqlSaveSchedule :: Connection -> String -> Schedule -> IO ()
+sqlSaveSchedule :: Connection -> Text -> Schedule -> IO ()
 sqlSaveSchedule conn name (Schedule assignments) = withTransaction conn $ do
     -- Upsert the schedule name
     execute conn
@@ -657,7 +655,7 @@ sqlSaveSchedule conn name (Schedule assignments) = withTransaction conn $ do
              diffTimeToSeconds (slotDuration s))
         ) (Set.toList assignments)
 
-sqlLoadSchedule :: Connection -> String -> IO (Maybe Schedule)
+sqlLoadSchedule :: Connection -> Text -> IO (Maybe Schedule)
 sqlLoadSchedule conn name = do
     exists <- query conn "SELECT 1 FROM schedules WHERE name = ?" (Only name)
         :: IO [Only Int]
@@ -668,20 +666,20 @@ sqlLoadSchedule conn name = do
                 "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
                 \FROM assignments WHERE schedule_name = ?"
                 (Only name)
-                :: IO [(Int, Int, String, String, Int)]
+                :: IO [(Int, Int, Text, Text, Int)]
             let as = Set.fromList
                     [Assignment (WorkerId w) (StationId st)
                         (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
                     | (w, st, d, t, dur) <- rows]
             return (Just (Schedule as))
 
-sqlListSchedules :: Connection -> IO [String]
+sqlListSchedules :: Connection -> IO [Text]
 sqlListSchedules conn = do
     rows <- query_ conn "SELECT name FROM schedules ORDER BY created_at DESC"
-        :: IO [Only String]
+        :: IO [Only Text]
     return [n | Only n <- rows]
 
-sqlDeleteSchedule :: Connection -> String -> IO ()
+sqlDeleteSchedule :: Connection -> Text -> IO ()
 sqlDeleteSchedule conn name = do
     execute conn "DELETE FROM assignments WHERE schedule_name = ?" (Only name)
     execute conn "DELETE FROM schedules WHERE name = ?" (Only name)
@@ -690,9 +688,9 @@ sqlDeleteSchedule conn name = do
 -- Audit log
 -- =====================================================================
 
-sqlLogCommand :: Connection -> String -> String -> IO ()
+sqlLogCommand :: Connection -> Text -> Text -> IO ()
 sqlLogCommand conn username command =
-    let meta = classify command
+    let meta = classify (T.unpack command)
         mut  = if cmIsMutation meta then (1 :: Int) else 0
     in execute conn
         "INSERT INTO audit_log (username, command, entity_type, operation, \
@@ -705,9 +703,9 @@ sqlLogCommand conn username command =
         , mut, cmParams meta
         )
 
-sqlLogRpcCommand :: Connection -> String -> String -> IO ()
+sqlLogRpcCommand :: Connection -> Text -> Text -> IO ()
 sqlLogRpcCommand conn username command =
-    let meta = classify command
+    let meta = classify (T.unpack command)
         mut  = if cmIsMutation meta then (1 :: Int) else 0
     in execute conn
         "INSERT INTO audit_log (username, command, entity_type, operation, \
@@ -720,9 +718,9 @@ sqlLogRpcCommand conn username command =
         , mut, cmParams meta
         )
 
-sqlLogCommandWithSource :: Connection -> String -> String -> String -> IO ()
+sqlLogCommandWithSource :: Connection -> Text -> Text -> Text -> IO ()
 sqlLogCommandWithSource conn username command source =
-    let meta = classify command
+    let meta = classify (T.unpack command)
         mut  = if cmIsMutation meta then (1 :: Int) else 0
     in execute conn
         "INSERT INTO audit_log (username, command, entity_type, operation, \
@@ -785,9 +783,9 @@ sqlLoadSchedulerConfig conn = do
 sqlLoadPayPeriodConfig :: Connection -> IO (Maybe PayPeriodConfig)
 sqlLoadPayPeriodConfig conn = do
     rows <- query_ conn "SELECT period_type, anchor_date FROM pay_period_config LIMIT 1"
-        :: IO [(String, String)]
+        :: IO [(Text, Text)]
     return $ case rows of
-        [(pt, ad)] -> case parsePayPeriodType pt of
+        [(pt, ad)] -> case parsePayPeriodType (T.unpack pt) of
             Just ptype -> Just (PayPeriodConfig ptype (textToDay ad))
             Nothing    -> Nothing
         _ -> Nothing
@@ -798,7 +796,7 @@ sqlSavePayPeriodConfig conn cfg = do
     execute_ conn "DELETE FROM pay_period_config"
     execute conn
         "INSERT INTO pay_period_config (period_type, anchor_date) VALUES (?, ?)"
-        (showPayPeriodType (ppcType cfg), dayToText (ppcAnchorDate cfg))
+        (T.pack (showPayPeriodType (ppcType cfg)), dayToText (ppcAnchorDate cfg))
 
 -- =====================================================================
 -- Worker seniority
@@ -878,7 +876,7 @@ sqlSavePins conn pins = withTransaction conn $ do
             StationId sid = pinStation p
             dow = showDow (pinDay p)
             (shiftName, hour) = case pinSpec p of
-                PinSlot h   -> (Nothing :: Maybe String, h)
+                PinSlot h   -> (Nothing :: Maybe Text, h)
                 PinShift sn -> (Just sn, -1)
         execute conn
             "INSERT INTO pinned_assignments (worker_id, station_id, day_of_week, shift_name, hour) \
@@ -890,7 +888,7 @@ sqlLoadPins :: Connection -> IO [PinnedAssignment]
 sqlLoadPins conn = do
     rows <- query_ conn
         "SELECT worker_id, station_id, day_of_week, shift_name, hour FROM pinned_assignments"
-        :: IO [(Int, Int, String, Maybe String, Int)]
+        :: IO [(Int, Int, String, Maybe Text, Int)]
     return [ PinnedAssignment (WorkerId w) (StationId s) (parseDow d) spec
            | (w, s, d, mShift, h) <- rows
            , let spec = case mShift of
@@ -971,7 +969,7 @@ sqlLoadCalendar conn dateFrom dateTo = do
         "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
         \FROM calendar_assignments WHERE slot_date >= ? AND slot_date <= ?"
         (dayToText dateFrom, dayToText dateTo)
-        :: IO [(Int, Int, String, String, Int)]
+        :: IO [(Int, Int, Text, Text, Int)]
     let as = Set.fromList
             [Assignment (WorkerId w) (StationId st)
                 (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
@@ -979,7 +977,7 @@ sqlLoadCalendar conn dateFrom dateTo = do
     return (Schedule as)
 
 -- | Insert commit metadata and snapshot assignments, return commit id.
-sqlSaveCommit :: Connection -> Day -> Day -> String -> Schedule -> IO Int
+sqlSaveCommit :: Connection -> Day -> Day -> Text -> Schedule -> IO Int
 sqlSaveCommit conn dateFrom dateTo note (Schedule assignments) = withTransaction conn $ do
     execute conn
         "INSERT INTO calendar_commits (committed_at, date_from, date_to, note) \
@@ -1005,18 +1003,17 @@ sqlListCommits conn = do
     rows <- query_ conn
         "SELECT id, committed_at, date_from, date_to, note \
         \FROM calendar_commits ORDER BY id DESC"
-        :: IO [(Int, String, String, String, String)]
+        :: IO [(Int, Text, Text, Text, Text)]
     return [CalendarCommit cid ts (textToDay df) (textToDay dt) n
            | (cid, ts, df, dt, n) <- rows]
 
--- | Load snapshot assignments for a commit id.
 sqlLoadCommitAssignments :: Connection -> Int -> IO Schedule
 sqlLoadCommitAssignments conn commitId = do
     rows <- query conn
         "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
         \FROM calendar_commit_assignments WHERE commit_id = ?"
         (Only commitId)
-        :: IO [(Int, Int, String, String, Int)]
+        :: IO [(Int, Int, Text, Text, Int)]
     let as = Set.fromList
             [Assignment (WorkerId w) (StationId st)
                 (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
@@ -1057,18 +1054,17 @@ sqlListDrafts conn = do
     rows <- query_ conn
         "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
         \FROM drafts ORDER BY created_at"
-        :: IO [(Int, String, String, String, String)]
+        :: IO [(Int, Text, Text, Text, Text)]
     return [DraftInfo did (textToDay df) (textToDay dt) ts lv
            | (did, df, dt, ts, lv) <- rows]
 
--- | Get a single draft by id.
 sqlGetDraft :: Connection -> Int -> IO (Maybe DraftInfo)
 sqlGetDraft conn draftId = do
     rows <- query conn
         "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
         \FROM drafts WHERE draft_id = ?"
         (Only draftId)
-        :: IO [(Int, String, String, String, String)]
+        :: IO [(Int, Text, Text, Text, Text)]
     return $ case rows of
         [(did, df, dt, ts, lv)] -> Just (DraftInfo did (textToDay df) (textToDay dt) ts lv)
         _                       -> Nothing
@@ -1105,21 +1101,20 @@ sqlLoadDraftAssignments conn draftId = do
         "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
         \FROM draft_assignments WHERE draft_id = ?"
         (Only draftId)
-        :: IO [(Int, Int, String, String, Int)]
+        :: IO [(Int, Int, Text, Text, Int)]
     let as = Set.fromList
             [Assignment (WorkerId w) (StationId st)
                 (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
             | (w, st, d, t, dur) <- rows]
     return (Schedule as)
 
--- | List calendar commits with committed_at after the given timestamp.
-sqlCalendarCommitsAfter :: Connection -> String -> IO [CalendarCommit]
+sqlCalendarCommitsAfter :: Connection -> Text -> IO [CalendarCommit]
 sqlCalendarCommitsAfter conn ts = do
     rows <- query conn
         "SELECT id, committed_at, date_from, date_to, note \
         \FROM calendar_commits WHERE committed_at > ? ORDER BY id DESC"
         (Only ts)
-        :: IO [(Int, String, String, String, String)]
+        :: IO [(Int, Text, Text, Text, Text)]
     return [CalendarCommit cid ca (textToDay df) (textToDay dt) n
            | (cid, ca, df, dt, n) <- rows]
 
@@ -1134,27 +1129,26 @@ sqlUpdateDraftValidatedAt conn draftId =
 -- Checkpoint (SQLite savepoints)
 -- =====================================================================
 
-sqlSavepoint :: Connection -> String -> IO ()
+sqlSavepoint :: Connection -> Text -> IO ()
 sqlSavepoint conn name =
-    execute_ conn (Query (fromString ("SAVEPOINT \"" ++ sanitize name ++ "\"")))
+    execute_ conn (Query (fromString ("SAVEPOINT \"" ++ T.unpack (sanitize name) ++ "\"")))
 
-sqlRelease :: Connection -> String -> IO ()
+sqlRelease :: Connection -> Text -> IO ()
 sqlRelease conn name =
-    execute_ conn (Query (fromString ("RELEASE SAVEPOINT \"" ++ sanitize name ++ "\"")))
+    execute_ conn (Query (fromString ("RELEASE SAVEPOINT \"" ++ T.unpack (sanitize name) ++ "\"")))
 
-sqlRollbackTo :: Connection -> String -> IO ()
+sqlRollbackTo :: Connection -> Text -> IO ()
 sqlRollbackTo conn name =
-    execute_ conn (Query (fromString ("ROLLBACK TO SAVEPOINT \"" ++ sanitize name ++ "\"")))
+    execute_ conn (Query (fromString ("ROLLBACK TO SAVEPOINT \"" ++ T.unpack (sanitize name) ++ "\"")))
 
--- | Basic sanitization: remove quotes to prevent SQL injection.
-sanitize :: String -> String
-sanitize = filter (/= '"')
+sanitize :: Text -> Text
+sanitize = T.filter (/= '"')
 
 -- =====================================================================
 -- Sessions
 -- =====================================================================
 
-sqlCreateSession :: Connection -> UserId -> IO (SessionId, String)
+sqlCreateSession :: Connection -> UserId -> IO (SessionId, Text)
 sqlCreateSession conn (UserId uid) = do
     tok <- generateToken
     execute conn "INSERT INTO sessions (user_id, token) VALUES (?, ?)" (uid, tok)
@@ -1184,23 +1178,22 @@ sqlCloseSession conn (SessionId sid) =
         "UPDATE sessions SET is_active = 0 WHERE id = ?"
         (Only sid)
 
-sqlGetSessionByToken :: Connection -> String -> IO (Maybe (SessionId, UserId, UTCTime))
+sqlGetSessionByToken :: Connection -> Text -> IO (Maybe (SessionId, UserId, UTCTime))
 sqlGetSessionByToken conn tok = do
     rows <- query conn
         "SELECT id, user_id, last_active_at FROM sessions \
         \WHERE token = ? AND is_active = 1 LIMIT 1"
         (Only tok)
-        :: IO [(Int, Int, String)]
+        :: IO [(Int, Int, Text)]
     return $ case rows of
         [(sid, uid, la)] -> case parseUTCTime la of
             Just t  -> Just (SessionId sid, UserId uid, t)
             Nothing -> Nothing
         _ -> Nothing
 
--- | Parse a SQLite datetime string to UTCTime.
-parseUTCTime :: String -> Maybe UTCTime
+parseUTCTime :: Text -> Maybe UTCTime
 parseUTCTime s =
-    parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S" s
+    parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S" (T.unpack s)
 
 -- | Get the user ID that owns a session.
 sqlGetSessionOwner :: Connection -> SessionId -> IO (Maybe UserId)
@@ -1218,17 +1211,17 @@ sqlGetIdleTimeoutMinutes :: Connection -> IO Double
 sqlGetIdleTimeoutMinutes conn = do
     rows <- query conn
         "SELECT value FROM scheduler_config WHERE key = ?"
-        (Only ("session_idle_timeout_minutes" :: String))
+        (Only ("session_idle_timeout_minutes" :: Text))
         :: IO [Only Double]
     return $ case rows of
         [Only v] -> v
         _        -> 30.0
 
 -- | Generate a random 64-character hex token (32 bytes of entropy).
-generateToken :: IO String
+generateToken :: IO Text
 generateToken = do
     bytes <- mapM (\_ -> randomRIO (0, 255 :: Int)) [(1::Int)..32]
-    return $ concatMap (\b -> let h = showHex b "" in if b < 16 then '0':h else h) bytes
+    return $ T.pack $ concatMap (\b -> let h = showHex b "" in if b < 16 then '0':h else h) bytes
 
 -- =====================================================================
 -- Hint sessions

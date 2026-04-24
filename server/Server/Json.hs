@@ -58,13 +58,14 @@ module Server.Json
     ) where
 
 import Data.Aeson
-    ( ToJSONKey(..), ToJSON(..), FromJSONKey (..), FromJSON(..), (.=), (.:), (.:?)
+    ( ToJSON(..), FromJSON(..), (.=), (.:), (.:?)
     , object, withObject, withText
     )
 import qualified Data.Aeson.Types
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Text (pack, unpack)
+import Data.Text (unpack)
+import qualified Data.Text as T
 import Data.Time
     ( Day, DayOfWeek(..), TimeOfDay(..)
     , formatTime, defaultTimeLocale, parseTimeM
@@ -103,17 +104,8 @@ instance FromJSON StationId where
 instance ToJSON SkillId where
     toJSON (SkillId i) = toJSON i
 
-instance ToJSONKey SkillId where
-    toJSONKey = Data.Aeson.Types.toJSONKeyText (\(SkillId i) -> pack (show i)) 
-
 instance FromJSON SkillId where
     parseJSON v = SkillId <$> parseJSON v
-
-instance FromJSONKey SkillId where
-    fromJSONKey = Data.Aeson.Types.FromJSONKeyTextParser $ \t -> do
-        case reads (unpack t) of
-            [(i, "")] -> pure (SkillId i)
-            _         -> fail("invalid SkillId key: " ++ unpack t)
 
 instance ToJSON AbsenceId where
     toJSON (AbsenceId i) = toJSON i
@@ -336,7 +328,7 @@ instance FromJSON GenerateDraftReq where
         GenerateDraftReq <$> v .: "workerIds"
 
 data CommitDraftReq = CommitDraftReq
-    { cmrNote :: !String
+    { cmrNote :: !T.Text
     } deriving (Show)
 
 instance ToJSON CommitDraftReq where
@@ -536,8 +528,8 @@ instance FromJSON AuditEntry where
 -- -----------------------------------------------------------------
 
 data CreateSkillReq = CreateSkillReq
-    { csrName        :: !String
-    , csrDescription :: !String
+    { csrName        :: !T.Text
+    , csrDescription :: !T.Text
     } deriving (Show)
 
 instance ToJSON CreateSkillReq where
@@ -548,7 +540,7 @@ instance FromJSON CreateSkillReq where
         CreateSkillReq <$> v .: "name" <*> v .: "description"
 
 data RenameSkillReq = RenameSkillReq
-    { rsrName :: !String
+    { rsrName :: !T.Text
     } deriving (Show)
 
 instance ToJSON RenameSkillReq where
@@ -559,15 +551,15 @@ instance FromJSON RenameSkillReq where
         RenameSkillReq <$> v .: "name"
 
 data AddImplicationReq = AddImplicationReq
-    { airImpliesSkillId :: !Int
+    { airImpliesSkillName :: !String
     } deriving (Show)
 
 instance ToJSON AddImplicationReq where
-    toJSON r = object ["impliesSkillId" .= airImpliesSkillId r]
+    toJSON r = object ["impliesSkillName" .= airImpliesSkillName r]
 
 instance FromJSON AddImplicationReq where
     parseJSON = withObject "AddImplicationReq" $ \v ->
-        AddImplicationReq <$> v .: "impliesSkillId"
+        AddImplicationReq <$> v .: "impliesSkillName"
 
 data CreateStationReq = CreateStationReq
     { cstrId   :: !Int
@@ -823,7 +815,7 @@ instance FromJSON SetPayPeriodReq where
 -- -----------------------------------------------------------------
 
 data CreateCheckpointReq = CreateCheckpointReq
-    { ccrName :: !String
+    { ccrName :: !T.Text
     } deriving (Show)
 
 instance ToJSON CreateCheckpointReq where
@@ -904,8 +896,8 @@ instance FromJSON SetAbsenceAllowanceReq where
 -- -----------------------------------------------------------------
 
 data CreateUserReq = CreateUserReq
-    { curUsername :: !String
-    , curPassword :: !String
+    { curUsername :: !T.Text
+    , curPassword :: !T.Text
     , curRole     :: !Role
     , curWorkerId :: !Int
     } deriving (Show)
@@ -977,11 +969,11 @@ newtype SkillReferencesResp = SkillReferencesResp SW.SkillReferences
 
 instance ToJSON SkillReferencesResp where
     toJSON (SkillReferencesResp refs) = object
-        [ "workers"       .= [object ["id" .= wid, "name" .= n] | (wid, n) <- SW.srWorkers refs]
-        , "stations"      .= [object ["id" .= sid, "name" .= n] | (sid, n) <- SW.srStations refs]
-        , "crossTraining" .= [object ["id" .= wid, "name" .= n] | (wid, n) <- SW.srCrossTraining refs]
-        , "impliedBy"     .= [object ["id" .= sid, "name" .= n] | (sid, n) <- SW.srImpliedBy refs]
-        , "implies"       .= [object ["id" .= sid, "name" .= n] | (sid, n) <- SW.srImplies refs]
+        [ "workers"       .= [object ["name" .= n] | (_, n) <- SW.srWorkers refs]
+        , "stations"      .= [object ["name" .= n] | (_, n) <- SW.srStations refs]
+        , "crossTraining" .= [object ["name" .= n] | (_, n) <- SW.srCrossTraining refs]
+        , "impliedBy"     .= [object ["name" .= n] | (_, n) <- SW.srImpliedBy refs]
+        , "implies"       .= [object ["name" .= n] | (_, n) <- SW.srImplies refs]
         ]
 
 -- -----------------------------------------------------------------

@@ -7,7 +7,8 @@ import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Exception (bracket, SomeException, try)
 import Control.Monad (when, forever)
 import Data.Aeson (encode, object, (.=))
-import qualified Data.ByteString.Char8 as BS8
+import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.ByteString.Builder (Builder, byteString, lazyByteString)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Network.HTTP.Types (status200, status401)
@@ -24,7 +25,7 @@ eventStreamApp repo bus req sendResponse = do
     case mToken of
         Nothing -> send401 "Missing token"
         Just tokBS -> do
-            let tok = BS8.unpack tokBS
+            let tok = TE.decodeUtf8 tokBS
             mSession <- repoGetSessionByToken repo tok
             case mSession of
                 Nothing -> send401 "Invalid session"
@@ -58,7 +59,7 @@ eventStreamApp repo bus req sendResponse = do
             ] $ \write flush ->
                 bracket
                     (subscribe cmdBus ".*" $ \_ event ->
-                        when (cmIsMutation (ceMeta event) && ceUsername event == uname) $
+                        when (cmIsMutation (ceMeta event) && ceUsername event == T.unpack uname) $
                             writeChan chan $ byteString "data: "
                                 <> lazyByteString (encode $ object
                                     [ "command"    .= ceCommand event

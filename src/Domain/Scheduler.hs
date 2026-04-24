@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Domain.Scheduler
     ( -- * Types
       SchedulerContext(..)

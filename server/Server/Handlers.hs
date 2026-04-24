@@ -16,8 +16,9 @@ import Data.Time (Day)
 import Servant
 
 import Auth.Types (User(..), Username(..), Role(..))
+import Data.Text (Text)
 import Domain.Types (WorkerId(..), StationId(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule)
-import Domain.Skill (Skill, skillName)
+import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef(..))
 import Domain.Scheduler (ScheduleResult)
 import Domain.Absence (AbsenceRequest(..), AbsenceType(..), AbsenceContext(..))
@@ -47,7 +48,16 @@ import Utils (shellQuote)
 -- | Publish a command event from a REST handler.
 logRest :: TopicBus CommandEvent -> User -> String -> Handler ()
 logRest cmdBus user cmd = let Username uname = userName user
-                          in liftIO $ publishCommand cmdBus GUI uname cmd
+                          in liftIO $ publishCommand cmdBus GUI (T.unpack uname) cmd
+
+-- | Resolve a skill name to a SkillId; throws 404 if not found.
+resolveSkillName :: Repository -> Text -> Handler SkillId
+resolveSkillName repo name = do
+    skills <- liftIO $ repoListSkills repo
+    let nameLower = T.toLower name
+    case [sid | (sid, sk) <- skills, T.toLower (skillName sk) == nameLower] of
+        (sid:_) -> pure sid
+        []      -> throwApiError (NotFound ("Unknown skill: " ++ T.unpack name))
 
 -- | Look up a skill name by ID; returns the ID as a string if not found.
 lookupSkillName :: Repository -> SkillId -> IO String
@@ -62,7 +72,7 @@ lookupStationName :: Repository -> StationId -> IO String
 lookupStationName repo stid = do
     stations <- repoListStations repo
     case lookup stid stations of
-        Just n  -> return n
+        Just n  -> return (T.unpack n)
         Nothing -> let StationId i = stid in return (show i)
 
 -- | Look up a worker name by ID; returns the ID as a string if not found.
@@ -70,7 +80,7 @@ lookupWorkerName :: Repository -> WorkerId -> IO String
 lookupWorkerName repo wid = do
     users <- repoListUsers repo
     case [uname | u <- users, userWorkerId u == wid, let Username uname = userName u] of
-        (n:_) -> return n
+        (n:_) -> return (T.unpack n)
         []    -> let WorkerId i = wid in return (show i)
 
 -- | REST server for protected endpoints. User is threaded through from AuthProtect.
@@ -187,10 +197,12 @@ fullServer execEnv repo =
 -- Skills / Stations / Shifts (read — no auth guard needed)
 -- -----------------------------------------------------------------
 
-handleListSkills :: Repository -> Handler [(SkillId, Skill)]
-handleListSkills repo = liftIO $ SW.listSkills repo
+handleListSkills :: Repository -> Handler [Skill]
+handleListSkills repo = do
+    skills <- liftIO $ SW.listSkills repo
+    pure [sk | (_, sk) <- skills]
 
-handleListStations :: Repository -> Handler [(Int, String)]
+handleListStations :: Repository -> Handler [(Int, T.Text)]
 handleListStations repo = do
     stations <- liftIO $ SW.listStations repo
     pure [(i, n) | (StationId i, n) <- stations]
@@ -202,12 +214,12 @@ handleListShifts repo = liftIO $ repoLoadShifts repo
 -- Schedules
 -- -----------------------------------------------------------------
 
-handleListSchedules :: Repository -> Handler [String]
+handleListSchedules :: Repository -> Handler [T.Text]
 handleListSchedules repo = liftIO $ SS.listSchedules repo
 
 handleGetSchedule :: Repository -> String -> Handler Schedule
 handleGetSchedule repo name = do
-    mSched <- liftIO $ SS.getSchedule repo name
+    mSched <- liftIO $ SS.getSchedule repo (T.pack name)
     case mSched of
         Nothing -> throwApiError (NotFound ("Schedule not found: " ++ name))
         Just s  -> pure s
@@ -215,7 +227,7 @@ handleGetSchedule repo name = do
 handleDeleteSchedule :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleDeleteSchedule cmdBus repo user name = do
     requireAdmin user
-    liftIO $ SS.deleteSchedule repo name
+    liftIO $ SS.deleteSchedule repo (T.pack name)
     logRest cmdBus user ("schedule delete " ++ shellQuote name)
     pure NoContent
 
@@ -353,57 +365,66 @@ handleCreateSkill cmdBus repo user req = do
     case result of
         Left err -> throwApiError (Conflict err)
         Right () -> do
-            logRest cmdBus user ("skill create " ++ shellQuote (csrName req))
+            logRest cmdBus user ("skill create " ++ shellQuote (T.unpack (csrName req)))
             pure NoContent
 
-handleDeleteSkill :: TopicBus CommandEvent -> Repository -> User -> SkillId -> Handler NoContent
-handleDeleteSkill cmdBus repo user sid = do
+handleDeleteSkill :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
+handleDeleteSkill cmdBus repo user name = do
     requireAdmin user
+    sid <- resolveSkillName repo name
     result <- liftIO $ SW.safeDeleteSkill repo sid
     case result of
         Right () -> do
-            sName <- liftIO $ lookupSkillName repo sid
-            logRest cmdBus user ("skill delete " ++ shellQuote sName)
+            logRest cmdBus user ("skill delete " ++ shellQuote (T.unpack name))
             pure NoContent
         Left refs -> throwError $ err409
             { errBody = encode (toJSON (SkillReferencesResp refs))
             , errHeaders = [("Content-Type", "application/json")]
             }
 
-handleForceDeleteSkill :: ExecuteEnv -> Repository -> User -> SkillId -> Handler NoContent
-handleForceDeleteSkill execEnv _repo user sid = do
+handleForceDeleteSkill :: ExecuteEnv -> Repository -> User -> Text -> Handler NoContent
+handleForceDeleteSkill execEnv repo user name = do
     requireAdmin user
-    let SkillId i = sid
-    _ <- liftIO $ executeCommandText execEnv user ("skill force-delete " ++ show i)
+    _ <- resolveSkillName repo name
+    _ <- liftIO $ executeCommandText execEnv user ("skill force-delete " ++ shellQuote (T.unpack name))
     pure NoContent
 
-handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> SkillId -> RenameSkillReq -> Handler NoContent
-handleRenameSkill cmdBus repo user sid req = do
+handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> Text -> RenameSkillReq -> Handler NoContent
+handleRenameSkill cmdBus repo user name req = do
     requireAdmin user
+    sid <- resolveSkillName repo name
     liftIO $ SW.renameSkill repo sid (rsrName req)
-    logRest cmdBus user ("skill rename " ++ show sid ++ " " ++ shellQuote (rsrName req))
+    logRest cmdBus user ("skill rename " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack (rsrName req)))
     pure NoContent
 
-handleListImplications :: Repository -> Handler (Map.Map SkillId [SkillId])
-handleListImplications repo = liftIO $ SW.listSkillImplications repo
+handleListImplications :: Repository -> Handler (Map.Map Text [Text])
+handleListImplications repo = do
+    skills <- liftIO $ SW.listSkills repo
+    implMap <- liftIO $ SW.listSkillImplications repo
+    let nameOf sid = case lookup sid skills of
+            Just sk -> skillName sk
+            Nothing -> T.pack (show sid)
+    pure $ Map.fromList
+        [ (nameOf sid, map nameOf impls)
+        | (sid, impls) <- Map.toList implMap
+        ]
 
-handleAddImplication :: TopicBus CommandEvent -> Repository -> User -> SkillId -> AddImplicationReq -> Handler NoContent
-handleAddImplication cmdBus repo user sid req = do
+handleAddImplication :: TopicBus CommandEvent -> Repository -> User -> Text -> AddImplicationReq -> Handler NoContent
+handleAddImplication cmdBus repo user name req = do
     requireAdmin user
-    sName <- liftIO $ lookupSkillName repo sid
-    let implSid = SkillId (airImpliesSkillId req)
-    implName <- liftIO $ lookupSkillName repo implSid
+    sid <- resolveSkillName repo name
+    implSid <- resolveSkillName repo (T.pack (airImpliesSkillName req))
     liftIO $ SW.addSkillImplication repo sid implSid
-    logRest cmdBus user ("skill implication " ++ shellQuote sName ++ " " ++ shellQuote implName)
+    logRest cmdBus user ("skill implication " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (airImpliesSkillName req))
     pure NoContent
 
-handleRemoveImplication :: TopicBus CommandEvent -> Repository -> User -> SkillId -> SkillId -> Handler NoContent
-handleRemoveImplication cmdBus repo user sid impliedId = do
+handleRemoveImplication :: TopicBus CommandEvent -> Repository -> User -> Text -> Text -> Handler NoContent
+handleRemoveImplication cmdBus repo user name impliedName = do
     requireAdmin user
-    sName <- liftIO $ lookupSkillName repo sid
-    implName <- liftIO $ lookupSkillName repo impliedId
-    liftIO $ SW.removeSkillImplication repo sid impliedId
-    logRest cmdBus user ("skill remove-implication " ++ shellQuote sName ++ " " ++ shellQuote implName)
+    sid <- resolveSkillName repo name
+    impliedSid <- resolveSkillName repo impliedName
+    liftIO $ SW.removeSkillImplication repo sid impliedSid
+    logRest cmdBus user ("skill remove-implication " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack impliedName))
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -413,7 +434,7 @@ handleRemoveImplication cmdBus repo user sid impliedId = do
 handleCreateStation :: TopicBus CommandEvent -> Repository -> User -> CreateStationReq -> Handler NoContent
 handleCreateStation cmdBus repo user req = do
     requireAdmin user
-    liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
+    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req))
     logRest cmdBus user ("station add " ++ shellQuote (cstrName req))
     pure NoContent
 
@@ -448,14 +469,14 @@ handleSetStationClosure cmdBus repo user sid req = do
 handleCreateShift :: TopicBus CommandEvent -> Repository -> User -> CreateShiftReq -> Handler NoContent
 handleCreateShift cmdBus repo user req = do
     requireAdmin user
-    liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
+    liftIO $ repoSaveShift repo (ShiftDef (T.pack (cshrName req)) (cshrStart req) (cshrEnd req))
     logRest cmdBus user ("shift create " ++ shellQuote (cshrName req) ++ " " ++ show (cshrStart req) ++ " " ++ show (cshrEnd req))
     pure NoContent
 
 handleDeleteShift :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleDeleteShift cmdBus repo user name = do
     requireAdmin user
-    liftIO $ repoDeleteShift repo name
+    liftIO $ repoDeleteShift repo (T.pack name)
     logRest cmdBus user ("shift delete " ++ shellQuote name)
     pure NoContent
 
@@ -500,7 +521,7 @@ handleSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> User -> Int 
 handleSetWorkerShiftPrefs cmdBus repo user wid req = do
     requireSelfOrAdmin user wid
     wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setShiftPreferences repo (WorkerId wid) (swsprShifts req)
+    liftIO $ SW.setShiftPreferences repo (WorkerId wid) (map T.pack (swsprShifts req))
     logRest cmdBus user ("worker set-shift-pref " ++ shellQuote wName)
     pure NoContent
 
@@ -703,20 +724,20 @@ handleCreateCheckpoint :: TopicBus CommandEvent -> Repository -> User -> CreateC
 handleCreateCheckpoint cmdBus repo user req = do
     requireAdmin user
     liftIO $ repoSavepoint repo (ccrName req)
-    logRest cmdBus user ("checkpoint create " ++ shellQuote (ccrName req))
+    logRest cmdBus user ("checkpoint create " ++ shellQuote (T.unpack (ccrName req)))
     pure NoContent
 
 handleCommitCheckpoint :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleCommitCheckpoint cmdBus repo user name = do
     requireAdmin user
-    liftIO $ repoRelease repo name
+    liftIO $ repoRelease repo (T.pack name)
     logRest cmdBus user ("checkpoint commit " ++ shellQuote name)
     pure NoContent
 
 handleRollbackCheckpoint :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleRollbackCheckpoint cmdBus repo user name = do
     requireAdmin user
-    liftIO $ repoRollbackTo repo name
+    liftIO $ repoRollbackTo repo (T.pack name)
     logRest cmdBus user ("checkpoint rollback " ++ shellQuote name)
     pure NoContent
 
@@ -789,13 +810,13 @@ handleCreateUser cmdBus repo user req = do
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
         Right _ -> do
-            logRest cmdBus user ("user create " ++ shellQuote (curUsername req))
+            logRest cmdBus user ("user create " ++ shellQuote (T.unpack (curUsername req)))
             pure NoContent
 
 handleDeleteUser :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
 handleDeleteUser cmdBus repo user uname = do
     requireAdmin user
-    mUser <- liftIO $ repoGetUserByName repo uname
+    mUser <- liftIO $ repoGetUserByName repo (T.pack uname)
     case mUser of
         Nothing -> throwApiError (NotFound ("User not found: " ++ uname))
         Just u  -> do

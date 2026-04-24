@@ -54,7 +54,7 @@ spec = do
             parseCommand "skill create \"hot grill\"" `shouldBe` SkillCreate "hot grill"
 
         it "parses station add with quoted multi-word name" $
-            parseCommand "station add 5 \"prep area\"" `shouldBe` StationAdd 5 "prep area"
+            parseCommand "station add \"prep area\"" `shouldBe` StationAdd "prep area"
 
         it "parses shift create with quoted multi-word name" $
             parseCommand "shift create \"morning rush\" 8 17" `shouldBe` ShiftCreate "morning rush" 8 17

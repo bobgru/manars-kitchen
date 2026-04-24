@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useParams, Link } from "react-router";
+import { useParams, Link, useNavigate } from "react-router";
 import {
   fetchSkills,
   fetchImplications,
@@ -12,10 +12,10 @@ import { useEntityEvents } from "../hooks/useSSE";
 
 /** Compute transitive closure for a single skill. */
 function effectiveSkills(
-  skillId: number,
-  direct: Record<number, number[]>
-): Set<number> {
-  const result = new Set(direct[skillId] || []);
+  skillName: string,
+  direct: Record<string, string[]>
+): Set<string> {
+  const result = new Set(direct[skillName] || []);
   let changed = true;
   while (changed) {
     changed = false;
@@ -32,23 +32,24 @@ function effectiveSkills(
 }
 
 export default function SkillDetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const skillId = Number(id);
+  const { name: urlName } = useParams<{ name: string }>();
+  const decodedName = decodeURIComponent(urlName || "");
+  const navigate = useNavigate();
 
   const [skills, setSkills] = useState<SkillInfo[]>([]);
-  const [implications, setImplications] = useState<Record<number, number[]>>(
+  const [implications, setImplications] = useState<Record<string, string[]>>(
     {}
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   // Name editing
-  const [name, setName] = useState("");
+  const [editName, setEditName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
   // Implication toggling
-  const [toggling, setToggling] = useState<number | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -58,14 +59,14 @@ export default function SkillDetailPage() {
       ]);
       setSkills(sk);
       setImplications(impl);
-      const current = sk.find((s) => s.id === skillId);
-      if (current) setName(current.name);
+      const current = sk.find((s) => s.name.toLowerCase() === decodedName.toLowerCase());
+      if (current) setEditName(current.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [skillId]);
+  }, [decodedName]);
 
   useEffect(() => {
     loadData();
@@ -76,7 +77,7 @@ export default function SkillDetailPage() {
   if (loading) return <div className="page loading">Loading...</div>;
   if (error) return <div className="page msg-error">{error}</div>;
 
-  const skill = skills.find((s) => s.id === skillId);
+  const skill = skills.find((s) => s.name.toLowerCase() === decodedName.toLowerCase());
   if (!skill) {
     return (
       <div className="page">
@@ -88,19 +89,17 @@ export default function SkillDetailPage() {
     );
   }
 
-  const nameById: Record<number, string> = {};
-  for (const s of skills) nameById[s.id] = s.name;
-
-  const directImplications = new Set(implications[skillId] || []);
-  const effective = effectiveSkills(skillId, implications);
-  const otherSkills = skills.filter((s) => s.id !== skillId);
+  const directImplications = new Set(implications[skill.name] || []);
+  const effective = effectiveSkills(skill.name, implications);
+  const otherSkills = skills.filter((s) => s.name !== skill.name);
 
   async function handleSave() {
     setSaving(true);
     setSaveMsg("");
     try {
-      await renameSkill(skillId, name);
+      await renameSkill(skill!.name, editName);
       setSaveMsg("Saved");
+      navigate(`/skills/${encodeURIComponent(editName)}`, { replace: true });
       await loadData();
       setTimeout(() => setSaveMsg(""), 2000);
     } catch (err) {
@@ -110,13 +109,13 @@ export default function SkillDetailPage() {
     }
   }
 
-  async function handleToggle(targetId: number, checked: boolean) {
-    setToggling(targetId);
+  async function handleToggle(targetName: string, checked: boolean) {
+    setToggling(targetName);
     try {
       if (checked) {
-        await addImplication(skillId, targetId);
+        await addImplication(skill!.name, targetName);
       } else {
-        await removeImplication(skillId, targetId);
+        await removeImplication(skill!.name, targetName);
       }
       await loadData();
     } catch (err) {
@@ -139,14 +138,14 @@ export default function SkillDetailPage() {
           <input
             className="form-input"
             type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            value={editName}
+            onChange={(e) => setEditName(e.target.value)}
             disabled={saving}
           />
           <button
             className="btn"
             onClick={handleSave}
-            disabled={saving || name === skill.name || !name.trim()}
+            disabled={saving || editName === skill.name || !editName.trim()}
           >
             {saving ? "Saving..." : "Save"}
           </button>
@@ -169,11 +168,11 @@ export default function SkillDetailPage() {
         ) : (
           <div className="checkbox-group">
             {otherSkills.map((s) => (
-              <label key={s.id} className="checkbox-label">
+              <label key={s.name} className="checkbox-label">
                 <input
                   type="checkbox"
-                  checked={directImplications.has(s.id)}
-                  onChange={(e) => handleToggle(s.id, e.target.checked)}
+                  checked={directImplications.has(s.name)}
+                  onChange={(e) => handleToggle(s.name, e.target.checked)}
                   disabled={toggling !== null}
                 />
                 {s.name}
@@ -184,9 +183,7 @@ export default function SkillDetailPage() {
         {effective.size > 0 && (
           <p className="effective-skills">
             Effective skills:{" "}
-            {[...effective]
-              .map((id) => nameById[id] || `#${id}`)
-              .join(", ")}
+            {[...effective].join(", ")}
           </p>
         )}
       </div>

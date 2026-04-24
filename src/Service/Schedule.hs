@@ -8,6 +8,7 @@ module Service.Schedule
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
+import Data.Text (Text)
 import Data.Time (addDays)
 
 import Domain.Types (WorkerId, Slot(..), Schedule)
@@ -21,7 +22,7 @@ import Repo.Types (Repository(..))
 
 -- | Load all contexts, run the scheduler, save the result.
 -- Returns the ScheduleResult for display.
-createSchedule :: Repository -> String -> [Slot] -> Set.Set WorkerId
+createSchedule :: Repository -> Text -> [Slot] -> Set.Set WorkerId
                -> IO ScheduleResult
 createSchedule repo name slots workers = do
     skillCtx   <- repoLoadSkillCtx repo
@@ -55,11 +56,11 @@ createSchedule repo name slots workers = do
     repoSaveSchedule repo name (srSchedule result)
     return result
 
-getSchedule :: Repository -> String -> IO (Maybe Schedule)
+getSchedule :: Repository -> Text -> IO (Maybe Schedule)
 getSchedule = repoLoadSchedule
 
-listSchedules :: Repository -> IO [String]
+listSchedules :: Repository -> IO [Text]
 listSchedules = repoListSchedules
 
-deleteSchedule :: Repository -> String -> IO ()
+deleteSchedule :: Repository -> Text -> IO ()
 deleteSchedule = repoDeleteSchedule
