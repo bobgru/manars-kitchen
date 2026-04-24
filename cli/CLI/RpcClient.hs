@@ -65,7 +65,7 @@ cCreateStation  :: CreateStationReq -> ClientM RpcOk
 cDeleteStation  :: RpcStationId -> ClientM RpcOk
 cSetStationHours :: RpcStationHours -> ClientM RpcOk
 _cCloseStationDay :: SetStationClosureReq' -> ClientM RpcOk
-cListStations   :: RpcEmpty -> ClientM [(Int, String)]
+cListStations   :: RpcEmpty -> ClientM [(Int, T.Text)]
 cCreateShift    :: CreateShiftReq -> ClientM RpcOk
 cDeleteShift    :: RpcShiftName -> ClientM RpcOk
 cListShifts     :: RpcEmpty -> ClientM [ShiftDef]
@@ -94,7 +94,7 @@ cViewDraft      :: RpcDraftId -> ClientM DraftInfo
 cGenerateDraft  :: RpcDraftGenerate -> ClientM ScheduleResult
 cCommitDraft    :: RpcDraftCommit -> ClientM RpcOk
 cDiscardDraft   :: RpcDraftId -> ClientM RpcOk
-cListSchedules  :: RpcEmpty -> ClientM [String]
+cListSchedules  :: RpcEmpty -> ClientM [T.Text]
 cViewSchedule   :: RpcScheduleName -> ClientM Schedule
 cDeleteSchedule :: RpcScheduleName -> ClientM RpcOk
 cViewCalendar   :: RpcDateRange -> ClientM Schedule
@@ -255,7 +255,7 @@ dispatchCommand env cmd = case cmd of
         case result of
             Right names -> if null names
                 then putStrLn "  (no schedules)"
-                else mapM_ (\n -> putStrLn ("  " ++ n)) names
+                else mapM_ (\n -> putStrLn ("  " ++ T.unpack n)) names
             Left err -> putStrLn err
 
     ScheduleView name -> do
@@ -312,10 +312,10 @@ dispatchCommand env cmd = case cmd of
 
     -- Skills
     SkillCreate name -> requireAdmin env $
-        runOk env (cCreateSkill (CreateSkillReq name "")) "Skill created."
+        runOk env (cCreateSkill (CreateSkillReq (T.pack name) T.empty)) "Skill created."
 
     SkillRename (SkillId sid) name -> requireAdmin env $
-        runOk env (cRenameSkill sid (RenameSkillReq name)) ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
+        runOk env (cRenameSkill sid (RenameSkillReq (T.pack name))) ("Renamed skill " ++ show sid ++ " to \"" ++ name ++ "\"")
 
     SkillDelete _ ->
         putStrLn "skill delete is not yet supported in remote mode."
@@ -343,14 +343,14 @@ dispatchCommand env cmd = case cmd of
         runOk env (cRevokeSkill (RpcWorkerSkill wid sid)) "Skill revoked."
 
     -- Stations
-    StationAdd sid name -> requireAdmin env $
-        runOk env (cCreateStation (CreateStationReq sid name)) "Station added."
+    StationAdd name -> requireAdmin env $
+        runOk env (cCreateStation (CreateStationReq 0 name)) "Station added."
 
     StationList -> do
         result <- run env (cListStations RpcEmpty)
         case result of
-            Right stations -> mapM_ (\(i, n) ->
-                putStrLn ("  " ++ show i ++ ": " ++ n)) stations
+            Right stations -> mapM_ (\(_i, n) ->
+                putStrLn ("  " ++ T.unpack n)) stations
             Left err -> putStrLn err
 
     StationRemove sid -> requireAdmin env $
@@ -380,7 +380,7 @@ dispatchCommand env cmd = case cmd of
         result <- run env (cListShifts RpcEmpty)
         case result of
             Right shifts -> mapM_ (\sd ->
-                putStrLn ("  " ++ sdName sd ++ " (" ++
+                putStrLn ("  " ++ T.unpack (sdName sd) ++ " (" ++
                     show (sdStart sd) ++ "-" ++ show (sdEnd sd) ++ ")")) shifts
             Left err -> putStrLn err
 
@@ -533,7 +533,7 @@ dispatchCommand env cmd = case cmd of
     DraftCommit mDid mNote -> case mDid of
         Just didStr -> do
             let note = maybe "" id mNote
-            result <- run env (cCommitDraft (RpcDraftCommit (read didStr) note))
+            result <- run env (cCommitDraft (RpcDraftCommit (read didStr) (T.pack note)))
             case result of
                 Right _ -> putStrLn "Draft committed."
                 Left err -> putStrLn err
@@ -600,9 +600,9 @@ dispatchCommand env cmd = case cmd of
         case result of
             Right commits -> mapM_ (\c ->
                 putStrLn ("  " ++ show (ccId c) ++ ": " ++
-                    ccCommittedAt c ++ " (" ++
+                    T.unpack (ccCommittedAt c) ++ " (" ++
                     show (ccDateFrom c) ++ " to " ++ show (ccDateTo c) ++ ") " ++
-                    ccNote c)) commits
+                    T.unpack (ccNote c))) commits
             Left err -> putStrLn err
 
     CalendarHistoryView _commitId ->
@@ -699,7 +699,7 @@ dispatchCommand env cmd = case cmd of
         let role = case roleStr of
                 "admin" -> Admin
                 _       -> Normal
-        runOk env (cCreateUser (CreateUserReq username password role 0))
+        runOk env (cCreateUser (CreateUserReq (T.pack username) (T.pack password) role 0))
             ("User created: " ++ username)
 
     UserList -> do
@@ -708,7 +708,7 @@ dispatchCommand env cmd = case cmd of
             Right users -> mapM_ (\u ->
                 let Username n = userName u
                     r = if userRole u == Admin then "admin" else "normal"
-                in putStrLn ("  " ++ n ++ " (" ++ r ++ ")")) users
+                in putStrLn ("  " ++ T.unpack n ++ " (" ++ r ++ ")")) users
             Left err -> putStrLn err
 
     UserDelete _uid ->
@@ -748,14 +748,14 @@ dispatchCommand env cmd = case cmd of
     -- Checkpoints
     CheckpointCreate mName -> requireAdmin env $ do
         let name = maybe "auto" id mName
-        runOk env (cCreateCheckpoint (CreateCheckpointReq name)) ("Checkpoint created: " ++ name)
+        runOk env (cCreateCheckpoint (CreateCheckpointReq (T.pack name))) ("Checkpoint created: " ++ name)
 
     CheckpointCommit -> requireAdmin env $
-        runOk env (cCommitCheckpoint (RpcCheckpointName "auto")) "Checkpoint committed."
+        runOk env (cCommitCheckpoint (RpcCheckpointName (T.pack "auto"))) "Checkpoint committed."
 
     CheckpointRollback mName -> requireAdmin env $ do
         let name = maybe "auto" id mName
-        runOk env (cRollbackCheckpoint (RpcCheckpointName name)) ("Rolled back to: " ++ name)
+        runOk env (cRollbackCheckpoint (RpcCheckpointName (T.pack name))) ("Rolled back to: " ++ name)
 
     CheckpointList ->
         putStrLn "Checkpoint list is not yet supported in remote mode."

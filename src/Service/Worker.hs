@@ -54,6 +54,7 @@ module Service.Worker
 import Data.List (nub, sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (DayOfWeek(..))
 
@@ -70,7 +71,7 @@ import Repo.Types (Repository(..))
 
 -- | Register a new skill with a name and description.
 -- Returns Left with error message if the skill name already exists.
-addSkill :: Repository -> String -> String -> IO (Either String ())
+addSkill :: Repository -> Text -> Text -> IO (Either String ())
 addSkill repo name desc = repoCreateSkill repo name desc
 
 -- | Remove a skill from the system (also removes from workers/stations/implications).
@@ -92,7 +93,7 @@ listSkills :: Repository -> IO [(SkillId, Skill)]
 listSkills = repoListSkills
 
 -- | Rename a skill.
-renameSkill :: Repository -> SkillId -> String -> IO ()
+renameSkill :: Repository -> SkillId -> Text -> IO ()
 renameSkill repo sid newName = repoRenameSkill repo sid newName
 
 -- | List all direct skill implications as a map.
@@ -136,10 +137,10 @@ checkSkillReferences repo sid = do
     let skillNameMap = Map.fromList [(s, skillName sk) | (s, sk) <- skills]
         lookupSkill s = Map.findWithDefault (T.pack $ show s) s skillNameMap
         workerNameMap = Map.fromList
-            [(userWorkerId u, let Username n = userName u in n) | u <- users]
+            [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
         lookupWorker w = Map.findWithDefault (show w) w workerNameMap
         stationNameMap = Map.fromList stationPairs
-        lookupStation s = Map.findWithDefault (show s) s stationNameMap
+        lookupStation s = T.unpack $ Map.findWithDefault (T.pack $ show s) s stationNameMap
         workers = [(w, lookupWorker w) | (w, sks) <- Map.toList (scWorkerSkills ctx), Set.member sid sks]
         stations = [(s, lookupStation s) | (s, sks) <- Map.toList (scStationRequires ctx), Set.member sid sks]
         crossTraining = [(w, lookupWorker w) | (w, sks) <- Map.toList (wcCrossTraining wCtx), Set.member sid sks]
@@ -173,13 +174,14 @@ safeDeleteSkill repo sid = do
 -- -----------------------------------------------------------------
 
 -- | Add a station to the system.
-addStation :: Repository -> StationId -> String -> IO ()
-addStation repo sid name = do
-    repoCreateStation repo sid name
+addStation :: Repository -> Text -> IO StationId
+addStation repo name = do
+    sid <- repoCreateStation repo name
     ctx <- repoLoadSkillCtx repo
     let ctx' = ctx
             { scAllStations = Set.insert sid (scAllStations ctx) }
     repoSaveSkillCtx repo ctx'
+    return sid
 
 -- | Remove a station.
 removeStation :: Repository -> StationId -> IO ()
@@ -221,7 +223,7 @@ revokeWorkerSkill repo wid sid = do
     repoSaveSkillCtx repo ctx'
 
 -- | List all stations.
-listStations :: Repository -> IO [(StationId, String)]
+listStations :: Repository -> IO [(StationId, Text)]
 listStations = repoListStations
 
 -- | Set required skills for a station.
@@ -309,7 +311,7 @@ setMultiStationHours repo sid startH endH = do
     repoSaveSkillCtx repo ctx'
 
 -- | Set a worker's shift preferences (ordered, most preferred first).
-setShiftPreferences :: Repository -> WorkerId -> [String] -> IO ()
+setShiftPreferences :: Repository -> WorkerId -> [Text] -> IO ()
 setShiftPreferences repo wid prefs = do
     ctx <- repoLoadWorkerCtx repo
     let ctx' = ctx { wcShiftPrefs = Map.insert wid prefs (wcShiftPrefs ctx) }

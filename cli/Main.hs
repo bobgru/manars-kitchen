@@ -3,6 +3,7 @@ module Main (main) where
 import System.IO (hFlush, stdout, hSetEcho, stdin)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
+import qualified Data.Text as T
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 
@@ -71,7 +72,7 @@ ensureAdminExists repo = do
     users <- repoListUsers repo
     case filter (\u -> userRole u == Admin) users of
         [] -> do
-            result <- register repo "admin" "admin" Admin (WorkerId 1)
+            result <- register repo (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
             case result of
                 Right _uid ->
                     putStrLn "Created default admin user (admin/admin), Worker 1"
@@ -100,7 +101,7 @@ remoteRepl :: RpcEnv -> User -> IO ()
 remoteRepl env user = do
     let Username uname = userName user
         role = if userRole user == Admin then "admin" else "user"
-    putStr (uname ++ " [" ++ role ++ " remote]> ")
+    putStr (T.unpack uname ++ " [" ++ role ++ " remote]> ")
     hFlush stdout
     line <- getLine
     let cmd = parseCommand line
@@ -156,11 +157,11 @@ loginLoop repo = do
     pass <- getLine
     hSetEcho stdin True
     putStrLn ""
-    result <- login repo name pass
+    result <- login repo (T.pack name) (T.pack pass)
     case result of
         Right user -> do
             let Username uname = userName user
-            putStrLn $ "Welcome, " ++ uname ++ "!"
+            putStrLn $ "Welcome, " ++ T.unpack uname ++ "!"
             return user
         Left _ -> do
             putStrLn "Invalid credentials. Try again."

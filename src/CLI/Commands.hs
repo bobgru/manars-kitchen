@@ -25,7 +25,7 @@ data Command
     | CmdAssign String Int Int String Int    -- ^ schedule worker station date hour
     | CmdUnassign String Int Int String Int  -- ^ schedule worker station date hour
     -- Skills / Stations (admin)
-    | StationAdd Int String           -- ^ station-id name
+    | StationAdd String               -- ^ name
     | StationList
     | StationRemove Int
     | StationSetHours Int Int Int   -- ^ station-id start-hour end-hour
@@ -183,8 +183,7 @@ parseCommand input = case shellWords input of
     ["unassign", sched, wid, sid, date, hr]
         | all isDigit' [wid, sid, hr] -> CmdUnassign sched (read wid) (read sid) date (read hr)
 
-    ["station", "add", sid, name]
-        | isDigit' sid -> StationAdd (read sid) name
+    ["station", "add", name] -> StationAdd name
     ["station", "list"]            -> StationList
     ["station", "remove", sid]
         | isDigit' sid -> StationRemove (read sid)

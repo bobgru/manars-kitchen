@@ -5,6 +5,7 @@ module Service.Auth
     , changePassword
     ) where
 
+import Data.Text (Text)
 import Auth.Types (UserId, Role, User(..))
 import Auth.Password (hashPassword, checkPassword)
 import Domain.Types (WorkerId)
@@ -18,8 +19,7 @@ data AuthError
     | WrongOldPassword
     deriving (Eq, Show)
 
--- | Register a new user. Returns error if username is taken.
-register :: Repository -> String -> String -> Role -> WorkerId -> IO (Either AuthError UserId)
+register :: Repository -> Text -> Text -> Role -> WorkerId -> IO (Either AuthError UserId)
 register repo name plainPass role wid = do
     existing <- repoGetUserByName repo name
     case existing of
@@ -30,8 +30,7 @@ register repo name plainPass role wid = do
                 Nothing   -> return (Left HashingFailed)
                 Just hash -> Right <$> repoCreateUser repo name hash role wid
 
--- | Authenticate a user by username and password.
-login :: Repository -> String -> String -> IO (Either AuthError User)
+login :: Repository -> Text -> Text -> IO (Either AuthError User)
 login repo name plainPass = do
     mUser <- repoGetUserByName repo name
     case mUser of
@@ -40,8 +39,7 @@ login repo name plainPass = do
             | checkPassword plainPass (userPassHash user) -> return (Right user)
             | otherwise -> return (Left InvalidCredentials)
 
--- | Change a user's password. Requires the old password for verification.
-changePassword :: Repository -> UserId -> String -> String -> IO (Either AuthError ())
+changePassword :: Repository -> UserId -> Text -> Text -> IO (Either AuthError ())
 changePassword repo uid oldPass newPass = do
     mUser <- repoGetUser repo uid
     case mUser of

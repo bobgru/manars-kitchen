@@ -5,6 +5,7 @@ module Auth.Types
     , User(..)
     ) where
 
+import Data.Text (Text)
 import Domain.Types (WorkerId)
 
 -- | Terminal unit: a system user, identified by an opaque ID.
@@ -12,7 +13,7 @@ newtype UserId = UserId Int
     deriving (Eq, Ord, Show, Read)
 
 -- | A unique login name.
-newtype Username = Username String
+newtype Username = Username Text
     deriving (Eq, Ord, Show, Read)
 
 -- | Admin = manager (full CRUD on all entities).
@@ -24,7 +25,7 @@ data Role = Admin | Normal
 data User = User
     { userId       :: !UserId
     , userName     :: !Username
-    , userPassHash :: !String       -- bcrypt hash
+    , userPassHash :: !Text
     , userRole     :: !Role
     , userWorkerId :: !WorkerId     -- every user IS a worker
     } deriving (Eq, Show)

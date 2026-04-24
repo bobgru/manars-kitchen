@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Repo.Serialize
     ( -- * Role
       roleToText
@@ -14,6 +15,7 @@ module Repo.Serialize
     , secondsToDiffTime
     ) where
 
+import Data.Text (Text, pack, unpack)
 import Data.Time
     ( Day, TimeOfDay(..)
     , DiffTime
@@ -27,11 +29,11 @@ import Domain.Absence (AbsenceStatus(..))
 -- Role
 -- -----------------------------------------------------------------
 
-roleToText :: Role -> String
+roleToText :: Role -> Text
 roleToText Admin  = "admin"
 roleToText Normal = "normal"
 
-textToRole :: String -> Role
+textToRole :: Text -> Role
 textToRole "admin" = Admin
 textToRole _       = Normal
 
@@ -39,12 +41,12 @@ textToRole _       = Normal
 -- AbsenceStatus
 -- -----------------------------------------------------------------
 
-statusToText :: AbsenceStatus -> String
+statusToText :: AbsenceStatus -> Text
 statusToText Pending  = "pending"
 statusToText Approved = "approved"
 statusToText Rejected = "rejected"
 
-textToStatus :: String -> AbsenceStatus
+textToStatus :: Text -> AbsenceStatus
 textToStatus "approved" = Approved
 textToStatus "rejected" = Rejected
 textToStatus _          = Pending
@@ -53,21 +55,21 @@ textToStatus _          = Pending
 -- Time conversions
 -- -----------------------------------------------------------------
 
-dayToText :: Day -> String
-dayToText = formatTime defaultTimeLocale "%Y-%m-%d"
+dayToText :: Day -> Text
+dayToText = pack . formatTime defaultTimeLocale "%Y-%m-%d"
 
-textToDay :: String -> Day
-textToDay s = case parseTimeM True defaultTimeLocale "%Y-%m-%d" s of
+textToDay :: Text -> Day
+textToDay t = case parseTimeM True defaultTimeLocale "%Y-%m-%d" (unpack t) of
     Just d  -> d
-    Nothing -> error $ "Repo.Serialize.textToDay: invalid date: " ++ s
+    Nothing -> error $ "Repo.Serialize.textToDay: invalid date: " ++ unpack t
 
-todToText :: TimeOfDay -> String
-todToText = formatTime defaultTimeLocale "%H:%M:%S"
+todToText :: TimeOfDay -> Text
+todToText = pack . formatTime defaultTimeLocale "%H:%M:%S"
 
-textToTod :: String -> TimeOfDay
-textToTod s = case parseTimeM True defaultTimeLocale "%H:%M:%S" s of
-    Just t  -> t
-    Nothing -> error $ "Repo.Serialize.textToTod: invalid time: " ++ s
+textToTod :: Text -> TimeOfDay
+textToTod t = case parseTimeM True defaultTimeLocale "%H:%M:%S" (unpack t) of
+    Just tt -> tt
+    Nothing -> error $ "Repo.Serialize.textToTod: invalid time: " ++ unpack t
 
 diffTimeToSeconds :: DiffTime -> Int
 diffTimeToSeconds = round . toRational

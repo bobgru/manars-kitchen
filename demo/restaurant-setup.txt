@@ -6,86 +6,86 @@ shift create afternoon 14 18
 shift create evening 17 20
 
 # === Skills ===
-skill create 1 grill
-skill create 2 pizza
-skill create 3 sandwich
-skill create 4 beverage
-skill create 5 receiving
-skill create 6 register
-skill create 7 busboy
-skill create 8 master-chef
+skill create grill
+skill create pizza
+skill create sandwich
+skill create beverage
+skill create receiving
+skill create register
+skill create busboy
+skill create master-chef
 
 # master-chef implies all food prep skills
-skill implication 8 1
-skill implication 8 2
-skill implication 8 3
-skill implication 8 4
+skill implication master-chef grill
+skill implication master-chef pizza
+skill implication master-chef sandwich
+skill implication master-chef beverage
 
 # cooking skills imply busboy
-skill implication 1 7
-skill implication 2 7
-skill implication 3 7
-skill implication 4 7
+skill implication grill busboy
+skill implication pizza busboy
+skill implication sandwich busboy
+skill implication beverage busboy
 
 # pizza, grill, sandwich imply beverage
-skill implication 1 4
-skill implication 2 4
-skill implication 3 4
+skill implication grill beverage
+skill implication pizza beverage
+skill implication sandwich beverage
 
 # pizza, sandwich, beverage imply register
-skill implication 2 6
-skill implication 3 6
-skill implication 4 6
+skill implication pizza register
+skill implication sandwich register
+skill implication beverage register
 
 # === Stations ===
-station add 1 grill
-station add 2 pizza
-station add 3 sandwich
-station add 4 beverage
-station add 5 receiving
-station add 6 register
-station add 7 busboy
+station add grill
+station add pizza
+station add sandwich
+station add beverage
+station add receiving
+station add register
+station add busboy
 
-station require-skill 1 1
-station require-skill 2 2
-station require-skill 3 3
-station require-skill 4 4
-station require-skill 5 5
-station require-skill 6 6
-station require-skill 7 7
+station require-skill grill grill
+station require-skill pizza pizza
+station require-skill sandwich sandwich
+station require-skill beverage beverage
+station require-skill receiving receiving
+station require-skill register register
+station require-skill busboy busboy
 
 # Station operating hours
-station set-hours 1 10 17
-station set-hours 2 11 16
-station set-hours 3 10 17
-station set-hours 4 7 17
-station set-hours 5 6 11
-station set-hours 6 7 17
-station set-hours 7 10 18
+station set-hours grill 10 17
+station set-hours pizza 11 16
+station set-hours sandwich 10 17
+station set-hours beverage 7 17
+station set-hours receiving 6 11
+station set-hours register 7 17
+station set-hours busboy 10 18
 
 # Multi-station hours (non-peak: workers can cover 2 stations)
 # Early morning (7-10) and late afternoon (15-18) are non-peak
-station set-multi-hours 1 10 12
-station set-multi-hours 2 11 13
-station set-multi-hours 3 10 12
-station set-multi-hours 4 7 10
-station set-multi-hours 6 7 10
-station set-multi-hours 7 10 12
-station set-multi-hours 1 15 17
-station set-multi-hours 2 15 16
-station set-multi-hours 3 15 17
-station set-multi-hours 4 15 17
-station set-multi-hours 6 15 17
-station set-multi-hours 7 15 18
+station set-multi-hours grill 10 12
+station set-multi-hours pizza 11 13
+station set-multi-hours sandwich 10 12
+station set-multi-hours beverage 7 10
+station set-multi-hours register 7 10
+station set-multi-hours busboy 10 12
+station set-multi-hours grill 15 17
+station set-multi-hours pizza 15 16
+station set-multi-hours sandwich 15 17
+station set-multi-hours beverage 15 17
+station set-multi-hours register 15 17
+station set-multi-hours busboy 15 18
 
 # Receiving closed on weekends
-station close-day 5 saturday
-station close-day 5 sunday
+station close-day receiving saturday
+station close-day receiving sunday
 
 # Sunday: light crew (grill, beverage, register only)
-station close-day 2 sunday
-station close-day 3 sunday
-station close-day 7 sunday
+station close-day pizza sunday
+station close-day sandwich sunday
+station close-day busboy sunday
 
 # === Workers (11 + admin) ===
 user create marco changeme normal
@@ -101,131 +101,131 @@ user create pat changeme normal
 user create alex changeme normal
 
 # === Worker Skills ===
-# Admin (W1): master chef, available as last resort
-worker grant-skill 1 8
-# Marco (W2): master chef
-worker grant-skill 2 8
-# Lucia (W3): master chef, per-diem
-worker grant-skill 3 8
-# Tony (W4): grill + sandwich
-worker grant-skill 4 1
-worker grant-skill 4 3
-# Maria (W5): pizza + beverage
-worker grant-skill 5 2
-worker grant-skill 5 4
-# Sam (W6): receiving + sandwich
-worker grant-skill 6 5
-worker grant-skill 6 3
-# Rosa (W7): receiving + busboy + sandwich + beverage + pizza
-worker grant-skill 7 5
-worker grant-skill 7 7
-worker grant-skill 7 3
-worker grant-skill 7 4
-worker grant-skill 7 2
-# Jake (W8): register + busboy + sandwich + pizza
-worker grant-skill 8 6
-worker grant-skill 8 7
-worker grant-skill 8 3
-worker grant-skill 8 2
-# Nina (W9): beverage + register + sandwich
-worker grant-skill 9 4
-worker grant-skill 9 6
-worker grant-skill 9 3
-# Carlos (W10): sandwich + busboy + grill
-worker grant-skill 10 3
-worker grant-skill 10 7
-worker grant-skill 10 1
-# Pat (W11): pizza + busboy + sandwich + grill
-worker grant-skill 11 2
-worker grant-skill 11 7
-worker grant-skill 11 3
-worker grant-skill 11 1
-# Alex (W12): experienced cook (master-chef)
-worker grant-skill 12 8
+# Admin: master chef, available as last resort
+worker grant-skill admin master-chef
+# Marco: master chef
+worker grant-skill marco master-chef
+# Lucia: master chef, per-diem
+worker grant-skill lucia master-chef
+# Tony: grill + sandwich
+worker grant-skill tony grill
+worker grant-skill tony sandwich
+# Maria: pizza + beverage
+worker grant-skill maria pizza
+worker grant-skill maria beverage
+# Sam: receiving + sandwich
+worker grant-skill sam receiving
+worker grant-skill sam sandwich
+# Rosa: receiving + busboy + sandwich + beverage + pizza
+worker grant-skill rosa receiving
+worker grant-skill rosa busboy
+worker grant-skill rosa sandwich
+worker grant-skill rosa beverage
+worker grant-skill rosa pizza
+# Jake: register + busboy + sandwich + pizza
+worker grant-skill jake register
+worker grant-skill jake busboy
+worker grant-skill jake sandwich
+worker grant-skill jake pizza
+# Nina: beverage + register + sandwich
+worker grant-skill nina beverage
+worker grant-skill nina register
+worker grant-skill nina sandwich
+# Carlos: sandwich + busboy + grill
+worker grant-skill carlos sandwich
+worker grant-skill carlos busboy
+worker grant-skill carlos grill
+# Pat: pizza + busboy + sandwich + grill
+worker grant-skill pat pizza
+worker grant-skill pat busboy
+worker grant-skill pat sandwich
+worker grant-skill pat grill
+# Alex: experienced cook (master-chef)
+worker grant-skill alex master-chef
 
 # === Worker Hours ===
-worker set-hours 1 0
-worker set-hours 2 40
-worker set-hours 3 4  # overridden below by set-status per-diem
-worker set-hours 4 40
-worker set-hours 5 40
-worker set-hours 6 40
-worker set-hours 7 40
-worker set-hours 8 40
-worker set-hours 9 40
-worker set-hours 10 40
-worker set-hours 11 40
-worker set-hours 12 40
+worker set-hours admin 0
+worker set-hours marco 40
+worker set-hours lucia 4  # overridden below by set-status per-diem
+worker set-hours tony 40
+worker set-hours maria 40
+worker set-hours sam 40
+worker set-hours rosa 40
+worker set-hours jake 40
+worker set-hours nina 40
+worker set-hours carlos 40
+worker set-hours pat 40
+worker set-hours alex 40
 
 # === Employment Status ===
-# Marco (W2): salaried manager — overtime=manual-only, tracking=standard, 40h
-worker set-status 2 salaried
-# Lucia (W3): per-diem — overtime=exempt, tracking=exempt, no hour limit
-# (replaces manual set-hours 3 4 above — per-diem removes the limit)
-worker set-status 3 per-diem
-# Tony (W4): full-time — overtime=eligible, tracking=standard, 40h
-worker set-status 4 full-time
-# Pat (W11): temp worker
-worker set-temp 11 on
-# Rosa (W7): override overtime model to manual-only (won't get auto-overtime)
-worker set-overtime-model 7 manual-only
+# Marco: salaried manager — overtime=manual-only, tracking=standard, 40h
+worker set-status marco salaried
+# Lucia: per-diem — overtime=exempt, tracking=exempt, no hour limit
+# (replaces manual set-hours lucia 4 above — per-diem removes the limit)
+worker set-status lucia per-diem
+# Tony: full-time — overtime=eligible, tracking=standard, 40h
+worker set-status tony full-time
+# Pat: temp worker
+worker set-temp pat on
+# Rosa: override overtime model to manual-only (won't get auto-overtime)
+worker set-overtime-model rosa manual-only
 
 # Show employment properties alongside other worker info
 worker info
 
 # No overtime opt-in — we want a schedule with zero planned overtime
 # Admin is last resort only
-worker set-overtime 1 on
+worker set-overtime admin on
 
 # === Preferences ===
 # Workers with cooking skills prefer their stations over busboy/register
-# Marco (W2): master chef — prefers grill, pizza, sandwich, beverage
-worker set-prefs 2 1 2 3 4
-# Lucia (W3): master chef — prefers grill, pizza, sandwich, beverage
-worker set-prefs 3 1 2 3 4
-# Tony (W4): grill + sandwich — prefers grill, sandwich
-worker set-prefs 4 1 3
-# Maria (W5): pizza + beverage — prefers pizza, beverage
-worker set-prefs 5 2 4
-# Nina (W9): beverage + register — prefers beverage
-worker set-prefs 9 4
-# Carlos (W10): sandwich + busboy — prefers sandwich
-worker set-prefs 10 3
-# Pat (W11): pizza + busboy — prefers pizza
-worker set-prefs 11 2
-# Jake (W8): register + busboy — prefers register
-worker set-prefs 8 6
-# Alex (W12): master chef — prefers grill, pizza, sandwich, beverage
-worker set-prefs 12 1 2 3 4
+# Marco: master chef — prefers grill, pizza, sandwich, beverage
+worker set-prefs marco grill pizza sandwich beverage
+# Lucia: master chef — prefers grill, pizza, sandwich, beverage
+worker set-prefs lucia grill pizza sandwich beverage
+# Tony: grill + sandwich — prefers grill, sandwich
+worker set-prefs tony grill sandwich
+# Maria: pizza + beverage — prefers pizza, beverage
+worker set-prefs maria pizza beverage
+# Nina: beverage + register — prefers beverage
+worker set-prefs nina beverage
+# Carlos: sandwich + busboy — prefers sandwich
+worker set-prefs carlos sandwich
+# Pat: pizza + busboy — prefers pizza
+worker set-prefs pat pizza
+# Jake: register + busboy — prefers register
+worker set-prefs jake register
+# Alex: master chef — prefers grill, pizza, sandwich, beverage
+worker set-prefs alex grill pizza sandwich beverage
 
 # === Shift Preferences ===
-# Marco (W2): prefers morning
-worker set-shift-pref 2 morning midday
-# Lucia (W3): prefers morning (per-diem, 4h)
-worker set-shift-pref 3 morning
-# Tony (W4): prefers afternoon and evening
-worker set-shift-pref 4 afternoon evening
-# Maria (W5): prefers morning
-worker set-shift-pref 5 morning midday
-# Sam (W6): prefers morning
-worker set-shift-pref 6 morning
-# Rosa (W7): no preference (flexible)
-# Jake (W8): prefers evening, weekend
-worker set-shift-pref 8 evening weekend
-# Nina (W9): prefers midday and afternoon
-worker set-shift-pref 9 midday afternoon
-# Carlos (W10): prefers morning and midday
-worker set-shift-pref 10 morning midday
-# Pat (W11): prefers afternoon
-worker set-shift-pref 11 afternoon
-# Alex (W12): prefers midday and afternoon
-worker set-shift-pref 12 midday afternoon
+# Marco: prefers morning
+worker set-shift-pref marco morning midday
+# Lucia: prefers morning (per-diem, 4h)
+worker set-shift-pref lucia morning
+# Tony: prefers afternoon and evening
+worker set-shift-pref tony afternoon evening
+# Maria: prefers morning
+worker set-shift-pref maria morning midday
+# Sam: prefers morning
+worker set-shift-pref sam morning
+# Rosa: no preference (flexible)
+# Jake: prefers evening, weekend
+worker set-shift-pref jake evening weekend
+# Nina: prefers midday and afternoon
+worker set-shift-pref nina midday afternoon
+# Carlos: prefers morning and midday
+worker set-shift-pref carlos morning midday
+# Pat: prefers afternoon
+worker set-shift-pref pat afternoon
+# Alex: prefers midday and afternoon
+worker set-shift-pref alex midday afternoon
 
 # === Absences ===
-# Nina (W9) has approved absence on Friday Apr 10
+# Nina has approved absence on Friday Apr 10
 absence-type create 1 vacation on
-absence set-allowance 9 1 10
-absence request 1 9 2026-04-10 2026-04-10
+absence set-allowance nina vacation 10
+absence request vacation nina 2026-04-10 2026-04-10
 absence approve 1
 
 # === Scheduler Config ===
@@ -239,9 +239,9 @@ config set-pay-period biweekly 2026-04-06
 config show-pay-period
 
 # === Seniority ===
-# Marco (W2) and Alex (W12) are experienced: seniority level 2
-worker set-seniority 2 2
-worker set-seniority 12 2
+# Marco and Alex are experienced: seniority level 2
+worker set-seniority marco 2
+worker set-seniority alex 2
 
 # === Generate Schedule ===
 schedule create week1 2026-04-06
@@ -260,7 +260,7 @@ calendar history
 
 # === Draft ===
 # Pin Marco to grill on Monday mornings before drafting next week
-pin 2 1 monday morning
+pin marco grill monday morning
 
 # Create a draft for the following week (Apr 13-19)
 draft create 2026-04-13 2026-04-19
@@ -288,7 +288,7 @@ calendar history
 # May 2-3 weekend — those assignments are automatically removed.
 
 # Pin Marco to grill on Saturday midday (grill hours: 10-17)
-pin 2 1 saturday midday
+pin marco grill saturday midday
 
 # Create two concurrent drafts (non-overlapping)
 draft create 2026-04-20 2026-04-26
@@ -360,7 +360,7 @@ calendar freeze-status
 #
 # Scenario: We create a draft for week 4 and generate a schedule.
 # Then we explore hypothetical changes:
-#   - What if Nina (W9) could work the grill? (grant-skill)
+#   - What if Nina could work the grill? (grant-skill)
 #   - What if we closed the pizza station on Monday? (close-station)
 # Each hint shows a diff of the schedule impact. We can list,
 # revert, and re-explore freely — nothing is persisted.

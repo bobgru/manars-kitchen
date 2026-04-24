@@ -50,6 +50,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (ToJSON(..), FromJSON(..), (.=), (.:), (.:?), object, withObject)
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as T
 import qualified Data.Set as Set
 import Data.Time (Day, dayOfWeek)
 import Network.Wai (Middleware, requestHeaders)
@@ -103,7 +104,7 @@ type RpcAPI =
     :<|> "rpc" :> "station" :> "delete" :> ReqBody '[JSON] RpcStationId :> Post '[JSON] RpcOk
     :<|> "rpc" :> "station" :> "set-hours" :> ReqBody '[JSON] RpcStationHours :> Post '[JSON] RpcOk
     :<|> "rpc" :> "station" :> "close-day" :> ReqBody '[JSON] SetStationClosureReq' :> Post '[JSON] RpcOk
-    :<|> "rpc" :> "station" :> "list" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [(Int, String)]
+    :<|> "rpc" :> "station" :> "list" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [(Int, T.Text)]
     -- Shift CRUD
     :<|> "rpc" :> "shift" :> "create" :> ReqBody '[JSON] CreateShiftReq :> Post '[JSON] RpcOk
     :<|> "rpc" :> "shift" :> "delete" :> ReqBody '[JSON] RpcShiftName :> Post '[JSON] RpcOk
@@ -137,7 +138,7 @@ type RpcAPI =
     :<|> "rpc" :> "draft" :> "commit" :> ReqBody '[JSON] RpcDraftCommit :> Post '[JSON] RpcOk
     :<|> "rpc" :> "draft" :> "discard" :> ReqBody '[JSON] RpcDraftId :> Post '[JSON] RpcOk
     -- Schedule operations
-    :<|> "rpc" :> "schedule" :> "list" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [String]
+    :<|> "rpc" :> "schedule" :> "list" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [T.Text]
     :<|> "rpc" :> "schedule" :> "view" :> ReqBody '[JSON] RpcScheduleName :> Post '[JSON] Schedule
     :<|> "rpc" :> "schedule" :> "delete" :> ReqBody '[JSON] RpcScheduleName :> Post '[JSON] RpcOk
     -- Calendar operations
@@ -295,7 +296,7 @@ data RpcDraftGenerate = RpcDraftGenerate { rdgDraftId :: !Int, rdgWorkerIds :: !
 instance ToJSON RpcDraftGenerate where toJSON r = object ["draftId" .= rdgDraftId r, "workerIds" .= rdgWorkerIds r]
 instance FromJSON RpcDraftGenerate where parseJSON = withObject "RpcDraftGenerate" $ \v -> RpcDraftGenerate <$> v .: "draftId" <*> v .: "workerIds"
 
-data RpcDraftCommit = RpcDraftCommit { rdcDraftId :: !Int, rdcNote :: !String } deriving (Show)
+data RpcDraftCommit = RpcDraftCommit { rdcDraftId :: !Int, rdcNote :: !T.Text } deriving (Show)
 instance ToJSON RpcDraftCommit where toJSON r = object ["draftId" .= rdcDraftId r, "note" .= rdcNote r]
 instance FromJSON RpcDraftCommit where parseJSON = withObject "RpcDraftCommit" $ \v -> RpcDraftCommit <$> v .: "draftId" <*> v .: "note"
 
@@ -315,7 +316,7 @@ newtype RpcPresetName = RpcPresetName { rpnName :: String } deriving (Show)
 instance ToJSON RpcPresetName where toJSON r = object ["name" .= rpnName r]
 instance FromJSON RpcPresetName where parseJSON = withObject "RpcPresetName" $ \v -> RpcPresetName <$> v .: "name"
 
-newtype RpcCheckpointName = RpcCheckpointName { rcnName :: String } deriving (Show)
+newtype RpcCheckpointName = RpcCheckpointName { rcnName :: T.Text } deriving (Show)
 instance ToJSON RpcCheckpointName where toJSON r = object ["name" .= rcnName r]
 instance FromJSON RpcCheckpointName where parseJSON = withObject "RpcCheckpointName" $ \v -> RpcCheckpointName <$> v .: "name"
 
@@ -331,7 +332,7 @@ newtype RpcAbsenceId = RpcAbsenceId { raiId :: Int } deriving (Show)
 instance ToJSON RpcAbsenceId where toJSON r = object ["id" .= raiId r]
 instance FromJSON RpcAbsenceId where parseJSON = withObject "RpcAbsenceId" $ \v -> RpcAbsenceId <$> v .: "id"
 
-newtype RpcUsername = RpcUsername { ruName :: String } deriving (Show)
+newtype RpcUsername = RpcUsername { ruName :: T.Text } deriving (Show)
 instance ToJSON RpcUsername where toJSON r = object ["username" .= ruName r]
 instance FromJSON RpcUsername where parseJSON = withObject "RpcUsername" $ \v -> RpcUsername <$> v .: "username"
 
@@ -472,7 +473,7 @@ rpcCreateSkill cmdBus repo req = do
     case result of
         Left err -> throwApiError (Conflict err)
         Right () -> do
-            let cmd = "skill create " ++ shellQuote (csrName req)
+            let cmd = "skill create " ++ shellQuote (T.unpack (csrName req))
             liftIO $ publishCommand cmdBus RPC "rpc" cmd
             pure RpcOk
 
@@ -486,7 +487,7 @@ rpcDeleteSkill cmdBus repo req = do
 rpcRenameSkill :: TopicBus CommandEvent -> Repository -> Int -> RenameSkillReq -> Handler RpcOk
 rpcRenameSkill cmdBus repo sid req = do
     liftIO $ repoRenameSkill repo (SkillId sid) (rsrName req)
-    let cmd = "skill rename " ++ show sid ++ " " ++ shellQuote (rsrName req)
+    let cmd = "skill rename " ++ show sid ++ " " ++ shellQuote (T.unpack (rsrName req))
     liftIO $ publishCommand cmdBus RPC "rpc" cmd
     pure RpcOk
 
@@ -499,8 +500,8 @@ rpcListSkills repo _ = liftIO $ SW.listSkills repo
 
 rpcCreateStation :: TopicBus CommandEvent -> Repository -> CreateStationReq -> Handler RpcOk
 rpcCreateStation cmdBus repo req = do
-    liftIO $ SW.addStation repo (StationId (cstrId req)) (cstrName req)
-    logRpcBus cmdBus ("station add " ++ show (cstrId req) ++ " " ++ shellQuote (cstrName req))
+    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req))
+    logRpcBus cmdBus ("station add " ++ shellQuote (cstrName req))
     pure RpcOk
 
 rpcDeleteStation :: TopicBus CommandEvent -> Repository -> RpcStationId -> Handler RpcOk
@@ -522,7 +523,7 @@ rpcCloseStationDay cmdBus repo req = do
     logRpcBus cmdBus ("station close-day " ++ show (sscr'Sid req) ++ " " ++ show (sscr'Day req))
     pure RpcOk
 
-rpcListStations :: Repository -> RpcEmpty -> Handler [(Int, String)]
+rpcListStations :: Repository -> RpcEmpty -> Handler [(Int, T.Text)]
 rpcListStations repo _ = do
     stations <- liftIO $ SW.listStations repo
     pure [(i, n) | (StationId i, n) <- stations]
@@ -533,13 +534,13 @@ rpcListStations repo _ = do
 
 rpcCreateShift :: TopicBus CommandEvent -> Repository -> CreateShiftReq -> Handler RpcOk
 rpcCreateShift cmdBus repo req = do
-    liftIO $ repoSaveShift repo (ShiftDef (cshrName req) (cshrStart req) (cshrEnd req))
+    liftIO $ repoSaveShift repo (ShiftDef (T.pack (cshrName req)) (cshrStart req) (cshrEnd req))
     logRpcBus cmdBus ("shift create " ++ shellQuote (cshrName req))
     pure RpcOk
 
 rpcDeleteShift :: TopicBus CommandEvent -> Repository -> RpcShiftName -> Handler RpcOk
 rpcDeleteShift cmdBus repo req = do
-    liftIO $ repoDeleteShift repo (rsnName req)
+    liftIO $ repoDeleteShift repo (T.pack (rsnName req))
     logRpcBus cmdBus ("shift delete " ++ shellQuote (rsnName req))
     pure RpcOk
 
@@ -576,7 +577,7 @@ rpcSetWorkerVariety cmdBus repo req = do
 
 rpcSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> RpcWorkerShiftPrefs -> Handler RpcOk
 rpcSetWorkerShiftPrefs cmdBus repo req = do
-    liftIO $ SW.setShiftPreferences repo (WorkerId (rwspWid req)) (rwspShifts req)
+    liftIO $ SW.setShiftPreferences repo (WorkerId (rwspWid req)) (map T.pack (rwspShifts req))
     logRpcBus cmdBus ("worker set-shift-prefs " ++ show (rwspWid req))
     pure RpcOk
 
@@ -716,19 +717,19 @@ rpcDiscardDraft cmdBus repo req = do
 -- Schedule handlers
 -- -----------------------------------------------------------------
 
-rpcListSchedules :: Repository -> RpcEmpty -> Handler [String]
+rpcListSchedules :: Repository -> RpcEmpty -> Handler [T.Text]
 rpcListSchedules repo _ = liftIO $ SS.listSchedules repo
 
 rpcViewSchedule :: Repository -> RpcScheduleName -> Handler Schedule
 rpcViewSchedule repo req = do
-    mSched <- liftIO $ SS.getSchedule repo (rsnmName req)
+    mSched <- liftIO $ SS.getSchedule repo (T.pack (rsnmName req))
     case mSched of
         Nothing -> throwApiError (NotFound ("Schedule not found: " ++ rsnmName req))
         Just s  -> pure s
 
 rpcDeleteSchedule :: TopicBus CommandEvent -> Repository -> RpcScheduleName -> Handler RpcOk
 rpcDeleteSchedule cmdBus repo req = do
-    liftIO $ SS.deleteSchedule repo (rsnmName req)
+    liftIO $ SS.deleteSchedule repo (T.pack (rsnmName req))
     logRpcBus cmdBus ("schedule delete " ++ shellQuote (rsnmName req))
     pure RpcOk
 
@@ -804,19 +805,19 @@ rpcListAudit repo _ = liftIO $ repoGetAuditLog repo
 rpcCreateCheckpoint :: TopicBus CommandEvent -> Repository -> CreateCheckpointReq -> Handler RpcOk
 rpcCreateCheckpoint cmdBus repo req = do
     liftIO (repoSavepoint repo (ccrName req))
-    logRpcBus cmdBus ("checkpoint create " ++ shellQuote (ccrName req))
+    logRpcBus cmdBus ("checkpoint create " ++ shellQuote (T.unpack (ccrName req)))
     pure RpcOk
 
 rpcCommitCheckpoint :: TopicBus CommandEvent -> Repository -> RpcCheckpointName -> Handler RpcOk
 rpcCommitCheckpoint cmdBus repo req = do
     liftIO (repoRelease repo (rcnName req))
-    logRpcBus cmdBus ("checkpoint commit " ++ shellQuote (rcnName req))
+    logRpcBus cmdBus ("checkpoint commit " ++ shellQuote (T.unpack (rcnName req)))
     pure RpcOk
 
 rpcRollbackCheckpoint :: TopicBus CommandEvent -> Repository -> RpcCheckpointName -> Handler RpcOk
 rpcRollbackCheckpoint cmdBus repo req = do
     liftIO (repoRollbackTo repo (rcnName req))
-    logRpcBus cmdBus ("checkpoint rollback " ++ shellQuote (rcnName req))
+    logRpcBus cmdBus ("checkpoint rollback " ++ shellQuote (T.unpack (rcnName req)))
     pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -906,7 +907,7 @@ rpcCreateUser cmdBus repo req = do
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
         Right _ -> do
-            logRpcBus cmdBus ("user create " ++ shellQuote (curUsername req))
+            logRpcBus cmdBus ("user create " ++ shellQuote (T.unpack (curUsername req)))
             pure RpcOk
 
 rpcListUsers :: Repository -> RpcEmpty -> Handler [User]
@@ -916,10 +917,10 @@ rpcDeleteUser :: TopicBus CommandEvent -> Repository -> RpcUsername -> Handler R
 rpcDeleteUser cmdBus repo req = do
     mUser <- liftIO $ repoGetUserByName repo (ruName req)
     case mUser of
-        Nothing -> throwApiError (NotFound ("User not found: " ++ ruName req))
+        Nothing -> throwApiError (NotFound ("User not found: " ++ T.unpack (ruName req)))
         Just u  -> do
             liftIO $ repoDeleteUser repo (userId u)
-            logRpcBus cmdBus ("user delete " ++ shellQuote (ruName req))
+            logRpcBus cmdBus ("user delete " ++ shellQuote (T.unpack (ruName req)))
             pure RpcOk
 
 -- -----------------------------------------------------------------
@@ -1022,7 +1023,7 @@ rpcExecute cmdBus execEnv _repo user req = do
     let cmdStr = erCommand req
         Username uname = userName user
     output <- liftIO $ executeCommandText execEnv user cmdStr
-    liftIO $ publishCommandWithClient cmdBus RPC uname cmdStr (erClientId req)
+    liftIO $ publishCommandWithClient cmdBus RPC (T.unpack uname) cmdStr (erClientId req)
     return output
 
 -- -----------------------------------------------------------------

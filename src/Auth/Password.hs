@@ -8,15 +8,14 @@ import Crypto.BCrypt
     , slowerBcryptHashingPolicy
     , validatePassword
     )
-import qualified Data.ByteString.Char8 as BS
+import Data.Text (Text)
+import qualified Data.Text.Encoding as TE
 
--- | Hash a plaintext password using bcrypt.
-hashPassword :: String -> IO (Maybe String)
+hashPassword :: Text -> IO (Maybe Text)
 hashPassword plain = do
-    mHash <- hashPasswordUsingPolicy slowerBcryptHashingPolicy (BS.pack plain)
-    return (BS.unpack <$> mHash)
+    mHash <- hashPasswordUsingPolicy slowerBcryptHashingPolicy (TE.encodeUtf8 plain)
+    return (TE.decodeUtf8 <$> mHash)
 
--- | Check a plaintext password against a stored bcrypt hash.
-checkPassword :: String -> String -> Bool
+checkPassword :: Text -> Text -> Bool
 checkPassword plain hash =
-    validatePassword (BS.pack hash) (BS.pack plain)
+    validatePassword (TE.encodeUtf8 hash) (TE.encodeUtf8 plain)

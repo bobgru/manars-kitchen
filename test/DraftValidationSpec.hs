@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module DraftValidationSpec (spec) where
 
 import Test.Hspec

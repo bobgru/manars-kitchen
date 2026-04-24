@@ -21,7 +21,8 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (ToJSON(..), FromJSON(..), (.=), (.:), object, withObject)
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BS8
+import Data.Text (Text)
+import qualified Data.Text.Encoding as TE
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Network.Wai (Request, requestHeaders)
 import Servant
@@ -51,7 +52,7 @@ authHandler repo = mkAuthHandler handler
             Nothing -> throwError $ jsonError err401 "Missing authorization"
             Just bs -> case BS.stripPrefix "Bearer " bs of
                 Nothing  -> throwError $ jsonError err401 "Invalid authorization format"
-                Just t   -> return (BS8.unpack t)
+                Just t   -> return (TE.decodeUtf8 t)
         -- Look up session by token
         mSession <- liftIO $ repoGetSessionByToken repo tok
         case mSession of
@@ -94,8 +95,8 @@ requireSelfOrAdmin u wid =
 -- -----------------------------------------------------------------
 
 data LoginReq = LoginReq
-    { lrUsername :: !String
-    , lrPassword :: !String
+    { lrUsername :: !Text
+    , lrPassword :: !Text
     } deriving (Show)
 
 instance FromJSON LoginReq where
@@ -106,10 +107,10 @@ instance ToJSON LoginReq where
     toJSON r = object ["username" .= lrUsername r, "password" .= lrPassword r]
 
 data LoginResp = LoginResp
-    { lresToken    :: !String
+    { lresToken    :: !Text
     , lresUserId   :: !Int
-    , lresUsername :: !String
-    , lresRole     :: !String
+    , lresUsername :: !Text
+    , lresRole     :: !Text
     , lresWorkerId :: !Int
     } deriving (Show)
 
@@ -150,6 +151,7 @@ handleLogin repo req = do
             let UserId uid = userId user
                 Username uname = userName user
                 WorkerId wid = userWorkerId user
+                roleStr :: Text
                 roleStr = case userRole user of
                     Admin  -> "admin"
                     Normal -> "normal"

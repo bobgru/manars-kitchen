@@ -24,9 +24,11 @@ import Servant.Client
 import Network.HTTP.Types.Status (statusCode)
 import System.Directory (removeFile, doesFileExist)
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import Auth.Types (Role(..), User(..))
-import Domain.Types (WorkerId(..), StationId(..), SkillId(..), AbsenceTypeId(..), Schedule(..))
-import Domain.Skill (Skill)
+import Domain.Types (WorkerId(..), SkillId(..), AbsenceTypeId(..), Schedule(..))
+import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
 import Domain.Pin (PinnedAssignment)
@@ -62,10 +64,10 @@ loginC = client (Proxy :: Proxy PublicAPI)
 logoutC          :: ClientM NoContent
 
 -- Original endpoints
-listSkillsC      :: ClientM [(SkillId, Skill)]
-listStationsC    :: ClientM [(Int, String)]
+listSkillsC      :: ClientM [Skill]
+listStationsC    :: ClientM [(Int, Text)]
 listShiftsC      :: ClientM [ShiftDef]
-listSchedulesC   :: ClientM [String]
+listSchedulesC   :: ClientM [Text]
 getScheduleC     :: String -> ClientM Schedule
 _deleteScheduleC :: String -> ClientM NoContent
 listDraftsC      :: ClientM [DraftInfo]
@@ -85,12 +87,12 @@ getConfigC       :: ClientM [(String, Double)]
 
 -- Skill CRUD
 createSkillC     :: CreateSkillReq -> ClientM NoContent
-deleteSkillC     :: SkillId -> ClientM NoContent
-_forceDeleteSkillC :: SkillId -> ClientM NoContent
-renameSkillC    :: SkillId -> RenameSkillReq -> ClientM NoContent
-_listImplicationsC :: ClientM (Map.Map SkillId [SkillId])
-_addImplicationC :: SkillId -> AddImplicationReq -> ClientM NoContent
-_removeImplicationC :: SkillId -> SkillId -> ClientM NoContent
+deleteSkillC     :: Text -> ClientM NoContent
+_forceDeleteSkillC :: Text -> ClientM NoContent
+renameSkillC    :: Text -> RenameSkillReq -> ClientM NoContent
+_listImplicationsC :: ClientM (Map.Map Text [Text])
+_addImplicationC :: Text -> AddImplicationReq -> ClientM NoContent
+_removeImplicationC :: Text -> Text -> ClientM NoContent
 
 -- Station CRUD
 createStationC    :: CreateStationReq -> ClientM NoContent
@@ -258,7 +260,7 @@ _rpcCreateStationC :: CreateStationReq -> ClientM RpcOk
 _rpcDeleteStationC :: RpcStationId -> ClientM RpcOk
 _rpcSetStationHoursC :: RpcStationHours -> ClientM RpcOk
 _rpcCloseStationDayC :: SetStationClosureReq' -> ClientM RpcOk
-_rpcListStationsC  :: RpcEmpty -> ClientM [(Int, String)]
+_rpcListStationsC  :: RpcEmpty -> ClientM [(Int, Text)]
 rpcCreateShiftC    :: CreateShiftReq -> ClientM RpcOk
 rpcDeleteShiftC    :: RpcShiftName -> ClientM RpcOk
 rpcListShiftsC     :: RpcEmpty -> ClientM [ShiftDef]
@@ -287,7 +289,7 @@ _rpcViewDraftC :: RpcDraftId -> ClientM DraftInfo
 _rpcGenerateDraftC :: RpcDraftGenerate -> ClientM ScheduleResult
 _rpcCommitDraftC :: RpcDraftCommit -> ClientM RpcOk
 _rpcDiscardDraftC :: RpcDraftId -> ClientM RpcOk
-_rpcListSchedulesC :: RpcEmpty -> ClientM [String]
+_rpcListSchedulesC :: RpcEmpty -> ClientM [Text]
 _rpcViewScheduleC :: RpcScheduleName -> ClientM Schedule
 _rpcDeleteScheduleC :: RpcScheduleName -> ClientM RpcOk
 _rpcViewCalendarC :: RpcDateRange -> ClientM Schedule
@@ -452,11 +454,11 @@ mkAuthEnv token port = do
     return $ mkClientEnv mgr baseUrl { baseUrlPort = port }
 
 -- | Login and return the token.
-loginAs :: ClientEnv -> String -> String -> IO String
+loginAs :: ClientEnv -> Text -> Text -> IO String
 loginAs env username password = do
     result <- runClientM (loginC (LoginReq username password)) env
     case result of
-        Right resp -> return (lresToken resp)
+        Right resp -> return (T.unpack (lresToken resp))
         Left err -> error $ "Login failed in test setup: " ++ show err
 
 -- | App with admin user logged in. Provides authenticated ClientEnv.
@@ -590,11 +592,11 @@ spec = do
         it "generate populates schedule" $ withSeededApp $ \repo env -> do
             -- Add a skill, station, and worker so the scheduler has something to do
             _ <- SW.addSkill repo "grill" ""
-            SW.addStation repo (StationId 1) "grill"
+            sid <- SW.addStation repo "grill"
             SW.grantWorkerSkill repo (WorkerId 1) (SkillId 1)
-            SW.setStationRequiredSkills repo (StationId 1)
+            SW.setStationRequiredSkills repo sid
                 (Set.singleton (SkillId 1))
-            SW.setStationHours repo (StationId 1) 9 12
+            SW.setStationHours repo sid 9 12
             -- Create and generate
             Right resp <- runClientM (createDraftC (CreateDraftReq (may 4) (may 10))) env
             let did = dcrId resp
@@ -662,7 +664,7 @@ spec = do
 
         it "create and delete skill" $ withTestApp $ \env -> do
             Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "Grill skills")) env
-            Right _ <- runClientM (deleteSkillC (SkillId 1)) env
+            Right _ <- runClientM (deleteSkillC "grill") env
             Right skills <- runClientM listSkillsC env
             length skills `shouldBe` 0
 
@@ -744,9 +746,9 @@ spec = do
             Right skills <- runClientM (rpcListSkillsC RpcEmpty) env
             length skills `shouldBe` 1
 
-        it "create rejects duplicate skill ID" $ withTestApp $ \env -> do
+        it "create rejects duplicate skill name" $ withTestApp $ \env -> do
             Right _ <- runClientM (rpcCreateSkillC (CreateSkillReq "grill" "Grill skills")) env
-            result <- runClientM (rpcCreateSkillC (CreateSkillReq "pastry" "Pastry skills")) env
+            result <- runClientM (rpcCreateSkillC (CreateSkillReq "grill" "Grill again")) env
             case result of
                 Left (FailureResponse _ resp) ->
                     statusCode (responseStatusCode resp) `shouldBe` 409
@@ -805,7 +807,7 @@ spec = do
 
         it "station add via dispatchCommand creates server-side station" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (StationAdd 1 "kitchen")
+                dispatchCommand rpc (StationAdd "kitchen")
                 Right stations <- runClientM (_rpcListStationsC RpcEmpty) env
                 length stations `shouldBe` 1
 
@@ -834,7 +836,7 @@ spec = do
         it "RPC commands produce audit entries with source=rpc" $
             withRemoteApp $ \_ env rpc -> do
                 dispatchCommand rpc (SkillCreate "grill")
-                dispatchCommand rpc (StationAdd 1 "kitchen")
+                dispatchCommand rpc (StationAdd "kitchen")
                 Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
                 all (\e -> aeSource e == "rpc") entries `shouldBe` True
@@ -859,7 +861,7 @@ spec = do
                 case result of
                     Left err -> expectationFailure (show err)
                     Right resp -> do
-                        lresToken resp `shouldSatisfy` (not . null)
+                        lresToken resp `shouldSatisfy` (not . T.null)
                         lresUsername resp `shouldBe` "alice"
                         lresRole resp `shouldBe` "admin"
 
@@ -912,7 +914,7 @@ spec = do
                 result <- runClientM (loginC (LoginReq "alice" "secret")) env
                 case result of
                     Left err -> expectationFailure (show err)
-                    Right resp -> lresToken resp `shouldSatisfy` (not . null)
+                    Right resp -> lresToken resp `shouldSatisfy` (not . T.null)
 
     -- -----------------------------------------------------------------
     -- Auth: Session expiry (7.3)
@@ -1163,7 +1165,7 @@ spec = do
                 threadDelay 500000
 
                 -- Rename skill via REST — triggers GUI event
-                Right _ <- runClientM (renameSkillC (SkillId 1) (RenameSkillReq "broiler")) aEnv
+                Right _ <- runClientM (renameSkillC "grill" (RenameSkillReq "broiler")) aEnv
 
                 -- Wait for the SSE event to arrive
                 threadDelay 1000000

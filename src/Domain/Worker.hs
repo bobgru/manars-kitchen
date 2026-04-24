@@ -43,6 +43,7 @@ module Domain.Worker
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
+import Data.Text (Text)
 import qualified Data.Set as Set
 import Data.List (elemIndex)
 import Data.Time (Day, TimeOfDay(..), addDays, dayOfWeek, DayOfWeek(..), fromGregorian,
@@ -83,7 +84,7 @@ data WorkerContext = WorkerContext
     , wcPrefersVariety :: !(Set WorkerId)
       -- ^ Workers who prefer to rotate among different stations
       -- rather than staying at the same one.
-    , wcShiftPrefs    :: !(Map WorkerId [String])
+    , wcShiftPrefs    :: !(Map WorkerId [Text])
       -- ^ Preferred shift names per worker, e.g. ["morning"], ["afternoon", "weekend"].
       -- "weekend" is a special preference for Saturday/Sunday.
     , wcWeekendOnly  :: !(Set WorkerId)

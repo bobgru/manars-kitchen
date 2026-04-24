@@ -22,6 +22,7 @@ import Data.Aeson.Encode.Pretty (encodePretty)
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (Day, DayOfWeek(..), TimeOfDay(..), formatTime, defaultTimeLocale, parseTimeM)
 import GHC.Generics (Generic)
@@ -44,18 +45,18 @@ data ExportData = ExportData
     , expStations         :: [ExportStation]
     , expWorkers          :: [ExportWorker]
     , expAbsenceTypes     :: [ExportAbsenceType]
-    , expSchedules        :: Map.Map String [ExportAssignment]
+    , expSchedules        :: Map.Map Text [ExportAssignment]
     } deriving (Show, Generic)
 
 data ExportSkill = ExportSkill
     { esId          :: Int
-    , esName        :: String
-    , esDescription :: String
+    , esName        :: Text
+    , esDescription :: Text
     } deriving (Show, Generic)
 
 data ExportStation = ExportStation
     { estId             :: Int
-    , estName           :: String
+    , estName           :: Text
     , estRequiredSkills :: [Int]
     , estStartHour      :: Maybe Int
     , estEndHour        :: Maybe Int
@@ -63,21 +64,21 @@ data ExportStation = ExportStation
 
 data ExportWorker = ExportWorker
     { ewId              :: Int
-    , ewUsername        :: String
-    , ewRole            :: String
+    , ewUsername        :: Text
+    , ewRole            :: Text
     , ewSkills          :: [Int]
     , ewMaxWeeklyHours  :: Maybe Int
     , ewOvertimeOptIn   :: Bool
     , ewStationPrefs    :: [Int]
     , ewPrefersVariety  :: Bool
-    , ewShiftPrefs      :: [String]
+    , ewShiftPrefs      :: [Text]
     } deriving (Show, Generic)
 
 data ExportAssignment = ExportAssignment
     { eaWorker   :: Int
     , eaStation  :: Int
-    , eaDate     :: String
-    , eaStart    :: String
+    , eaDate     :: Text
+    , eaStart    :: Text
     , eaDuration :: Int
     } deriving (Show, Generic)
 
@@ -208,11 +209,11 @@ decodeExport = decode
 -- Gather export data from repository
 -- -----------------------------------------------------------------
 
-gatherExport :: Repository -> Maybe String -> IO ExportData
+gatherExport :: Repository -> Maybe Text -> IO ExportData
 gatherExport repo mSchedName = do
     -- Skills
     skillList <- repoListSkills repo
-    let expSk = [ ExportSkill sid (T.unpack nm) (T.unpack desc)
+    let expSk = [ ExportSkill sid nm desc
                  | (SkillId sid, Skill nm desc) <- skillList ]
 
     -- Skill context (for implications, station requirements, worker skills)
@@ -269,8 +270,8 @@ gatherExport repo mSchedName = do
                 Nothing -> []
                 Just (Schedule as) ->
                     [ ExportAssignment w s
-                        (formatTime defaultTimeLocale "%Y-%m-%d" (slotDate sl))
-                        (formatTime defaultTimeLocale "%H:%M" (slotStart sl))
+                        (T.pack $ formatTime defaultTimeLocale "%Y-%m-%d" (slotDate sl))
+                        (T.pack $ formatTime defaultTimeLocale "%H:%M" (slotStart sl))
                         (round (toRational (slotDuration sl)))
                     | Assignment (WorkerId w) (StationId s) sl <- Set.toList as ]
         pure (nm, assignments)
@@ -278,7 +279,7 @@ gatherExport repo mSchedName = do
 
     pure $ ExportData expSk expImps expSt expWk expAt scheds
 
-roleStr :: Role -> String
+roleStr :: Role -> Text
 roleStr Admin  = "admin"
 roleStr Normal = "normal"
 
@@ -303,27 +304,26 @@ applyImport repo dat = do
   where
     importSkill (ExportSkill sid nm desc) = do
         _ <- repoCreateSkill repo nm desc
-        pure ("Imported skill " ++ show sid ++ ": " ++ nm)
+        pure ("Imported skill " ++ show sid ++ ": " ++ T.unpack nm)
 
-    importStation (ExportStation sid nm reqSkills mSh mEh) = do
-        repoCreateStation repo (StationId sid) nm
-        -- Set required skills and optional hours
+    importStation (ExportStation _oldSid nm reqSkills mSh mEh) = do
+        newSid <- repoCreateStation repo nm
         skillCtx <- repoLoadSkillCtx repo
         let hours = case (mSh, mEh) of
                 (Just sh, Just eh) ->
                     let allDays = [Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday]
                         dayMap = Map.fromList [(dow, [sh..eh-1]) | dow <- allDays]
-                    in Map.insert (StationId sid) dayMap (scStationHours skillCtx)
+                    in Map.insert newSid dayMap (scStationHours skillCtx)
                 _                  -> scStationHours skillCtx
             ctx' = skillCtx
-                { scStationRequires = Map.insert (StationId sid)
+                { scStationRequires = Map.insert newSid
                     (Set.fromList [SkillId s | s <- reqSkills])
                     (scStationRequires skillCtx)
-                , scAllStations = Set.insert (StationId sid) (scAllStations skillCtx)
+                , scAllStations = Set.insert newSid (scAllStations skillCtx)
                 , scStationHours = hours
                 }
         repoSaveSkillCtx repo ctx'
-        pure ("Imported station " ++ show sid ++ ": " ++ nm)
+        pure ("Imported station: " ++ T.unpack nm)
 
     importImplication (a, b) = do
         skillCtx <- repoLoadSkillCtx repo
@@ -343,10 +343,10 @@ applyImport repo dat = do
             else do
                 result <- register repo (ewUsername ew) "changeme" role wid
                 pure $ Just $ case result of
-                    Right _  -> "Created user '" ++ ewUsername ew
+                    Right _  -> "Created user '" ++ T.unpack (ewUsername ew)
                                 ++ "' (worker " ++ show (ewId ew)
                                 ++ ") with default password 'changeme'"
-                    Left err -> "WARNING: could not create user '" ++ ewUsername ew
+                    Left err -> "WARNING: could not create user '" ++ T.unpack (ewUsername ew)
                                 ++ "': " ++ show err
         do  -- Update worker attributes regardless
             skillCtx <- repoLoadSkillCtx repo
@@ -380,7 +380,7 @@ applyImport repo dat = do
                     , wcWeekendOnly = wcWeekendOnly workerCtx  -- preserved from existing context
                     }
             repoSaveWorkerCtx repo wctx'
-            let attrMsg = "Imported worker " ++ show (ewId ew) ++ " (" ++ ewUsername ew ++ ") attributes"
+            let attrMsg = "Imported worker " ++ show (ewId ew) ++ " (" ++ T.unpack (ewUsername ew) ++ ") attributes"
             pure $ case createMsg of
                 Nothing  -> attrMsg
                 Just msg -> msg ++ "\n" ++ attrMsg
@@ -402,11 +402,11 @@ applyImport repo dat = do
                      , Just start <- [parseTime' (eaStart a)]
                      ]
         repoSaveSchedule repo nm (Schedule (Set.fromList parsed))
-        pure ("Imported schedule '" ++ nm ++ "' with "
+        pure ("Imported schedule '" ++ T.unpack nm ++ "' with "
              ++ show (length parsed) ++ " assignments")
 
-parseDay' :: String -> Maybe Day
-parseDay' = parseTimeM True defaultTimeLocale "%Y-%m-%d"
+parseDay' :: Text -> Maybe Day
+parseDay' = parseTimeM True defaultTimeLocale "%Y-%m-%d" . T.unpack
 
-parseTime' :: String -> Maybe TimeOfDay
-parseTime' = parseTimeM True defaultTimeLocale "%H:%M"
+parseTime' :: Text -> Maybe TimeOfDay
+parseTime' = parseTimeM True defaultTimeLocale "%H:%M" . T.unpack

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Domain.Pin
     ( -- * Types
       PinnedAssignment(..)
@@ -8,6 +9,7 @@ module Domain.Pin
     , spec
     ) where
 
+import Data.Text (Text)
 import Data.Time (Day, DayOfWeek(..), TimeOfDay(..), addDays, dayOfWeek)
 import qualified Data.Set as Set
 import Test.Hspec
@@ -24,7 +26,7 @@ import Domain.Shift (ShiftDef(..), defaultShifts)
 data PinSpec
     = PinSlot !Int
       -- ^ A single hour (e.g., 9 means 9:00-10:00).
-    | PinShift !String
+    | PinShift !Text
       -- ^ A named shift (e.g., "morning"). Expands to all hours in
       -- the shift definition.
     deriving (Eq, Ord, Show, Read)
