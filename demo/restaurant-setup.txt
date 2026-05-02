@@ -223,7 +223,7 @@ worker set-shift-pref alex midday afternoon
 
 # === Absences ===
 # Nina has approved absence on Friday Apr 10
-absence-type create 1 vacation on
+absence-type create vacation on
 absence set-allowance nina vacation 10
 absence request vacation nina 2026-04-10 2026-04-10
 absence approve 1

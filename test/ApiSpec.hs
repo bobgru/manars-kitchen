@@ -153,8 +153,8 @@ _importC :: ImportReq -> ClientM ImportResp
 
 -- Absence type management
 createAbsenceTypeC :: CreateAbsenceTypeReq -> ClientM NoContent
-_deleteAbsenceTypeC :: Int -> ClientM NoContent
-_setAbsenceAllowanceC :: Int -> SetAbsenceAllowanceReq -> ClientM NoContent
+_deleteAbsenceTypeC :: Text -> ClientM NoContent
+_setAbsenceAllowanceC :: Text -> SetAbsenceAllowanceReq -> ClientM NoContent
 
 -- User management
 listUsersC :: ClientM [User]
@@ -308,7 +308,7 @@ _rpcRollbackCheckpointC :: RpcCheckpointName -> ClientM RpcOk
 _rpcExportAllC :: RpcEmpty -> ClientM ExportResp
 _rpcImportDataC :: ImportReq -> ClientM ImportResp
 _rpcCreateAbsenceTypeC :: CreateAbsenceTypeReq -> ClientM RpcOk
-_rpcDeleteAbsenceTypeC :: RpcAbsenceTypeId -> ClientM RpcOk
+_rpcDeleteAbsenceTypeC :: RpcAbsenceTypeName -> ClientM RpcOk
 _rpcSetAllowanceC :: RpcSetAllowance -> ClientM RpcOk
 _rpcRequestAbsenceC :: RequestAbsenceReq -> ClientM AbsenceCreatedResp
 _rpcApproveAbsenceC :: RpcAbsenceId -> ClientM RpcOk
@@ -722,7 +722,7 @@ spec = do
     describe "Absence type management" $ do
         it "create absence type" $ withTestApp $ \env -> do
             Right _ <- runClientM (createAbsenceTypeC
-                (CreateAbsenceTypeReq 1 "vacation" True)) env
+                (CreateAbsenceTypeReq "vacation" True)) env
             pure ()
 
     describe "User management" $ do

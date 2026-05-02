@@ -616,9 +616,9 @@ displayAbsenceTypes :: AbsenceContext -> String
 displayAbsenceTypes ctx
     | Map.null (acTypes ctx) = "  (no absence types)"
     | otherwise = unlines
-        [ "  " ++ show tid ++ ". " ++ T.unpack (atName at)
+        [ "  " ++ T.unpack (atName at)
           ++ if atYearlyLimit at then " (yearly limit)" else " (no limit)"
-        | (AbsenceTypeId tid, at) <- Map.toList (acTypes ctx) ]
+        | (_tid, at) <- Map.toList (acTypes ctx) ]
 
 -- -----------------------------------------------------------------
 -- Hint diff and list display

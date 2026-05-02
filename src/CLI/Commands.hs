@@ -57,7 +57,7 @@ data Command
     | ShiftList
     | ShiftDelete String            -- ^ name
     -- Absences (admin)
-    | AbsenceTypeCreate Int String Bool  -- ^ type-id name yearly-limit?
+    | AbsenceTypeCreate String Bool      -- ^ name yearly-limit?
     | AbsenceTypeList
     | AbsenceSetAllowance Int Int Int    -- ^ worker-id type-id days
     | AbsenceApprove Int
@@ -238,8 +238,8 @@ parseCommand input = case shellWords input of
     ["shift", "list"]          -> ShiftList
     ["shift", "delete", name]  -> ShiftDelete name
 
-    ["absence-type", "create", tid, name, lim]
-        | isDigit' tid -> AbsenceTypeCreate (read tid) name (parseBool lim)
+    ["absence-type", "create", name, lim]
+        -> AbsenceTypeCreate name (parseBool lim)
     ["absence-type", "list"]       -> AbsenceTypeList
     ["absence", "set-allowance", wid, tid, days]
         | all isDigit' [wid, tid, days] -> AbsenceSetAllowance (read wid) (read tid) (read days)

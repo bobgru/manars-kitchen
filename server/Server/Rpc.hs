@@ -37,7 +37,7 @@ module Server.Rpc
     , RpcConfigSet(..)
     , RpcPresetName(..)
     , RpcCheckpointName(..)
-    , RpcAbsenceTypeId(..)
+    , RpcAbsenceTypeName(..)
     , RpcSetAllowance(..)
     , RpcAbsenceId(..)
     , RpcUsername(..)
@@ -163,7 +163,7 @@ type RpcAPI =
     :<|> "rpc" :> "import" :> "data" :> ReqBody '[JSON] ImportReq :> Post '[JSON] ImportResp
     -- Absence types
     :<|> "rpc" :> "absence-type" :> "create" :> ReqBody '[JSON] CreateAbsenceTypeReq :> Post '[JSON] RpcOk
-    :<|> "rpc" :> "absence-type" :> "delete" :> ReqBody '[JSON] RpcAbsenceTypeId :> Post '[JSON] RpcOk
+    :<|> "rpc" :> "absence-type" :> "delete" :> ReqBody '[JSON] RpcAbsenceTypeName :> Post '[JSON] RpcOk
     :<|> "rpc" :> "absence-type" :> "set-allowance" :> ReqBody '[JSON] RpcSetAllowance :> Post '[JSON] RpcOk
     -- Absences
     :<|> "rpc" :> "absence" :> "request" :> ReqBody '[JSON] RequestAbsenceReq :> Post '[JSON] AbsenceCreatedResp
@@ -320,9 +320,9 @@ newtype RpcCheckpointName = RpcCheckpointName { rcnName :: T.Text } deriving (Sh
 instance ToJSON RpcCheckpointName where toJSON r = object ["name" .= rcnName r]
 instance FromJSON RpcCheckpointName where parseJSON = withObject "RpcCheckpointName" $ \v -> RpcCheckpointName <$> v .: "name"
 
-newtype RpcAbsenceTypeId = RpcAbsenceTypeId { ratiId :: Int } deriving (Show)
-instance ToJSON RpcAbsenceTypeId where toJSON r = object ["id" .= ratiId r]
-instance FromJSON RpcAbsenceTypeId where parseJSON = withObject "RpcAbsenceTypeId" $ \v -> RpcAbsenceTypeId <$> v .: "id"
+newtype RpcAbsenceTypeName = RpcAbsenceTypeName { ratnName :: T.Text } deriving (Show)
+instance ToJSON RpcAbsenceTypeName where toJSON r = object ["name" .= ratnName r]
+instance FromJSON RpcAbsenceTypeName where parseJSON = withObject "RpcAbsenceTypeName" $ \v -> RpcAbsenceTypeName <$> v .: "name"
 
 data RpcSetAllowance = RpcSetAllowance { rsaTypeId :: !Int, rsaWorkerId :: !Int, rsaAllowance :: !Int } deriving (Show)
 instance ToJSON RpcSetAllowance where toJSON r = object ["typeId" .= rsaTypeId r, "workerId" .= rsaWorkerId r, "allowance" .= rsaAllowance r]
@@ -837,20 +837,30 @@ rpcImportData repo req = ImportResp <$> liftIO (Exp.applyImport repo (irData req
 rpcCreateAbsenceType :: TopicBus CommandEvent -> Repository -> CreateAbsenceTypeReq -> Handler RpcOk
 rpcCreateAbsenceType cmdBus repo req = do
     ctx <- liftIO $ SA.loadAbsenceCtx repo
-    let atId = AbsenceTypeId (catrId req)
+    let nextTid = if Map.null (acTypes ctx)
+                  then 1
+                  else let AbsenceTypeId maxId = maximum (Map.keys (acTypes ctx))
+                       in maxId + 1
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
-        ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
+        ctx' = ctx { acTypes = Map.insert (AbsenceTypeId nextTid) newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpcBus cmdBus ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (T.unpack (catrName req)))
+    logRpcBus cmdBus ("absence-type create " ++ shellQuote (T.unpack (catrName req)))
     pure RpcOk
 
-rpcDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> RpcAbsenceTypeId -> Handler RpcOk
+rpcDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> RpcAbsenceTypeName -> Handler RpcOk
 rpcDeleteAbsenceType cmdBus repo req = do
     ctx <- liftIO $ SA.loadAbsenceCtx repo
-    let ctx' = ctx { acTypes = Map.delete (AbsenceTypeId (ratiId req)) (acTypes ctx) }
-    liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpcBus cmdBus ("absence-type delete " ++ show (ratiId req))
-    pure RpcOk
+    let name = ratnName req
+        matches = [ tid | (tid, at) <- Map.toList (acTypes ctx)
+                  , T.toLower (atName at) == T.toLower name ]
+    case matches of
+        [atId] -> do
+            let ctx' = ctx { acTypes = Map.delete atId (acTypes ctx) }
+            liftIO $ repoSaveAbsenceCtx repo ctx'
+            logRpcBus cmdBus ("absence-type delete " ++ shellQuote (T.unpack name))
+            pure RpcOk
+        [] -> throwError err404
+        _  -> throwError err409
 
 rpcSetAllowance :: TopicBus CommandEvent -> Repository -> RpcSetAllowance -> Handler RpcOk
 rpcSetAllowance cmdBus repo req = do

@@ -385,14 +385,18 @@ applyImport repo dat = do
                 Nothing  -> attrMsg
                 Just msg -> msg ++ "\n" ++ attrMsg
 
-    importAbsenceType (ExportAbsenceType tid nm yearly) = do
+    importAbsenceType (ExportAbsenceType _tid nm yearly) = do
         absCtx <- repoLoadAbsenceCtx repo
-        let ctx' = absCtx
-                { acTypes = Map.insert (AbsenceTypeId tid)
+        let nextTid = if Map.null (acTypes absCtx)
+                      then 1
+                      else let AbsenceTypeId maxId = maximum (Map.keys (acTypes absCtx))
+                           in maxId + 1
+            ctx' = absCtx
+                { acTypes = Map.insert (AbsenceTypeId nextTid)
                     (AbsenceType nm yearly) (acTypes absCtx)
                 }
         repoSaveAbsenceCtx repo ctx'
-        pure ("Imported absence type " ++ show tid ++ ": " ++ T.unpack nm)
+        pure ("Imported absence type: " ++ T.unpack nm)
 
     importSchedule nm assignments = do
         let parsed = [ Assignment (WorkerId (eaWorker a)) (StationId (eaStation a))

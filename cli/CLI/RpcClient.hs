@@ -113,7 +113,7 @@ cRollbackCheckpoint :: RpcCheckpointName -> ClientM RpcOk
 cExportAll      :: RpcEmpty -> ClientM ExportResp
 _cImportData    :: ImportReq -> ClientM ImportResp
 cCreateAbsenceType :: CreateAbsenceTypeReq -> ClientM RpcOk
-_cDeleteAbsenceType :: RpcAbsenceTypeId -> ClientM RpcOk
+_cDeleteAbsenceType :: RpcAbsenceTypeName -> ClientM RpcOk
 cSetAllowance   :: RpcSetAllowance -> ClientM RpcOk
 cRequestAbsence :: RequestAbsenceReq -> ClientM AbsenceCreatedResp
 cApproveAbsence :: RpcAbsenceId -> ClientM RpcOk
@@ -654,8 +654,8 @@ dispatchCommand env cmd = case cmd of
         putStrLn "Pay period display is not yet supported in remote mode."
 
     -- Absence types
-    AbsenceTypeCreate tid name counts -> requireAdmin env $
-        runOk env (cCreateAbsenceType (CreateAbsenceTypeReq tid (T.pack name) counts))
+    AbsenceTypeCreate name counts -> requireAdmin env $
+        runOk env (cCreateAbsenceType (CreateAbsenceTypeReq (T.pack name) counts))
             "Absence type created."
 
     AbsenceTypeList ->

@@ -766,31 +766,46 @@ handleCreateAbsenceType :: TopicBus CommandEvent -> Repository -> User -> Create
 handleCreateAbsenceType cmdBus repo user req = do
     requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
-    let atId = AbsenceTypeId (catrId req)
+    let nextTid = if Map.null (acTypes ctx)
+                  then 1
+                  else let AbsenceTypeId maxId = maximum (Map.keys (acTypes ctx))
+                       in maxId + 1
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
-        ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
+        ctx' = ctx { acTypes = Map.insert (AbsenceTypeId nextTid) newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRest cmdBus user ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (T.unpack (catrName req)))
+    logRest cmdBus user ("absence-type create " ++ shellQuote (T.unpack (catrName req)))
     pure NoContent
 
-handleDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
-handleDeleteAbsenceType cmdBus repo user atid = do
+handleDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
+handleDeleteAbsenceType cmdBus repo user name = do
     requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
-    let ctx' = ctx { acTypes = Map.delete (AbsenceTypeId atid) (acTypes ctx) }
-    liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRest cmdBus user ("absence-type delete " ++ show atid)
-    pure NoContent
+    let matches = [ tid | (tid, at) <- Map.toList (acTypes ctx)
+                  , T.toLower (atName at) == T.toLower name ]
+    case matches of
+        [atId] -> do
+            let ctx' = ctx { acTypes = Map.delete atId (acTypes ctx) }
+            liftIO $ repoSaveAbsenceCtx repo ctx'
+            logRest cmdBus user ("absence-type delete " ++ shellQuote (T.unpack name))
+            pure NoContent
+        [] -> throwError err404
+        _  -> throwError err409
 
-handleSetAbsenceAllowance :: TopicBus CommandEvent -> Repository -> User -> Int -> SetAbsenceAllowanceReq -> Handler NoContent
-handleSetAbsenceAllowance cmdBus repo user atid req = do
+handleSetAbsenceAllowance :: TopicBus CommandEvent -> Repository -> User -> Text -> SetAbsenceAllowanceReq -> Handler NoContent
+handleSetAbsenceAllowance cmdBus repo user name req = do
     requireAdmin user
     ctx <- liftIO $ SA.loadAbsenceCtx repo
-    let key = (WorkerId (saarWorkerId req), AbsenceTypeId atid)
-        ctx' = ctx { acYearlyAllowance = Map.insert key (saarAllowance req) (acYearlyAllowance ctx) }
-    liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRest cmdBus user ("absence set-allowance " ++ show atid ++ " " ++ show (saarWorkerId req) ++ " " ++ show (saarAllowance req))
-    pure NoContent
+    let matches = [ tid | (tid, at) <- Map.toList (acTypes ctx)
+                  , T.toLower (atName at) == T.toLower name ]
+    case matches of
+        [atId] -> do
+            let key = (WorkerId (saarWorkerId req), atId)
+                ctx' = ctx { acYearlyAllowance = Map.insert key (saarAllowance req) (acYearlyAllowance ctx) }
+            liftIO $ repoSaveAbsenceCtx repo ctx'
+            logRest cmdBus user ("absence set-allowance " ++ shellQuote (T.unpack name) ++ " " ++ show (saarWorkerId req) ++ " " ++ show (saarAllowance req))
+            pure NoContent
+        [] -> throwError err404
+        _  -> throwError err409
 
 -- -----------------------------------------------------------------
 -- User management

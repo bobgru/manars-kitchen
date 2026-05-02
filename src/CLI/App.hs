@@ -1504,10 +1504,14 @@ handleCommand st cmd = case cmd of
         putStrLn ("Deleted shift: " ++ name)
 
     -- Absence types (admin)
-    AbsenceTypeCreate tid name lim -> requireAdmin st $ do
+    AbsenceTypeCreate name lim -> requireAdmin st $ do
         ctx <- repoLoadAbsenceCtx (asRepo st)
-        let at = AbsenceType { atName = T.pack name, atYearlyLimit = lim }
-            ctx' = ctx { acTypes = Map.insert (AbsenceTypeId tid) at (acTypes ctx) }
+        let nextTid = if Map.null (acTypes ctx)
+                      then 1
+                      else let AbsenceTypeId maxId = maximum (Map.keys (acTypes ctx))
+                           in maxId + 1
+            at = AbsenceType { atName = T.pack name, atYearlyLimit = lim }
+            ctx' = ctx { acTypes = Map.insert (AbsenceTypeId nextTid) at (acTypes ctx) }
         repoSaveAbsenceCtx (asRepo st) ctx'
         putStrLn ("Created absence type: " ++ name)
 
@@ -2329,7 +2333,7 @@ helpRegistry =
     , ("absence",  False, "absence request <tid> <wid> <start> <end>", "Request an absence")
     , ("absence",  False, "absence list",                    "List your absences")
     , ("absence",  False, "vacation remaining <tid>",        "Check remaining vacation days")
-    , ("absence",  True,  "absence-type create <id> <name> <on|off>", "Create absence type")
+    , ("absence",  True,  "absence-type create <name> <on|off>", "Create absence type")
     , ("absence",  True,  "absence-type list",               "List absence types")
     , ("absence",  True,  "absence set-allowance <wid> <tid> <days>", "Set worker allowance")
     , ("absence",  True,  "absence approve <id>",            "Approve absence request")

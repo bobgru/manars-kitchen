@@ -105,8 +105,8 @@ statements =
 
       -- Absences
     , "CREATE TABLE IF NOT EXISTS absence_types (\
-      \  id INTEGER PRIMARY KEY,\
-      \  name TEXT NOT NULL,\
+      \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      \  name TEXT NOT NULL UNIQUE,\
       \  yearly_limit INTEGER NOT NULL DEFAULT 0\
       \)"
 

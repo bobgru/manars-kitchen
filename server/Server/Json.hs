@@ -863,20 +863,19 @@ instance FromJSON ImportResp where
 -- -----------------------------------------------------------------
 
 data CreateAbsenceTypeReq = CreateAbsenceTypeReq
-    { catrId          :: !Int
-    , catrName        :: !Text
+    { catrName        :: !Text
     , catrCountsAgainstAllowance :: !Bool
     } deriving (Show)
 
 instance ToJSON CreateAbsenceTypeReq where
     toJSON r = object
-        [ "id" .= catrId r, "name" .= catrName r
+        [ "name" .= catrName r
         , "countsAgainstAllowance" .= catrCountsAgainstAllowance r
         ]
 
 instance FromJSON CreateAbsenceTypeReq where
     parseJSON = withObject "CreateAbsenceTypeReq" $ \v ->
-        CreateAbsenceTypeReq <$> v .: "id" <*> v .: "name"
+        CreateAbsenceTypeReq <$> v .: "name"
                              <*> v .: "countsAgainstAllowance"
 
 data SetAbsenceAllowanceReq = SetAbsenceAllowanceReq

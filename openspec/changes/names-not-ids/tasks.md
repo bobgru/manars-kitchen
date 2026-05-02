@@ -48,11 +48,11 @@
 
 ## Wave 3: Absence Type — Text + ID removal
 
-- [ ] 3.1. **Repo signatures** — Change `repoCreateAbsenceType` to take name only (Text), return auto-assigned ID. All absence type String → Text.
-- [ ] 3.2. **SQLite schema + implementation** — Auto-increment for absence type ID. Unique name constraint. Update queries.
-- [ ] 3.3. **CLI commands** — Change absence type commands from user-supplied ID to name-only creation. Update parsing and resolution.
-- [ ] 3.4. **Demo script: absence types** — Update to name-based references.
-- [ ] 3.5. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
+- [x] 3.1. **Repo signatures** — Change `repoCreateAbsenceType` to take name only (Text), return auto-assigned ID. All absence type String → Text.
+- [x] 3.2. **SQLite schema + implementation** — Auto-increment for absence type ID. Unique name constraint. Update queries.
+- [x] 3.3. **CLI commands** — Change absence type commands from user-supplied ID to name-only creation. Update parsing and resolution.
+- [x] 3.4. **Demo script: absence types** — Update to name-based references.
+- [x] 3.5. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
 
 ## Wave 3: Absence — Text migration
 

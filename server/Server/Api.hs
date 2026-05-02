@@ -192,8 +192,8 @@ type RawAPI =
     -- Absence type management
     -- -----------------------------------------------------------------
     :<|> "api" :> "absence-types" :> ReqBody '[JSON] CreateAbsenceTypeReq :> PostNoContent
-    :<|> "api" :> "absence-types" :> Capture "id" Int :> DeleteNoContent
-    :<|> "api" :> "absence-types" :> Capture "id" Int :> "allowance"
+    :<|> "api" :> "absence-types" :> Capture "name" Text :> DeleteNoContent
+    :<|> "api" :> "absence-types" :> Capture "name" Text :> "allowance"
          :> ReqBody '[JSON] SetAbsenceAllowanceReq :> PutNoContent
 
     -- -----------------------------------------------------------------
