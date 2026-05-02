@@ -263,7 +263,7 @@ calendar history
 pin marco grill monday morning
 
 # Create a draft for the following week (Apr 13-19)
-draft create 2026-04-13 2026-04-19
+draft create 2026-04-13 2026-04-19 --force
 draft list
 
 # Generate the schedule within the draft
@@ -291,8 +291,8 @@ calendar history
 pin marco grill saturday midday
 
 # Create two concurrent drafts (non-overlapping)
-draft create 2026-04-20 2026-04-26
-draft create 2026-04-27 2026-05-03
+draft create 2026-04-20 2026-04-26 --force
+draft create 2026-04-27 2026-05-03 --force
 draft list
 
 # Generate both drafts — scheduler assigns workers to all shifts including weekends
@@ -309,7 +309,7 @@ draft open 3
 # === Freeze Line ===
 # Demonstrates the freeze-line guardrail for historical calendar dates.
 #
-# The freeze line defaults to yesterday (2026-04-10). Dates on or before
+# The freeze line defaults to yesterday. Dates on or before
 # the freeze line are "frozen" — creating a draft that covers them
 # triggers a warning. The intended workflow for intentional history edits:
 # 1. Check freeze status
@@ -366,7 +366,7 @@ calendar freeze-status
 # revert, and re-explore freely — nothing is persisted.
 
 # Create and generate a draft for week 4
-draft create 2026-04-27 2026-05-03
+draft create 2026-04-27 2026-05-03 --force
 draft generate 6
 
 # Explore: what if Nina (beverage/register/sandwich) could also do grill?

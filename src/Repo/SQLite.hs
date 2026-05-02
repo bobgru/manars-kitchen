@@ -86,8 +86,6 @@ mkSQLiteRepo path = do
         , repoSavePayPeriodConfig = sqlSavePayPeriodConfig conn
         , repoSavePins       = sqlSavePins conn
         , repoLoadPins       = sqlLoadPins conn
-        , repoLogCommand     = sqlLogCommand conn
-        , repoLogRpcCommand  = sqlLogRpcCommand conn
         , repoLogCommandWithSource = sqlLogCommandWithSource conn
         , repoGetAuditLog    = sqlGetAuditLog conn
         , repoWipeAll        = sqlWipeAll conn
@@ -687,36 +685,6 @@ sqlDeleteSchedule conn name = do
 -- =====================================================================
 -- Audit log
 -- =====================================================================
-
-sqlLogCommand :: Connection -> Text -> Text -> IO ()
-sqlLogCommand conn username command =
-    let meta = classify (T.unpack command)
-        mut  = if cmIsMutation meta then (1 :: Int) else 0
-    in execute conn
-        "INSERT INTO audit_log (username, command, entity_type, operation, \
-        \entity_id, target_id, date_from, date_to, is_mutation, params, source) \
-        \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'cli')"
-        ( username, command
-        , cmEntityType meta, cmOperation meta
-        , cmEntityId meta, cmTargetId meta
-        , cmDateFrom meta, cmDateTo meta
-        , mut, cmParams meta
-        )
-
-sqlLogRpcCommand :: Connection -> Text -> Text -> IO ()
-sqlLogRpcCommand conn username command =
-    let meta = classify (T.unpack command)
-        mut  = if cmIsMutation meta then (1 :: Int) else 0
-    in execute conn
-        "INSERT INTO audit_log (username, command, entity_type, operation, \
-        \entity_id, target_id, date_from, date_to, is_mutation, params, source) \
-        \VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rpc')"
-        ( username, command
-        , cmEntityType meta, cmOperation meta
-        , cmEntityId meta, cmTargetId meta
-        , cmDateFrom meta, cmDateTo meta
-        , mut, cmParams meta
-        )
 
 sqlLogCommandWithSource :: Connection -> Text -> Text -> Text -> IO ()
 sqlLogCommandWithSource conn username command source =

@@ -9,7 +9,8 @@ import Audit.CommandMeta
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), AuditEntry(..))
 import CLI.Commands (parseCommand)
-import CLI.App (isMutating)
+import CLI.App (isMutating, registerAuditSubscriber)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), newTopicBus, publishCommand)
 
 spec :: Spec
 spec = do
@@ -314,8 +315,8 @@ spec = do
 
     -- 8.5: Integration test
     describe "integration: log and read structured audit entries" $ do
-        it "logs a command and reads back structured fields" $ withTestRepo $ \repo -> do
-            repoLogCommand repo "admin" "skill create pastry"
+        it "logs a command and reads back structured fields" $ withTestRepo $ \(repo, bus) -> do
+            publishCommand bus CLI "admin" "skill create pastry"
             entries <- repoGetAuditLog repo
             case entries of
                 [ae] -> do
@@ -330,9 +331,9 @@ spec = do
 
     -- 8.6: Legacy rows test
     describe "legacy rows with NULL structured fields" $ do
-        it "reads legacy entries as AuditEntry with Nothing fields" $ withTestRepo $ \repo -> do
+        it "reads legacy entries as AuditEntry with Nothing fields" $ withTestRepo $ \(repo, bus) -> do
             -- Log an unrecognized command (structured fields will be NULL)
-            repoLogCommand repo "admin" "foobar baz"
+            publishCommand bus CLI "admin" "foobar baz"
             entries <- repoGetAuditLog repo
             case entries of
                 [ae] -> do
@@ -344,12 +345,14 @@ spec = do
                 _ -> expectationFailure $
                     "expected 1 entry, got " ++ show (length entries)
 
--- | Helper: create a temporary SQLite repo for testing.
-withTestRepo :: (Repository -> IO ()) -> IO ()
+-- | Helper: create a temporary SQLite repo with pub/sub bus for testing.
+withTestRepo :: ((Repository, TopicBus CommandEvent) -> IO ()) -> IO ()
 withTestRepo action = do
     let path = "/tmp/manars-kitchen-test-audit.db"
     exists <- doesFileExist path
     if exists then removeFile path else return ()
     (_, repo) <- mkSQLiteRepo path
-    action repo
+    bus <- newTopicBus
+    _ <- registerAuditSubscriber bus repo
+    action (repo, bus)
     removeFile path

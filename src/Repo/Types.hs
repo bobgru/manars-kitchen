@@ -175,10 +175,6 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Audit log
       -- ---------------------------------------------------------------
-    , repoLogCommand     :: Text -> Text -> IO ()
-      -- ^ username, command string (source='cli')
-    , repoLogRpcCommand  :: Text -> Text -> IO ()
-      -- ^ username, command string (source='rpc')
     , repoLogCommandWithSource :: Text -> Text -> Text -> IO ()
       -- ^ username, command string, source (e.g. "cli", "rpc", "demo")
     , repoGetAuditLog    :: IO [AuditEntry]

@@ -7,7 +7,6 @@ import System.Directory (removeFile, doesFileExist)
 import Data.Time (TimeOfDay(..), fromGregorian)
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import Auth.Types (UserId, Role(..))
 import Domain.Types (WorkerId(..), StationId(..), SkillId(..), Slot(..))
 import Domain.Hint (Hint(..))
@@ -16,12 +15,14 @@ import Repo.Types (Repository(..), HintSessionRecord(..), AuditEntry(..))
 import Service.Auth (register)
 import Service.HintRebase (ChangeCategory(..), RebaseResult(..), classifyChange, rebaseSession)
 import qualified Service.Draft as Draft
+import CLI.App (registerAuditSubscriber)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), newTopicBus, publishCommand)
 
 spec :: Spec
 spec = do
     describe "E2E: hint session persistence across sessions" $ do
         it "add hints, close session, open new session, resume — hints preserved" $
-            withTestRepo $ \repo -> do
+            withTestRepo $ \(repo, bus) -> do
                 -- Session 1: create user, session, draft, save hints
                 uid <- createTestUser repo "alice"
                 (sid1, _tok1) <- repoCreateSession repo uid
@@ -30,7 +31,7 @@ spec = do
                             , WaiveOvertime (WorkerId 5)
                             ]
                 -- Log a command to establish a checkpoint
-                repoLogCommand repo "alice" "station add 1 grill"
+                publishCommand bus CLI "alice" "station add 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 -- Save hint session
@@ -56,19 +57,19 @@ spec = do
 
     describe "E2E: rebase with compatible change" $ do
         it "hints preserved after compatible mutation" $
-            withTestRepo $ \repo -> do
+            withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "bob"
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
                 -- Establish checkpoint
-                repoLogCommand repo "bob" "station add 1 grill"
+                publishCommand bus CLI "bob" "station add 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 -- Save hint session
                 repoSaveHintSession repo sid did hints cp
                 -- Make a compatible mutation (different station, doesn't touch worker 3 or skill 2)
-                repoLogCommand repo "bob" "station add 5 dishwash"
+                publishCommand bus CLI "bob" "station add 5 dishwash"
                 -- Get entries since checkpoint
                 since <- repoAuditSince repo cp
                 length since `shouldBe` 1
@@ -88,7 +89,7 @@ spec = do
 
     describe "E2E: rebase with conflicting change" $ do
         it "conflict detected and resolvable by dropping conflicting hints" $
-            withTestRepo $ \repo -> do
+            withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "carol"
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
@@ -96,12 +97,12 @@ spec = do
                             , WaiveOvertime (WorkerId 5)
                             ]
                 -- Establish checkpoint
-                repoLogCommand repo "carol" "station add 1 grill"
+                publishCommand bus CLI "carol" "station add 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
                 -- Make a conflicting mutation: revoke the exact skill we're granting
-                repoLogCommand repo "carol" "worker revoke-skill 3 2"
+                publishCommand bus CLI "carol" "worker revoke-skill 3 2"
                 -- Get entries since checkpoint
                 since <- repoAuditSince repo cp
                 length since `shouldBe` 1
@@ -135,17 +136,17 @@ spec = do
                         ("Expected HasConflicts, got: " ++ show other)
 
         it "structural change (draft commit) invalidates session" $
-            withTestRepo $ \repo -> do
+            withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "dave"
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
-                repoLogCommand repo "dave" "station add 1 grill"
+                publishCommand bus CLI "dave" "station add 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
                 -- Simulate draft commit appearing in audit log
-                repoLogCommand repo "dave" (T.pack ("draft commit " ++ show did))
+                publishCommand bus CLI "dave" ("draft commit " ++ show did)
                 since <- repoAuditSince repo cp
                 let result = rebaseSession did since hints
                 case result of
@@ -155,12 +156,12 @@ spec = do
 
     describe "E2E: draft commit/discard cleans up hint session" $ do
         it "deleting hint session on commit simulates cleanup" $
-            withTestRepo $ \repo -> do
+            withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "eve"
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [WaiveOvertime (WorkerId 1)]
-                repoLogCommand repo "eve" "station add 1 grill"
+                publishCommand bus CLI "eve" "station add 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
@@ -175,14 +176,14 @@ spec = do
                 afterCommit `shouldBe` Nothing
 
         it "deleting hint session on discard simulates cleanup" $
-            withTestRepo $ \repo -> do
+            withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "frank"
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , CloseStation (StationId 1) testSlot
                             ]
-                repoLogCommand repo "frank" "station add 1 grill"
+                publishCommand bus CLI "frank" "station add 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
@@ -200,14 +201,16 @@ spec = do
 testSlot :: Slot
 testSlot = Slot (fromGregorian 2026 5 4) (TimeOfDay 9 0 0) 3600
 
--- | Helper: create a temporary SQLite repo for testing.
-withTestRepo :: (Repository -> IO ()) -> IO ()
+-- | Helper: create a temporary SQLite repo with pub/sub bus for testing.
+withTestRepo :: ((Repository, TopicBus CommandEvent) -> IO ()) -> IO ()
 withTestRepo action = do
     let path = "/tmp/manars-kitchen-test-hint-e2e.db"
     exists <- doesFileExist path
     if exists then removeFile path else return ()
     (_, repo) <- mkSQLiteRepo path
-    action repo
+    bus <- newTopicBus
+    _ <- registerAuditSubscriber bus repo
+    action (repo, bus)
     removeFile path
 
 -- | Helper: create a test user and return their UserId.

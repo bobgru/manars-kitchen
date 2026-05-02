@@ -13,11 +13,13 @@ import Data.Time (TimeOfDay(..), fromGregorian)
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), HintSessionRecord(..), AuditEntry(..))
 import Service.Auth (register)
+import CLI.App (registerAuditSubscriber)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), newTopicBus, publishCommand)
 
 spec :: Spec
 spec = do
     describe "hint session persistence" $ do
-        it "save and load round-trips" $ withTestRepo $ \repo -> do
+        it "save and load round-trips" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "alice"
             (sid, _tok) <- repoCreateSession repo uid
             let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
@@ -27,13 +29,13 @@ spec = do
             result <- repoLoadHintSession repo sid 1
             result `shouldBe` Just (HintSessionRecord hints 42)
 
-        it "returns Nothing for nonexistent session" $ withTestRepo $ \repo -> do
+        it "returns Nothing for nonexistent session" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "bob"
             (sid, _tok) <- repoCreateSession repo uid
             result <- repoLoadHintSession repo sid 99
             result `shouldBe` Nothing
 
-        it "upsert overwrites existing session" $ withTestRepo $ \repo -> do
+        it "upsert overwrites existing session" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "carol"
             (sid, _tok) <- repoCreateSession repo uid
             let hints1 = [GrantSkill (WorkerId 1) (SkillId 1)]
@@ -43,7 +45,7 @@ spec = do
             result <- repoLoadHintSession repo sid 1
             result `shouldBe` Just (HintSessionRecord hints2 20)
 
-        it "delete removes session" $ withTestRepo $ \repo -> do
+        it "delete removes session" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "dave"
             (sid, _tok) <- repoCreateSession repo uid
             let hints = [WaiveOvertime (WorkerId 1)]
@@ -52,24 +54,24 @@ spec = do
             result <- repoLoadHintSession repo sid 1
             result `shouldBe` Nothing
 
-        it "delete nonexistent is a no-op" $ withTestRepo $ \repo -> do
+        it "delete nonexistent is a no-op" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "eve"
             (sid, _tok) <- repoCreateSession repo uid
             repoDeleteHintSession repo sid 99  -- should not error
 
     describe "audit-since query" $ do
-        it "returns only mutations after checkpoint" $ withTestRepo $ \repo -> do
+        it "returns only mutations after checkpoint" $ withTestRepo $ \(repo, bus) -> do
             _ <- createTestUser repo "frank"
             -- Log some commands (mutations)
-            repoLogCommand repo "frank" "worker grant-skill 1 2"
-            repoLogCommand repo "frank" "station add 3 dishwash"
+            publishCommand bus CLI "frank" "worker grant-skill 1 2"
+            publishCommand bus CLI "frank" "station add 3 dishwash"
             -- Get the audit log to find the IDs
             entries <- repoGetAuditLog repo
             let checkpoint = case entries of
                     []  -> 0
                     _   -> aeId (last entries)
             -- Log more commands
-            repoLogCommand repo "frank" "worker set-hours 1 40"
+            publishCommand bus CLI "frank" "worker set-hours 1 40"
             -- Query since checkpoint
             since <- repoAuditSince repo checkpoint
             length since `shouldBe` 1
@@ -77,9 +79,9 @@ spec = do
                 [entry] -> aeCommand entry `shouldBe` Just "worker set-hours 1 40"
                 _       -> expectationFailure ("Expected 1 entry, got " ++ show (length since))
 
-        it "returns empty list when nothing since checkpoint" $ withTestRepo $ \repo -> do
+        it "returns empty list when nothing since checkpoint" $ withTestRepo $ \(repo, bus) -> do
             _ <- createTestUser repo "grace"
-            repoLogCommand repo "grace" "station add 1 grill"
+            publishCommand bus CLI "grace" "station add 1 grill"
             entries <- repoGetAuditLog repo
             let checkpoint = aeId (last entries)
             since <- repoAuditSince repo checkpoint
@@ -88,14 +90,16 @@ spec = do
 testSlot :: Slot
 testSlot = Slot (fromGregorian 2026 5 4) (TimeOfDay 9 0 0) 3600
 
--- | Helper: create a temporary SQLite repo for testing.
-withTestRepo :: (Repository -> IO ()) -> IO ()
+-- | Helper: create a temporary SQLite repo with pub/sub bus for testing.
+withTestRepo :: ((Repository, TopicBus CommandEvent) -> IO ()) -> IO ()
 withTestRepo action = do
     let path = "/tmp/manars-kitchen-test-hint-session.db"
     exists <- doesFileExist path
     if exists then removeFile path else return ()
     (_, repo) <- mkSQLiteRepo path
-    action repo
+    bus <- newTopicBus
+    _ <- registerAuditSubscriber bus repo
+    action (repo, bus)
     removeFile path
 
 -- | Helper: create a test user and return their UserId.
