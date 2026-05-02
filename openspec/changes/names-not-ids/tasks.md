@@ -56,10 +56,10 @@
 
 ## Wave 3: Absence — Text migration
 
-- [ ] 3.6. **CLI commands** — Update absence commands to reference workers and absence types by name. Update parsing.
-- [ ] 3.7. **Repo/SQLite** — String → Text for absence-related signatures and queries.
-- [ ] 3.8. **Demo script: absences** — Update to name-based references.
-- [ ] 3.9. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
+- [x] 3.6. **CLI commands** — Update absence commands to reference workers and absence types by name. Update parsing.
+- [x] 3.7. **Repo/SQLite** — String → Text for absence-related signatures and queries.
+- [x] 3.8. **Demo script: absences** — Update to name-based references.
+- [x] 3.9. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
 
 ## Wave 4: AuditEntry — String to Text
 

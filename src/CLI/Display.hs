@@ -439,20 +439,21 @@ displayUsers users = unlines
     showRole Admin  = "admin"
     showRole Normal = "normal"
 
-displayAbsences :: [AbsenceRequest] -> String
-displayAbsences [] = "  (no absences)"
-displayAbsences reqs = unlines
-    [ "  #" ++ show aid ++ " " ++ showWorker wid
-      ++ " type " ++ show tid
+displayAbsences :: Map.Map WorkerId String -> Map.Map AbsenceTypeId String -> [AbsenceRequest] -> String
+displayAbsences _wNames _tNames [] = "  (no absences)"
+displayAbsences wNames tNames reqs = unlines
+    [ "  #" ++ show aid ++ " " ++ namedWorker wid
+      ++ " " ++ namedType (arType r)
       ++ " " ++ formatTime defaultTimeLocale "%Y-%m-%d" (arStartDay r)
       ++ " to " ++ formatTime defaultTimeLocale "%Y-%m-%d" (arEndDay r)
       ++ " [" ++ showStatus (arStatus r) ++ "]"
     | r <- reqs
     , let AbsenceId aid = arId r
           wid = arWorker r
-          AbsenceTypeId tid = arType r
     ]
   where
+    namedWorker wid = Map.findWithDefault (showWorker wid) wid wNames
+    namedType tid = Map.findWithDefault ("type " ++ show tid) tid tNames
     showStatus Pending  = "pending"
     showStatus Approved = "approved"
     showStatus Rejected = "rejected"

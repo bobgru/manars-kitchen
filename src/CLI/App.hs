@@ -1521,11 +1521,13 @@ handleCommand st cmd = case cmd of
 
     AbsenceSetAllowance wid tid days -> requireAdmin st $ do
         ctx <- repoLoadAbsenceCtx (asRepo st)
-        let ctx' = ctx { acYearlyAllowance =
-                Map.insert (WorkerId wid, AbsenceTypeId tid) days (acYearlyAllowance ctx) }
+        let atId = AbsenceTypeId tid
+            ctx' = ctx { acYearlyAllowance =
+                Map.insert (WorkerId wid, atId) days (acYearlyAllowance ctx) }
         repoSaveAbsenceCtx (asRepo st) ctx'
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
-        putStrLn ("Set " ++ wname ++ " allowance for type " ++ show tid
+        let tname = maybe (show tid) (T.unpack . atName) (Map.lookup atId (acTypes ctx))
+        putStrLn ("Set " ++ wname ++ " allowance for " ++ tname
                   ++ ": " ++ show days ++ " days")
 
     -- Absence approval (admin)
@@ -1545,12 +1547,13 @@ handleCommand st cmd = case cmd of
 
     AbsenceListPending -> do
         reqs <- SA.listPendingAbsences (asRepo st)
-        putStr (displayAbsences reqs)
+        (wNames, tNames) <- absenceNameMaps (asRepo st)
+        putStr (displayAbsences wNames tNames reqs)
 
     -- Absence request (worker or admin)
     CmdAbsenceRequest tid wid sd ed -> do
-        let mStart = parseDay sd
-            mEnd   = parseDay ed
+        let mStart = parseDay (T.unpack sd)
+            mEnd   = parseDay (T.unpack ed)
         case (mStart, mEnd) of
             (Just s, Just e) -> do
                 result <- SA.requestAbsenceService (asRepo st)
@@ -1563,7 +1566,8 @@ handleCommand st cmd = case cmd of
     AbsenceListMine -> do
         reqs <- SA.listWorkerAbsences (asRepo st) (userWorkerId (asUser st))
                     (read "2020-01-01") (read "2030-12-31")
-        putStr (displayAbsences reqs)
+        (wNames, tNames) <- absenceNameMaps (asRepo st)
+        putStr (displayAbsences wNames tNames reqs)
 
     VacationRemaining tid -> do
         mRemaining <- SA.vacationRemaining (asRepo st) (userWorkerId (asUser st))
@@ -2477,6 +2481,18 @@ lookupSkillName repo sid = do
     case [sk | (sid', sk) <- skills, sid' == sid] of
         (sk:_) -> return (T.unpack (skillName sk))
         []     -> let SkillId s = sid in return ("Skill " ++ show s)
+
+absenceNameMaps :: Repository -> IO (Map.Map WorkerId String, Map.Map AbsenceTypeId String)
+absenceNameMaps repo = do
+    users <- repoListUsers repo
+    ctx <- repoLoadAbsenceCtx repo
+    let wNames = Map.fromList
+            [ (userWorkerId u, T.unpack uname)
+            | u <- users, let Username uname = userName u ]
+        tNames = Map.fromList
+            [ (tid, T.unpack (atName at))
+            | (tid, at) <- Map.toList (acTypes ctx) ]
+    return (wNames, tNames)
 
 -- -----------------------------------------------------------------
 -- Draft validation display

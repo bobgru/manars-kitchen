@@ -5,6 +5,7 @@ module CLI.Commands
     , shellQuote
     ) where
 
+import Data.Text (Text, pack)
 import Domain.Types (SkillId(..))
 import Utils (shellWords, shellQuote)
 
@@ -64,7 +65,7 @@ data Command
     | AbsenceReject Int
     | AbsenceListPending
     -- Absences (worker)
-    | CmdAbsenceRequest Int Int String String  -- ^ type-id worker-id start end (dates)
+    | CmdAbsenceRequest Int Int Text Text       -- ^ type-id worker-id start end (dates)
     | AbsenceListMine
     | VacationRemaining Int              -- ^ type-id
     -- Users (admin)
@@ -249,7 +250,7 @@ parseCommand input = case shellWords input of
         | isDigit' aid -> AbsenceReject (read aid)
     ["absence", "list-pending"]    -> AbsenceListPending
     ["absence", "request", tid, wid, sd, ed]
-        | all isDigit' [tid, wid] -> CmdAbsenceRequest (read tid) (read wid) sd ed
+        | all isDigit' [tid, wid] -> CmdAbsenceRequest (read tid) (read wid) (pack sd) (pack ed)
     ["absence", "list"]            -> AbsenceListMine
     ["vacation", "remaining", tid]
         | isDigit' tid -> VacationRemaining (read tid)

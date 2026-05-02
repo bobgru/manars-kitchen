@@ -680,7 +680,7 @@ dispatchCommand env cmd = case cmd of
             Left err -> putStrLn err
 
     CmdAbsenceRequest tid wid startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
+        case (parseDay (T.unpack startStr), parseDay (T.unpack endStr)) of
             (Just s, Just e) -> do
                 result <- run env (cRequestAbsence (RequestAbsenceReq wid tid s e))
                 case result of
