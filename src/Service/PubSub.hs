@@ -21,6 +21,7 @@ module Service.PubSub
 import Control.Concurrent.MVar
 import qualified Data.Map.Strict as Map
 import Data.Maybe (catMaybes)
+import qualified Data.Text as T
 import Text.Regex.Posix ((=~))
 
 import Domain.Optimizer (OptProgress(..))
@@ -102,8 +103,8 @@ publish bus topic@(Topic topicStr) event = do
 -- | Build a topic from structured metadata.
 buildTopic :: CommandMeta -> Topic
 buildTopic meta = Topic $ intercalate' "." $ catMaybes
-    [ cmEntityType meta
-    , cmOperation meta
+    [ fmap T.unpack (cmEntityType meta)
+    , fmap T.unpack (cmOperation meta)
     , fmap show (cmEntityId meta)
     ]
 

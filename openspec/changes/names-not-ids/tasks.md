@@ -63,22 +63,22 @@
 
 ## Wave 4: AuditEntry — String to Text
 
-- [ ] 4.1. **AuditEntry type** — In `Repo/Types.hs`, change all String fields to Text: `aeTimestamp`, `aeUsername`, `aeCommand`, `aeEntityType`, `aeOperation`, `aeDateFrom`, `aeDateTo`, `aeParams`, `aeSource`.
-- [ ] 4.2. **SQLite implementation** — Update audit log queries in `Repo/SQLite.hs` to produce/consume Text.
-- [ ] 4.3. **All AuditEntry consumers** — Update `CLI/App.hs` (replay, display), `Service/HintRebase.hs`, and any other modules that read AuditEntry fields.
-- [ ] 4.4. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
+- [x] 4.1. **AuditEntry type** — In `Repo/Types.hs`, change all String fields to Text: `aeTimestamp`, `aeUsername`, `aeCommand`, `aeEntityType`, `aeOperation`, `aeDateFrom`, `aeDateTo`, `aeParams`, `aeSource`.
+- [x] 4.2. **SQLite implementation** — Update audit log queries in `Repo/SQLite.hs` to produce/consume Text.
+- [x] 4.3. **All AuditEntry consumers** — Update `CLI/App.hs` (replay, display), `Service/HintRebase.hs`, and any other modules that read AuditEntry fields.
+- [x] 4.4. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
 
 ## Wave 4: CommandMeta — String to Text
 
-- [ ] 4.5. **CommandMeta type** — In `Audit/CommandMeta.hs`, change all String fields and entity type constants to Text. `classify` and `render` operate on Text.
-- [ ] 4.6. **All CommandMeta consumers** — Update `HintRebase.hs`, `App.hs`, `Handlers.hs`, and any other modules that use CommandMeta or entity type constants.
-- [ ] 4.7. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
+- [x] 4.5. **CommandMeta type** — In `Audit/CommandMeta.hs`, change all String fields and entity type constants to Text. `classify` and `render` operate on Text.
+- [x] 4.6. **All CommandMeta consumers** — Update `HintRebase.hs`, `App.hs`, `Handlers.hs`, `PubSub.hs`, and any other modules that use CommandMeta or entity type constants.
+- [x] 4.7. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
 
 ## Wave 4: Replay collapse
 
-- [ ] 4.8. **Merge replay commands** — Collapse `CmdReplay`, `CmdReplayFile`, and `CmdDemo` into a single `Replay` command that always wipes, bootstraps, and replays.
-- [ ] 4.9. **Update command parsing** — In `Commands.hs`, single `replay` command (optionally takes a file path). Remove `audit replay`, `audit demo` as separate commands.
-- [ ] 4.10. **Update help text** — Remove old audit replay/demo entries, add new replay command.
+- [x] 4.8. **Merge replay commands** — Collapse `CmdReplay`, `CmdReplayFile`, and `CmdDemo` into a single `Replay` command that always wipes, bootstraps, and replays.
+- [x] 4.9. **Update command parsing** — In `Commands.hs`, single `replay` command (optionally takes a file path). Remove `audit replay`, `audit demo` as separate commands.
+- [x] 4.10. **Update help text** — Remove old audit replay/demo entries, add new replay command.
 - [ ] 4.11. **Audit log: resolved IDs** — Ensure the logging path (pub/sub or direct) stores resolved entity IDs in `entity_id`/`target_id` columns. The resolution layer provides these; `classify` no longer needs to parse them from the raw command string.
-- [ ] 4.12. **HintRebase: rename as Compatible** — In `Service/HintRebase.hs`, classify entity rename operations as `Compatible` (not `Irrelevant`). Optionally emit a message noting the rename.
-- [ ] 4.13. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
+- [x] 4.12. **HintRebase: rename as Compatible** — In `Service/HintRebase.hs`, classify entity rename operations as `Compatible` (not `Irrelevant`). Optionally emit a message noting the rename.
+- [x] 4.13. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.

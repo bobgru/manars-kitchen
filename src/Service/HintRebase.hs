@@ -8,6 +8,7 @@ module Service.HintRebase
     ) where
 
 import Test.Hspec
+import qualified Data.Text as T
 import Data.Time (TimeOfDay(..))
 
 import Domain.Types (WorkerId(..), StationId(..), SkillId(..), Slot(..))
@@ -45,7 +46,7 @@ data RebaseResult
 classifyChange :: Int -> AuditEntry -> [Hint] -> ChangeCategory
 classifyChange draftId entry hints =
     let meta = case aeCommand entry of
-            Just cmd -> classify cmd
+            Just cmd -> classify (T.unpack cmd)
             Nothing  -> CommandMeta Nothing Nothing Nothing Nothing Nothing Nothing False Nothing
     in classifyMeta draftId meta hints
 
@@ -57,6 +58,8 @@ classifyMeta draftId meta hints
     -- Non-mutating entries are irrelevant (shouldn't appear since we filter,
     -- but handle defensively)
     | not (cmIsMutation meta) = Irrelevant
+    -- Renames don't affect entity relationships, always compatible
+    | isRename meta = Compatible
     -- Check if this mutation affects any hint
     | any (conflictsWith meta) hints = Conflicting
     -- Mutation that doesn't touch any scheduler context
@@ -69,6 +72,10 @@ isStructural :: Int -> CommandMeta -> Bool
 isStructural _draftId meta = case (cmEntityType meta, cmOperation meta) of
     (Just et, Just op) | et == etDraft && op `elem` ["commit", "discard"] -> True
     _ -> False
+
+-- | Check if this is a rename operation.
+isRename :: CommandMeta -> Bool
+isRename meta = cmOperation meta == Just "rename"
 
 -- | Entities that never affect scheduler context.
 isIrrelevantEntity :: CommandMeta -> Bool
@@ -176,7 +183,7 @@ mkEntry eid cmd = AuditEntry
     { aeId = eid
     , aeTimestamp = "2026-04-12 10:00:00"
     , aeUsername = "test"
-    , aeCommand = Just cmd
+    , aeCommand = Just (T.pack cmd)
     , aeEntityType = Nothing
     , aeOperation = Nothing
     , aeEntityId = Nothing

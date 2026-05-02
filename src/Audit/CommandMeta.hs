@@ -13,18 +13,19 @@ module Audit.CommandMeta
 import Data.Char    (isDigit)
 import Data.List    (intercalate, isPrefixOf)
 import Data.Maybe   (catMaybes)
+import Data.Text    (Text, pack, unpack)
 import CLI.Commands (shellWords)
 
 -- | Structured metadata for a logged command.
 data CommandMeta = CommandMeta
-    { cmEntityType  :: !(Maybe String)   -- ^ e.g. "worker", "station"
-    , cmOperation   :: !(Maybe String)   -- ^ e.g. "grant-skill", "add"
-    , cmEntityId    :: !(Maybe Int)       -- ^ primary entity ID
-    , cmTargetId    :: !(Maybe Int)       -- ^ secondary entity ID
-    , cmDateFrom    :: !(Maybe String)    -- ^ YYYY-MM-DD
-    , cmDateTo      :: !(Maybe String)    -- ^ YYYY-MM-DD
+    { cmEntityType  :: !(Maybe Text)    -- ^ e.g. "worker", "station"
+    , cmOperation   :: !(Maybe Text)    -- ^ e.g. "grant-skill", "add"
+    , cmEntityId    :: !(Maybe Int)     -- ^ primary entity ID
+    , cmTargetId    :: !(Maybe Int)     -- ^ secondary entity ID
+    , cmDateFrom    :: !(Maybe Text)    -- ^ YYYY-MM-DD
+    , cmDateTo      :: !(Maybe Text)    -- ^ YYYY-MM-DD
     , cmIsMutation  :: !Bool
-    , cmParams      :: !(Maybe String)    -- ^ JSON blob for variadic args
+    , cmParams      :: !(Maybe Text)    -- ^ JSON blob for variadic args
     } deriving (Show, Eq)
 
 -- | Default metadata: unknown command, not a mutation.
@@ -41,9 +42,9 @@ defaultMeta = CommandMeta
     }
 
 -- Entity type constants
-etWorker, etStation, etSkill, etShift, etAbsence :: String
-etUser, etConfig, etSchedule, etDraft, etCalendar :: String
-etPin, etWhatIf, etCheckpoint, etImportExport :: String
+etWorker, etStation, etSkill, etShift, etAbsence :: Text
+etUser, etConfig, etSchedule, etDraft, etCalendar :: Text
+etPin, etWhatIf, etCheckpoint, etImportExport :: Text
 etWorker       = "worker"
 etStation      = "station"
 etSkill        = "skill"
@@ -128,7 +129,7 @@ classifySchedule op rest = case op of
     "view-by-station" -> nonMutating etSchedule "view-by-station"
     "hours"    -> nonMutating etSchedule "hours"
     "diagnose" -> nonMutating etSchedule "diagnose"
-    _ -> nonMutating etSchedule op
+    _ -> nonMutating etSchedule (pack op)
   where _unused = rest  -- suppress warning
 
 -- Assign / Unassign
@@ -177,7 +178,7 @@ classifyStation op rest = case op of
         (sid : _) -> (mutating etStation "remove-required-skill") { cmEntityId = readMaybe sid }
         _         -> mutating etStation "remove-required-skill"
     "list" -> nonMutating etStation "list"
-    _ -> nonMutating etStation op
+    _ -> nonMutating etStation (pack op)
 
 -- Skill
 classifySkill :: String -> [String] -> CommandMeta
@@ -207,7 +208,7 @@ classifySkill op rest = case op of
         _         -> nonMutating etSkill "view"
     "list" -> nonMutating etSkill "list"
     "info" -> nonMutating etSkill "info"
-    _ -> nonMutating etSkill op
+    _ -> nonMutating etSkill (pack op)
 
 -- Worker
 classifyWorker :: String -> [String] -> CommandMeta
@@ -220,14 +221,14 @@ classifyWorker op rest = case op of
         (wid : sids) ->
             let base = (mutating etWorker "set-prefs") { cmEntityId = readMaybe wid }
             in if null sids then base
-               else base { cmParams = Just (toJsonIntList sids) }
+               else base { cmParams = Just (pack (toJsonIntList sids)) }
         _ -> mutating etWorker "set-prefs"
     "set-variety" -> oneId etWorker "set-variety" rest
     "set-shift-pref" -> case rest of
         (wid : names) ->
             let base = (mutating etWorker "set-shift-pref") { cmEntityId = readMaybe wid }
             in if null names then base
-               else base { cmParams = Just (toJsonStrList names) }
+               else base { cmParams = Just (pack (toJsonStrList names)) }
         _ -> mutating etWorker "set-shift-pref"
     "set-weekend-only" -> oneId etWorker "set-weekend-only" rest
     "set-status" -> oneId etWorker "set-status" rest
@@ -242,7 +243,7 @@ classifyWorker op rest = case op of
     "prefer-pairing" -> twoIds etWorker "prefer-pairing" rest
     "clear-prefer-pairing" -> twoIds etWorker "clear-prefer-pairing" rest
     "info" -> nonMutating etWorker "info"
-    _ -> nonMutating etWorker op
+    _ -> nonMutating etWorker (pack op)
 
 -- Shift
 classifyShift :: String -> [String] -> CommandMeta
@@ -250,7 +251,7 @@ classifyShift op _rest = case op of
     "create" -> mutating etShift "create"
     "delete" -> mutating etShift "delete"
     "list"   -> nonMutating etShift "list"
-    _ -> nonMutating etShift op
+    _ -> nonMutating etShift (pack op)
 
 -- Absence type
 classifyAbsenceType :: String -> [String] -> CommandMeta
@@ -259,7 +260,7 @@ classifyAbsenceType op rest = case op of
         (tid : _) -> (mutating etAbsence "type-create") { cmEntityId = readMaybe tid }
         _         -> mutating etAbsence "type-create"
     "list" -> nonMutating etAbsence "type-list"
-    _ -> nonMutating etAbsence ("type-" ++ op)
+    _ -> nonMutating etAbsence (pack ("type-" ++ op))
 
 -- Absence
 classifyAbsence :: String -> [String] -> CommandMeta
@@ -284,13 +285,13 @@ classifyAbsence op rest = case op of
         _ -> mutating etAbsence "request"
     "list-pending" -> nonMutating etAbsence "list-pending"
     "list" -> nonMutating etAbsence "list"
-    _ -> nonMutating etAbsence op
+    _ -> nonMutating etAbsence (pack op)
 
 -- Vacation
 classifyVacation :: String -> [String] -> CommandMeta
 classifyVacation op _rest = case op of
     "remaining" -> nonMutating etAbsence "vacation-remaining"
-    _ -> nonMutating etAbsence ("vacation-" ++ op)
+    _ -> nonMutating etAbsence (pack ("vacation-" ++ op))
 
 -- User
 classifyUser :: String -> [String] -> CommandMeta
@@ -300,7 +301,7 @@ classifyUser op rest = case op of
         (uid : _) -> (mutating etUser "delete") { cmEntityId = readMaybe uid }
         _         -> mutating etUser "delete"
     "list" -> nonMutating etUser "list"
-    _ -> nonMutating etUser op
+    _ -> nonMutating etUser (pack op)
 
 -- Config
 classifyConfig :: String -> [String] -> CommandMeta
@@ -312,7 +313,7 @@ classifyConfig op _rest = case op of
     "show"           -> nonMutating etConfig "show"
     "show-pay-period" -> nonMutating etConfig "show-pay-period"
     "preset-list"    -> nonMutating etConfig "preset-list"
-    _ -> nonMutating etConfig op
+    _ -> nonMutating etConfig (pack op)
 
 -- Pin
 classifyPin :: [String] -> CommandMeta
@@ -339,7 +340,7 @@ classifyCheckpoint op _rest = case op of
     "commit"   -> nonMutating etCheckpoint "commit"
     "rollback" -> nonMutating etCheckpoint "rollback"
     "list"     -> nonMutating etCheckpoint "list"
-    _ -> nonMutating etCheckpoint op
+    _ -> nonMutating etCheckpoint (pack op)
 
 -- Calendar
 classifyCalendar :: String -> [String] -> CommandMeta
@@ -362,7 +363,7 @@ classifyCalendar op rest = case op of
     "diagnose"        -> nonMutating etCalendar "diagnose"
     "history"         -> nonMutating etCalendar "history"
     "freeze-status"   -> nonMutating etCalendar "freeze-status"
-    _ -> nonMutating etCalendar op
+    _ -> nonMutating etCalendar (pack op)
 
 -- Draft
 classifyDraft :: String -> [String] -> CommandMeta
@@ -388,7 +389,7 @@ classifyDraft op rest = case op of
     "view-compact" -> nonMutating etDraft "view-compact"
     "hours"        -> nonMutating etDraft "hours"
     "diagnose"     -> nonMutating etDraft "diagnose"
-    _ -> nonMutating etDraft op
+    _ -> nonMutating etDraft (pack op)
 
 -- What-if
 classifyWhatIf :: String -> [String] -> CommandMeta
@@ -414,13 +415,13 @@ classifyWhatIf op rest = case op of
         (wid : sids) ->
             let base = (nonMutating etWhatIf "override-prefs") { cmEntityId = readMaybe wid }
             in if null sids then base
-               else base { cmParams = Just (toJsonIntList sids) }
+               else base { cmParams = Just (pack (toJsonIntList sids)) }
         _ -> nonMutating etWhatIf "override-prefs"
     "revert"     -> nonMutating etWhatIf "revert"
     "revert-all" -> nonMutating etWhatIf "revert-all"
     "list"       -> nonMutating etWhatIf "list"
     "rebase"     -> nonMutating etWhatIf "rebase"
-    _ -> nonMutating etWhatIf op
+    _ -> nonMutating etWhatIf (pack op)
 
 -- =====================================================================
 -- render
@@ -433,7 +434,7 @@ render meta = case (cmEntityType meta, cmOperation meta) of
     (_, Nothing) -> ""
     (Just et, Just op) -> unwords $ catMaybes $ renderParts et op meta
 
-renderParts :: String -> String -> CommandMeta -> [Maybe String]
+renderParts :: Text -> Text -> CommandMeta -> [Maybe String]
 renderParts et op meta
     -- Schedule-level assign/unassign: "assign <sched> <wid> <sid>"
     | et == etSchedule && op == "assign" =
@@ -441,11 +442,11 @@ renderParts et op meta
     | et == etSchedule && op == "unassign" =
         [ Just "unassign", Just "?", fmap show (cmEntityId meta), fmap show (cmTargetId meta) ]
     -- Absence type commands use "absence-type" prefix
-    | et == etAbsence && "type-" `isPrefixOf` op =
-        [ Just "absence-type", Just (drop 5 op) ]
+    | et == etAbsence && "type-" `isPrefixOf` unpack op =
+        [ Just "absence-type", Just (drop 5 (unpack op)) ]
         ++ idParts meta
-    | et == etAbsence && "vacation-" `isPrefixOf` op =
-        [ Just "vacation", Just (drop 9 op) ]
+    | et == etAbsence && "vacation-" `isPrefixOf` unpack op =
+        [ Just "vacation", Just (drop 9 (unpack op)) ]
         ++ idParts meta
     -- Pin: "pin <wid> <sid> ..." or "unpin <wid> <sid> ..."
     | et == etPin && op == "add" =
@@ -465,17 +466,17 @@ renderParts et op meta
         ++ dateParts meta
     -- What-if: "what-if <op> ..."
     | et == etWhatIf =
-        [ Just "what-if", Just op ]
+        [ Just "what-if", Just (unpack op) ]
         ++ idParts meta
         ++ paramsParts meta
     -- Worker variadic commands
     | et == etWorker && op `elem` ["set-prefs", "set-shift-pref", "override-prefs"] =
-        [ Just "worker", Just op ]
+        [ Just (unpack et), Just (unpack op) ]
         ++ idParts meta
         ++ paramsParts meta
     -- Standard: "<entity> <op> [ids] [dates]"
     | otherwise =
-        [ Just et, Just op ]
+        [ Just (unpack et), Just (unpack op) ]
         ++ idParts meta
         ++ dateParts meta
         ++ paramsParts meta
@@ -488,21 +489,21 @@ idParts meta =
 
 dateParts :: CommandMeta -> [Maybe String]
 dateParts meta =
-    [ cmDateFrom meta
-    , cmDateTo meta
+    [ fmap unpack (cmDateFrom meta)
+    , fmap unpack (cmDateTo meta)
     ]
 
 paramsParts :: CommandMeta -> [Maybe String]
 paramsParts meta = case cmParams meta of
     Nothing -> []
-    Just p  -> map Just (parseJsonList p)
+    Just p  -> map Just (parseJsonList (unpack p))
 
 -- =====================================================================
 -- Helpers
 -- =====================================================================
 
 -- | Create a mutating CommandMeta with entity type and operation.
-mutating :: String -> String -> CommandMeta
+mutating :: Text -> Text -> CommandMeta
 mutating et op = defaultMeta
     { cmEntityType = Just et
     , cmOperation  = Just op
@@ -510,7 +511,7 @@ mutating et op = defaultMeta
     }
 
 -- | Create a non-mutating CommandMeta with entity type and operation.
-nonMutating :: String -> String -> CommandMeta
+nonMutating :: Text -> Text -> CommandMeta
 nonMutating et op = defaultMeta
     { cmEntityType = Just et
     , cmOperation  = Just op
@@ -518,12 +519,12 @@ nonMutating et op = defaultMeta
     }
 
 -- | Extract one entity ID from the first argument.
-oneId :: String -> String -> [String] -> CommandMeta
+oneId :: Text -> Text -> [String] -> CommandMeta
 oneId et op (x : _) = (mutating et op) { cmEntityId = readMaybe x }
 oneId et op _       = mutating et op
 
 -- | Extract two IDs from the first two arguments.
-twoIds :: String -> String -> [String] -> CommandMeta
+twoIds :: Text -> Text -> [String] -> CommandMeta
 twoIds et op (x : y : _) = (mutating et op)
     { cmEntityId = readMaybe x, cmTargetId = readMaybe y }
 twoIds et op (x : _) = (mutating et op) { cmEntityId = readMaybe x }
@@ -542,9 +543,9 @@ isDate s = length s == 10
     && s !! 7 == '-'
     && all isDigit (take 4 s ++ take 2 (drop 5 s) ++ take 2 (drop 8 s))
 
--- | Return the string if it looks like a date, Nothing otherwise.
-dateOrNothing :: String -> Maybe String
-dateOrNothing s = if isDate s then Just s else Nothing
+-- | Return the string as Text if it looks like a date, Nothing otherwise.
+dateOrNothing :: String -> Maybe Text
+dateOrNothing s = if isDate s then Just (pack s) else Nothing
 
 -- | Encode a list of numeric strings as a JSON array of ints: "[1,2,4]"
 toJsonIntList :: [String] -> String

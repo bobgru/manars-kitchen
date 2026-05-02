@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module PubSubSpec (spec) where
 
 import Test.Hspec

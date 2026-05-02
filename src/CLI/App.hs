@@ -222,9 +222,7 @@ isMutating cmd = case cmd of
     CmdExport _           -> False
     CmdExportSchedule _ _ -> False
     CmdAuditLog           -> False
-    CmdReplay             -> False
-    CmdReplayFile _       -> False
-    CmdDemo               -> False
+    CmdReplay _           -> False
     _                     -> True
 
 handleCommand :: AppState -> Command -> IO ()
@@ -1638,38 +1636,28 @@ handleCommand st cmd = case cmd of
             then putStrLn "  (no audit entries)"
             else mapM_ (\ae ->
                 let cmdStr = case aeCommand ae of
-                        Just c  -> c
+                        Just c  -> T.unpack c
                         Nothing -> Meta.render (auditEntryToMeta ae)
-                in putStrLn ("  " ++ aeTimestamp ae ++ "  " ++ aeUsername ae ++ ": " ++ cmdStr)
+                in putStrLn ("  " ++ T.unpack (aeTimestamp ae) ++ "  " ++ T.unpack (aeUsername ae) ++ ": " ++ cmdStr)
                 ) entries
 
-    CmdReplay -> requireAdmin st $ do
-        entries <- repoGetAuditLog (asRepo st)
+    CmdReplay mFile -> requireAdmin st $ do
+        entries <- case mFile of
+            Nothing -> do
+                auditEntries <- repoGetAuditLog (asRepo st)
+                return (map auditEntryToTriple auditEntries)
+            Just file -> do
+                contents <- readFile file
+                return [(""::String, ""::String, c) | c <- lines contents, not (null c)]
         if null entries
-            then putStrLn "  (no audit entries to replay)"
-            else replayCommands fastReplay st (map auditEntryToTriple entries)
-
-    CmdReplayFile file -> requireAdmin st $ do
-        contents <- readFile file
-        let cmds = lines contents
-            entries = [(""::String, ""::String, c) | c <- cmds, not (null c)]
-        if null entries
-            then putStrLn "  (no commands in file)"
-            else replayCommands fastReplay st entries
-
-    CmdDemo -> requireAdmin st $ do
-        -- Save the audit log before wiping
-        entries <- repoGetAuditLog (asRepo st)
-        if null entries
-            then putStrLn "  (no audit entries to demo)"
+            then putStrLn "  (no commands to replay)"
             else do
                 putStrLn ("Wiping database and replaying " ++ show (length entries) ++ " commands...")
                 repoWipeAll (asRepo st)
-                -- Re-create default admin
                 _ <- register (asRepo st) (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
                 putStrLn "Created default admin user (admin/admin), Worker 1"
-                replayCommands fastReplay st (map auditEntryToTriple entries)
-                putStrLn "Demo complete."
+                replayCommands fastReplay st entries
+                putStrLn "Replay complete."
 
     -- Self
     PasswordChange -> do
@@ -1875,7 +1863,7 @@ handleNormalRebase st hs entries hints = do
             -- Show conflicts
             let conflicts = [(e, c) | (e, c) <- classified, c == Conflicting]
             putStrLn "Conflicts detected during rebase:"
-            mapM_ (\(e, _) -> putStrLn ("  - " ++ maybe "?" id (aeCommand e))) conflicts
+            mapM_ (\(e, _) -> putStrLn ("  - " ++ maybe "?" T.unpack (aeCommand e))) conflicts
             putStrLn "[D]rop conflicting hints / [K]eep all (force) / [A]bort"
             putStr "> "
             hFlush stdout
@@ -2021,9 +2009,7 @@ replayCommands opts st entries = do
                 cmd = parseCommand cmdStr'
             case cmd of
                 CmdAuditLog       -> putStrLn "  (skipped: audit)"
-                CmdReplay         -> putStrLn "  (skipped: replay)"
-                CmdReplayFile _   -> putStrLn "  (skipped: replay)"
-                CmdDemo           -> putStrLn "  (skipped: demo)"
+                CmdReplay _       -> putStrLn "  (skipped: replay)"
                 PasswordChange    -> putStrLn "  (skipped: interactive)"
                 Quit              -> putStrLn "  (skipped: quit)"
                 Help              -> pure ()
@@ -2037,9 +2023,9 @@ replayCommands opts st entries = do
 auditEntryToTriple :: AuditEntry -> (String, String, String)
 auditEntryToTriple ae =
     let cmdStr = case aeCommand ae of
-            Just c  -> c
+            Just c  -> T.unpack c
             Nothing -> Meta.render (auditEntryToMeta ae)
-    in (aeTimestamp ae, aeUsername ae, cmdStr)
+    in (T.unpack (aeTimestamp ae), T.unpack (aeUsername ae), cmdStr)
 
 -- | Convert an AuditEntry to a CommandMeta for rendering.
 auditEntryToMeta :: AuditEntry -> Meta.CommandMeta
@@ -2373,9 +2359,8 @@ helpRegistry =
     , ("export",   True,  "import <file>",                   "Import data from JSON")
     -- Audit
     , ("audit",    True,  "audit",                           "Show audit trail")
-    , ("audit",    True,  "replay",                          "Replay audit log")
-    , ("audit",    True,  "replay <file>",                   "Replay commands from file")
-    , ("audit",    True,  "demo",                            "Wipe DB and replay audit log")
+    , ("audit",    True,  "replay",                          "Wipe DB and replay audit log")
+    , ("audit",    True,  "replay <file>",                   "Wipe DB and replay from file")
     -- User
     , ("user",     True,  "user create <name> <pass> <role>", "Create a user")
     , ("user",     True,  "user list",                       "List all users")

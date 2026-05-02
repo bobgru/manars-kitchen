@@ -51,18 +51,18 @@ data CalendarCommit = CalendarCommit
 -- | Structured audit log entry.
 data AuditEntry = AuditEntry
     { aeId         :: !Int
-    , aeTimestamp  :: !String
-    , aeUsername   :: !String
-    , aeCommand    :: !(Maybe String)
-    , aeEntityType :: !(Maybe String)
-    , aeOperation  :: !(Maybe String)
+    , aeTimestamp  :: !Text
+    , aeUsername   :: !Text
+    , aeCommand    :: !(Maybe Text)
+    , aeEntityType :: !(Maybe Text)
+    , aeOperation  :: !(Maybe Text)
     , aeEntityId   :: !(Maybe Int)
     , aeTargetId   :: !(Maybe Int)
-    , aeDateFrom   :: !(Maybe String)
-    , aeDateTo     :: !(Maybe String)
+    , aeDateFrom   :: !(Maybe Text)
+    , aeDateTo     :: !(Maybe Text)
     , aeIsMutation :: !Bool
-    , aeParams     :: !(Maybe String)
-    , aeSource     :: !String
+    , aeParams     :: !(Maybe Text)
+    , aeSource     :: !Text
     } deriving (Show, Eq)
 
 -- | Persisted hint session (hints + audit checkpoint).

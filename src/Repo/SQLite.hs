@@ -740,8 +740,8 @@ sqlGetAuditLog conn = do
         "SELECT id, timestamp, username, command, entity_type, operation, \
         \entity_id, target_id, date_from, date_to, is_mutation, params, source \
         \FROM audit_log ORDER BY id ASC"
-        :: IO [(Int, String, String, Maybe String, Maybe String, Maybe String,
-                Maybe Int) :. (Maybe Int, Maybe String, Maybe String, Int, Maybe String, String)]
+        :: IO [(Int, Text, Text, Maybe Text, Maybe Text, Maybe Text,
+                Maybe Int) :. (Maybe Int, Maybe Text, Maybe Text, Int, Maybe Text, Text)]
     return [AuditEntry
         { aeId         = i
         , aeTimestamp  = ts
@@ -1270,8 +1270,8 @@ sqlAuditSince conn checkpoint = do
         \entity_id, target_id, date_from, date_to, is_mutation, params, source \
         \FROM audit_log WHERE id > ? AND is_mutation = 1 ORDER BY id ASC"
         (Only checkpoint)
-        :: IO [(Int, String, String, Maybe String, Maybe String, Maybe String,
-                Maybe Int) :. (Maybe Int, Maybe String, Maybe String, Int, Maybe String, String)]
+        :: IO [(Int, Text, Text, Maybe Text, Maybe Text, Maybe Text,
+                Maybe Int) :. (Maybe Int, Maybe Text, Maybe Text, Int, Maybe Text, Text)]
     return [AuditEntry
         { aeId         = i
         , aeTimestamp  = ts

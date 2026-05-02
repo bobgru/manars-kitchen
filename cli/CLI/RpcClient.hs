@@ -719,18 +719,12 @@ dispatchCommand env cmd = case cmd of
         result <- run env (cListAudit RpcEmpty)
         case result of
             Right entries -> mapM_ (\e ->
-                putStrLn (aeTimestamp e ++ " " ++ aeUsername e ++ ": " ++
-                    maybe "(no command)" id (aeCommand e))) entries
+                putStrLn (T.unpack (aeTimestamp e) ++ " " ++ T.unpack (aeUsername e) ++ ": " ++
+                    maybe "(no command)" T.unpack (aeCommand e))) entries
             Left err -> putStrLn err
 
-    CmdReplay ->
+    CmdReplay _ ->
         putStrLn "Replay is not supported in remote mode."
-
-    CmdReplayFile _ ->
-        putStrLn "Replay from file is not supported in remote mode."
-
-    CmdDemo ->
-        putStrLn "Demo is not supported in remote mode."
 
     -- Import / Export
     CmdExport _path -> do

@@ -105,9 +105,7 @@ data Command
     | CmdImport String              -- ^ file path
     -- Audit
     | CmdAuditLog                   -- ^ show audit trail
-    | CmdReplay                     -- ^ replay audit log
-    | CmdReplayFile String          -- ^ replay commands from file
-    | CmdDemo                       -- ^ wipe DB, replay audit log from scratch
+    | CmdReplay (Maybe String)      -- ^ wipe DB and replay (from file or audit log)
     -- Self
     | PasswordChange
     -- Checkpoint
@@ -302,9 +300,8 @@ parseCommand input = case shellWords input of
     ["import", file]                 -> CmdImport file
 
     ["audit"]                        -> CmdAuditLog
-    ["replay"]                       -> CmdReplay
-    ["replay", file]                 -> CmdReplayFile file
-    ["demo"]                         -> CmdDemo
+    ["replay"]                       -> CmdReplay Nothing
+    ["replay", file]                 -> CmdReplay (Just file)
 
     ["checkpoint", "create"]        -> CheckpointCreate Nothing
     ["checkpoint", "create", name]  -> CheckpointCreate (Just name)
