@@ -15,6 +15,7 @@ module Service.PubSub
     , buildTopic
     , publishCommand
     , publishCommandWithClient
+    , publishResolvedCommand
     , sourceString
     ) where
 
@@ -119,6 +120,16 @@ publishCommandWithClient bus source username cmdStr clientId = do
     let meta  = classify cmdStr
         topic = buildTopic meta
         event = CommandEvent cmdStr meta source username clientId
+    publish bus topic event
+
+-- | Publish with separate original and resolved command strings.
+-- The original is stored in ceCommand (for display/replay); the resolved
+-- string (with numeric IDs) is classified to produce accurate metadata.
+publishResolvedCommand :: TopicBus CommandEvent -> Source -> String -> String -> String -> IO ()
+publishResolvedCommand bus source username originalCmd resolvedCmd = do
+    let meta  = classify resolvedCmd
+        topic = buildTopic meta
+        event = CommandEvent originalCmd meta source username Nothing
     publish bus topic event
 
 -- | Convert Source to the string used in the audit_log source column.

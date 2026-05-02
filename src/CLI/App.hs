@@ -59,7 +59,7 @@ import Service.PubSub
     ( TopicBus, SubscriptionId, AppBus(..), newAppBus, newTopicBus
     , subscribe, unsubscribe
     , ProgressEvent(..), Source(..), CommandEvent(..)
-    , publishCommand, sourceString
+    , publishResolvedCommand, sourceString
     )
 import CLI.Commands (Command(..), parseCommand)
 import CLI.Display
@@ -101,7 +101,7 @@ mkAppState repo user sid = do
 registerAuditSubscriber :: TopicBus CommandEvent -> Repository -> IO SubscriptionId
 registerAuditSubscriber cmdBus repo =
     subscribe cmdBus ".*" $ \_topic event ->
-        repoLogCommandWithSource repo (T.pack $ ceUsername event) (T.pack $ ceCommand event) (T.pack $ sourceString (ceSource event))
+        repoLogCommandWithMeta repo (T.pack $ ceUsername event) (T.pack $ ceCommand event) (T.pack $ sourceString (ceSource event)) (ceMeta event)
 
 registerTerminalEcho :: TopicBus CommandEvent -> IO SubscriptionId
 registerTerminalEcho cmdBus =
@@ -139,7 +139,7 @@ runRepl st = do
                 Right resolvedLine -> do
                     let cmd = parseCommand resolvedLine
                     when (isMutating cmd) $ do
-                        publishCommand (busCommands (asBus st)) CLI (T.unpack uname) line
+                        publishResolvedCommand (busCommands (asBus st)) CLI (T.unpack uname) line resolvedLine
                         repoTouchSession (asRepo st) (asSessionId st)
                     handleCommand st cmd
                     -- Mark hint session as stale if a mutating command ran

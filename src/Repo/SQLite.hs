@@ -17,7 +17,7 @@ import Database.SQLite.Simple
 import Numeric (showHex)
 import System.Random (randomRIO)
 
-import Audit.CommandMeta (classify, CommandMeta(..))
+import Audit.CommandMeta (CommandMeta(..))
 import Auth.Types (UserId(..), Username(..), Role(..), User(..))
 import Data.Time (DayOfWeek(..))
 import Domain.Absence
@@ -86,7 +86,7 @@ mkSQLiteRepo path = do
         , repoSavePayPeriodConfig = sqlSavePayPeriodConfig conn
         , repoSavePins       = sqlSavePins conn
         , repoLoadPins       = sqlLoadPins conn
-        , repoLogCommandWithSource = sqlLogCommandWithSource conn
+        , repoLogCommandWithMeta = sqlLogCommandWithMeta conn
         , repoGetAuditLog    = sqlGetAuditLog conn
         , repoWipeAll        = sqlWipeAll conn
         , repoSaveCalendar   = sqlSaveCalendar conn
@@ -686,10 +686,9 @@ sqlDeleteSchedule conn name = do
 -- Audit log
 -- =====================================================================
 
-sqlLogCommandWithSource :: Connection -> Text -> Text -> Text -> IO ()
-sqlLogCommandWithSource conn username command source =
-    let meta = classify (T.unpack command)
-        mut  = if cmIsMutation meta then (1 :: Int) else 0
+sqlLogCommandWithMeta :: Connection -> Text -> Text -> Text -> CommandMeta -> IO ()
+sqlLogCommandWithMeta conn username command source meta =
+    let mut = if cmIsMutation meta then (1 :: Int) else 0
     in execute conn
         "INSERT INTO audit_log (username, command, entity_type, operation, \
         \entity_id, target_id, date_from, date_to, is_mutation, params, source) \

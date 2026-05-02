@@ -16,6 +16,7 @@ import Data.Time (Day, UTCTime)
 import Domain.Types (WorkerId, StationId, SkillId, Schedule)
 import Domain.Shift (ShiftDef)
 import Domain.Skill (Skill, SkillContext)
+import Audit.CommandMeta (CommandMeta)
 import Domain.Worker (WorkerContext, OvertimeModel, PayPeriodTracking)
 import Domain.Absence (AbsenceContext)
 import Domain.SchedulerConfig (SchedulerConfig)
@@ -175,8 +176,8 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Audit log
       -- ---------------------------------------------------------------
-    , repoLogCommandWithSource :: Text -> Text -> Text -> IO ()
-      -- ^ username, command string, source (e.g. "cli", "rpc", "demo")
+    , repoLogCommandWithMeta :: Text -> Text -> Text -> CommandMeta -> IO ()
+      -- ^ username, command string, source, pre-classified metadata
     , repoGetAuditLog    :: IO [AuditEntry]
       -- ^ returns structured audit entries
     , repoWipeAll        :: IO ()

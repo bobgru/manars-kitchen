@@ -79,6 +79,6 @@
 - [x] 4.8. **Merge replay commands** — Collapse `CmdReplay`, `CmdReplayFile`, and `CmdDemo` into a single `Replay` command that always wipes, bootstraps, and replays.
 - [x] 4.9. **Update command parsing** — In `Commands.hs`, single `replay` command (optionally takes a file path). Remove `audit replay`, `audit demo` as separate commands.
 - [x] 4.10. **Update help text** — Remove old audit replay/demo entries, add new replay command.
-- [ ] 4.11. **Audit log: resolved IDs** — Ensure the logging path (pub/sub or direct) stores resolved entity IDs in `entity_id`/`target_id` columns. The resolution layer provides these; `classify` no longer needs to parse them from the raw command string.
+- [x] 4.11. **Audit log: resolved IDs** — Ensure the logging path (pub/sub or direct) stores resolved entity IDs in `entity_id`/`target_id` columns. The resolution layer provides these; `classify` no longer needs to parse them from the raw command string.
 - [x] 4.12. **HintRebase: rename as Compatible** — In `Service/HintRebase.hs`, classify entity rename operations as `Compatible` (not `Irrelevant`). Optionally emit a message noting the rename.
 - [x] 4.13. **Build and test** — `stack clean && stack build && stack test`. Fix all warnings. Run demo.
