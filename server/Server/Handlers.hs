@@ -770,7 +770,7 @@ handleCreateAbsenceType cmdBus repo user req = do
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
         ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRest cmdBus user ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (catrName req))
+    logRest cmdBus user ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (T.unpack (catrName req)))
     pure NoContent
 
 handleDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent

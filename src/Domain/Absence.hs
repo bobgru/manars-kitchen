@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Domain.Absence
     ( -- * Types
       AbsenceType(..)
@@ -26,6 +27,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text (Text)
 import Data.Time (Day, addDays, toGregorian, fromGregorian, diffDays)
 import Test.Hspec
 
@@ -37,8 +39,7 @@ import Domain.Types
 
 -- | Metadata for a type of absence.
 data AbsenceType = AbsenceType
-    { atName         :: !String
-      -- ^ Human-readable name (e.g., "Vacation", "Training").
+    { atName         :: !Text
     , atYearlyLimit  :: !Bool
       -- ^ Whether this absence type has a per-worker yearly day limit.
       -- When True, approval checks the worker's allowance in

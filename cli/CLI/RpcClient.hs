@@ -655,7 +655,7 @@ dispatchCommand env cmd = case cmd of
 
     -- Absence types
     AbsenceTypeCreate tid name counts -> requireAdmin env $
-        runOk env (cCreateAbsenceType (CreateAbsenceTypeReq tid name counts))
+        runOk env (cCreateAbsenceType (CreateAbsenceTypeReq tid (T.pack name) counts))
             "Absence type created."
 
     AbsenceTypeList ->

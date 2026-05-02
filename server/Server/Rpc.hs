@@ -841,7 +841,7 @@ rpcCreateAbsenceType cmdBus repo req = do
         newType = AbsenceType (catrName req) (catrCountsAgainstAllowance req)
         ctx' = ctx { acTypes = Map.insert atId newType (acTypes ctx) }
     liftIO $ repoSaveAbsenceCtx repo ctx'
-    logRpcBus cmdBus ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (catrName req))
+    logRpcBus cmdBus ("absence-type create " ++ show (catrId req) ++ " " ++ shellQuote (T.unpack (catrName req)))
     pure RpcOk
 
 rpcDeleteAbsenceType :: TopicBus CommandEvent -> Repository -> RpcAbsenceTypeId -> Handler RpcOk

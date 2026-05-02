@@ -64,7 +64,7 @@ import Data.Aeson
 import qualified Data.Aeson.Types
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Text (unpack)
+import Data.Text (Text, unpack)
 import qualified Data.Text as T
 import Data.Time
     ( Day, DayOfWeek(..), TimeOfDay(..)
@@ -864,7 +864,7 @@ instance FromJSON ImportResp where
 
 data CreateAbsenceTypeReq = CreateAbsenceTypeReq
     { catrId          :: !Int
-    , catrName        :: !String
+    , catrName        :: !Text
     , catrCountsAgainstAllowance :: !Bool
     } deriving (Show)
 

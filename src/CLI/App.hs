@@ -1506,7 +1506,7 @@ handleCommand st cmd = case cmd of
     -- Absence types (admin)
     AbsenceTypeCreate tid name lim -> requireAdmin st $ do
         ctx <- repoLoadAbsenceCtx (asRepo st)
-        let at = AbsenceType { atName = name, atYearlyLimit = lim }
+        let at = AbsenceType { atName = T.pack name, atYearlyLimit = lim }
             ctx' = ctx { acTypes = Map.insert (AbsenceTypeId tid) at (acTypes ctx) }
         repoSaveAbsenceCtx (asRepo st) ctx'
         putStrLn ("Created absence type: " ++ name)

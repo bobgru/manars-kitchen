@@ -184,9 +184,10 @@ lookupByName repo EStation name = do
         _     -> return (Left ("Ambiguous station: " ++ name))
 lookupByName repo EAbsenceType name = do
     ctx <- repoLoadAbsenceCtx repo
-    let matches = [ tid
+    let nameLower = T.toLower (T.pack name)
+        matches = [ tid
                   | (AbsenceTypeId tid, at) <- Map.toList (acTypes ctx)
-                  , map toLower (atName at) == map toLower name
+                  , T.toLower (atName at) == nameLower
                   ]
     case matches of
         [tid] -> return (Right (show tid))

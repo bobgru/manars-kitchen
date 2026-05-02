@@ -84,7 +84,7 @@ data ExportAssignment = ExportAssignment
 
 data ExportAbsenceType = ExportAbsenceType
     { eatId          :: Int
-    , eatName        :: String
+    , eatName        :: Text
     , eatYearlyLimit :: Bool
     } deriving (Show, Generic)
 
@@ -392,7 +392,7 @@ applyImport repo dat = do
                     (AbsenceType nm yearly) (acTypes absCtx)
                 }
         repoSaveAbsenceCtx repo ctx'
-        pure ("Imported absence type " ++ show tid ++ ": " ++ nm)
+        pure ("Imported absence type " ++ show tid ++ ": " ++ T.unpack nm)
 
     importSchedule nm assignments = do
         let parsed = [ Assignment (WorkerId (eaWorker a)) (StationId (eaStation a))

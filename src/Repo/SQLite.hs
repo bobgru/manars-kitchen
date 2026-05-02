@@ -571,7 +571,7 @@ sqlLoadAbsenceCtx :: Connection -> IO AbsenceContext
 sqlLoadAbsenceCtx conn = do
     -- Absence types
     tRows <- query_ conn "SELECT id, name, yearly_limit FROM absence_types"
-        :: IO [(Int, String, Int)]
+        :: IO [(Int, Text, Int)]
     let types = Map.fromList
             [(AbsenceTypeId tid, AbsenceType nm (lim /= 0))
             | (tid, nm, lim) <- tRows]
