@@ -14,6 +14,11 @@ module Service.Worker
     , addStation
     , removeStation
     , listStations
+    , renameStation
+    , StationReferences(..)
+    , checkStationReferences
+    , isStationUnreferenced
+    , safeDeleteStation
       -- * Skill context operations
     , addSkillImplication
     , grantWorkerSkill
@@ -61,7 +66,7 @@ import Data.Time (DayOfWeek(..))
 import Auth.Types (User(..), Username(..))
 import Domain.Pin (PinnedAssignment(..))
 import Domain.Skill (Skill(..), SkillContext(..))
-import Domain.Types (WorkerId(..), StationId(..), SkillId, DiffTime)
+import Domain.Types (WorkerId(..), StationId(..), Station(..), SkillId, DiffTime)
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Repo.Types (Repository(..))
 
@@ -139,7 +144,7 @@ checkSkillReferences repo sid = do
         workerNameMap = Map.fromList
             [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
         lookupWorker w = Map.findWithDefault (show w) w workerNameMap
-        stationNameMap = Map.fromList stationPairs
+        stationNameMap = Map.fromList [(s, stationName st) | (s, st) <- stationPairs]
         lookupStation s = T.unpack $ Map.findWithDefault (T.pack $ show s) s stationNameMap
         workers = [(w, lookupWorker w) | (w, sks) <- Map.toList (scWorkerSkills ctx), Set.member sid sks]
         stations = [(s, lookupStation s) | (s, sks) <- Map.toList (scStationRequires ctx), Set.member sid sks]
@@ -174,9 +179,9 @@ safeDeleteSkill repo sid = do
 -- -----------------------------------------------------------------
 
 -- | Add a station to the system.
-addStation :: Repository -> Text -> IO StationId
-addStation repo name = do
-    sid <- repoCreateStation repo name
+addStation :: Repository -> Text -> Int -> Int -> IO StationId
+addStation repo name minStaff maxStaff = do
+    sid <- repoCreateStation repo name minStaff maxStaff
     ctx <- repoLoadSkillCtx repo
     let ctx' = ctx
             { scAllStations = Set.insert sid (scAllStations ctx) }
@@ -193,6 +198,48 @@ removeStation repo sid = do
             , scStationRequires = Map.delete sid (scStationRequires ctx)
             }
     repoSaveSkillCtx repo ctx'
+
+data StationReferences = StationReferences
+    { strWorkerPrefs    :: ![(WorkerId, String)]
+    , strRequiredSkills :: ![(SkillId, String)]
+    } deriving (Show)
+
+isStationUnreferenced :: StationReferences -> Bool
+isStationUnreferenced refs =
+    null (strWorkerPrefs refs) && null (strRequiredSkills refs)
+
+checkStationReferences :: Repository -> StationId -> IO StationReferences
+checkStationReferences repo sid = do
+    ctx <- repoLoadSkillCtx repo
+    wCtx <- repoLoadWorkerCtx repo
+    users <- repoListUsers repo
+    skills <- repoListSkills repo
+    let workerNameMap = Map.fromList
+            [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
+        lookupWorker w = Map.findWithDefault (show w) w workerNameMap
+        skillNameMap = Map.fromList [(s, skillName sk) | (s, sk) <- skills]
+        lookupSkill s = T.unpack $ Map.findWithDefault (T.pack $ show s) s skillNameMap
+        workerPrefs = [(w, lookupWorker w)
+            | (w, prefs) <- Map.toList (wcStationPrefs wCtx)
+            , sid `elem` prefs]
+        requiredSkills = [(s, lookupSkill s)
+            | s <- Set.toList (Map.findWithDefault Set.empty sid (scStationRequires ctx))]
+    return StationReferences
+        { strWorkerPrefs    = workerPrefs
+        , strRequiredSkills = requiredSkills
+        }
+
+safeDeleteStation :: Repository -> StationId -> IO (Either StationReferences ())
+safeDeleteStation repo sid = do
+    refs <- checkStationReferences repo sid
+    if isStationUnreferenced refs
+        then do
+            removeStation repo sid
+            return (Right ())
+        else return (Left refs)
+
+renameStation :: Repository -> StationId -> Text -> IO ()
+renameStation repo sid newName = repoRenameStation repo sid newName
 
 -- -----------------------------------------------------------------
 -- Skill context (relational operations)
@@ -223,7 +270,7 @@ revokeWorkerSkill repo wid sid = do
     repoSaveSkillCtx repo ctx'
 
 -- | List all stations.
-listStations :: Repository -> IO [(StationId, Text)]
+listStations :: Repository -> IO [(StationId, Station)]
 listStations = repoListStations
 
 -- | Set required skills for a station.

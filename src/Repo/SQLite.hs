@@ -31,7 +31,7 @@ import Domain.SchedulerConfig (SchedulerConfig, configToMap, configFromMap)
 import Domain.Shift (ShiftDef(..))
 import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Types
-    ( WorkerId(..), StationId(..), SkillId(..)
+    ( WorkerId(..), StationId(..), Station(..), SkillId(..)
     , AbsenceId(..), AbsenceTypeId(..)
     , Slot(..), Assignment(..), Schedule(..)
     )
@@ -65,6 +65,7 @@ mkSQLiteRepo path = do
         , repoCreateStation  = sqlCreateStation conn
         , repoDeleteStation  = sqlDeleteStation conn
         , repoListStations   = sqlListStations conn
+        , repoRenameStation  = sqlRenameStation conn
         , repoSaveSkillCtx   = sqlSaveSkillCtx conn
         , repoLoadSkillCtx   = sqlLoadSkillCtx conn
         , repoSaveWorkerCtx  = sqlSaveWorkerCtx conn
@@ -220,11 +221,11 @@ sqlRemoveSkillImplication conn (SkillId s) (SkillId i) =
 -- Stations (entity CRUD)
 -- =====================================================================
 
-sqlCreateStation :: Connection -> Text -> IO StationId
-sqlCreateStation conn name = do
+sqlCreateStation :: Connection -> Text -> Int -> Int -> IO StationId
+sqlCreateStation conn name minStaff maxStaff = do
     execute conn
-        "INSERT INTO stations (name) VALUES (?)"
-        (Only name)
+        "INSERT INTO stations (name, min_staff, max_staff) VALUES (?, ?, ?)"
+        (name, minStaff, maxStaff)
     rowId <- lastInsertRowId conn
     return (StationId (fromIntegral rowId))
 
@@ -233,11 +234,15 @@ sqlDeleteStation conn (StationId sid) = do
     execute conn "DELETE FROM station_required_skills WHERE station_id = ?" (Only sid)
     execute conn "DELETE FROM stations WHERE id = ?" (Only sid)
 
-sqlListStations :: Connection -> IO [(StationId, Text)]
+sqlListStations :: Connection -> IO [(StationId, Station)]
 sqlListStations conn = do
-    rows <- query_ conn "SELECT id, name FROM stations ORDER BY id"
-        :: IO [(Int, Text)]
-    return [(StationId sid, name) | (sid, name) <- rows]
+    rows <- query_ conn "SELECT id, name, min_staff, max_staff FROM stations ORDER BY id"
+        :: IO [(Int, Text, Int, Int)]
+    return [(StationId sid, Station name minS maxS) | (sid, name, minS, maxS) <- rows]
+
+sqlRenameStation :: Connection -> StationId -> Text -> IO ()
+sqlRenameStation conn (StationId sid) newName =
+    execute conn "UPDATE stations SET name = ? WHERE id = ?" (newName, sid)
 
 -- =====================================================================
 -- Skill context (relational data — does NOT touch skills/stations tables)

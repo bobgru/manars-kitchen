@@ -17,7 +17,7 @@ import Servant
 
 import Auth.Types (User(..), Username(..), Role(..))
 import Data.Text (Text)
-import Domain.Types (WorkerId(..), StationId(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule)
+import Domain.Types (WorkerId(..), StationId(..), Station(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule)
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef(..))
 import Domain.Scheduler (ScheduleResult)
@@ -72,7 +72,7 @@ lookupStationName :: Repository -> StationId -> IO String
 lookupStationName repo stid = do
     stations <- repoListStations repo
     case lookup stid stations of
-        Just n  -> return (T.unpack n)
+        Just st -> return (T.unpack (stationName st))
         Nothing -> let StationId i = stid in return (show i)
 
 -- | Look up a worker name by ID; returns the ID as a string if not found.
@@ -205,7 +205,7 @@ handleListSkills repo = do
 handleListStations :: Repository -> Handler [(Int, T.Text)]
 handleListStations repo = do
     stations <- liftIO $ SW.listStations repo
-    pure [(i, n) | (StationId i, n) <- stations]
+    pure [(i, stationName st) | (StationId i, st) <- stations]
 
 handleListShifts :: Repository -> Handler [ShiftDef]
 handleListShifts repo = liftIO $ repoLoadShifts repo
@@ -434,7 +434,7 @@ handleRemoveImplication cmdBus repo user name impliedName = do
 handleCreateStation :: TopicBus CommandEvent -> Repository -> User -> CreateStationReq -> Handler NoContent
 handleCreateStation cmdBus repo user req = do
     requireAdmin user
-    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req))
+    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req)) (cstrMinStaff req) (cstrMaxStaff req)
     logRest cmdBus user ("station add " ++ shellQuote (cstrName req))
     pure NoContent
 

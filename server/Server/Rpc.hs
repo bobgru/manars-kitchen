@@ -59,7 +59,7 @@ import Text.Read (readMaybe)
 
 import Auth.Types (UserId(..), User(..), Username(..))
 import Domain.Skill (Skill)
-import Domain.Types (WorkerId(..), StationId(..), SkillId(..), AbsenceId(..), AbsenceTypeId(..), Schedule)
+import Domain.Types (WorkerId(..), StationId(..), Station(..), SkillId(..), AbsenceId(..), AbsenceTypeId(..), Schedule)
 import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment(..))
 import Domain.Shift (ShiftDef(..))
@@ -500,7 +500,7 @@ rpcListSkills repo _ = liftIO $ SW.listSkills repo
 
 rpcCreateStation :: TopicBus CommandEvent -> Repository -> CreateStationReq -> Handler RpcOk
 rpcCreateStation cmdBus repo req = do
-    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req))
+    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req)) (cstrMinStaff req) (cstrMaxStaff req)
     logRpcBus cmdBus ("station add " ++ shellQuote (cstrName req))
     pure RpcOk
 
@@ -526,7 +526,7 @@ rpcCloseStationDay cmdBus repo req = do
 rpcListStations :: Repository -> RpcEmpty -> Handler [(Int, T.Text)]
 rpcListStations repo _ = do
     stations <- liftIO $ SW.listStations repo
-    pure [(i, n) | (StationId i, n) <- stations]
+    pure [(i, stationName st) | (StationId i, st) <- stations]
 
 -- -----------------------------------------------------------------
 -- Shift handlers

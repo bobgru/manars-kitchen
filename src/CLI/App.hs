@@ -246,8 +246,8 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, T.unpack sname)
-                        | (StationId sid, sname) <- stations ]
+                        [ (StationId sid, T.unpack (stationName st))
+                        | (StationId sid, st) <- stations ]
                 putStr (displayScheduleTable workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
@@ -263,8 +263,8 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, T.unpack sname)
-                        | (StationId sid, sname) <- stations ]
+                        [ (StationId sid, T.unpack (stationName st))
+                        | (StationId sid, st) <- stations ]
                 putStr (displayScheduleCompact workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
@@ -338,8 +338,8 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, T.unpack sname)
-                        | (StationId sid, sname) <- stations ]
+                        [ (StationId sid, T.unpack (stationName st))
+                        | (StationId sid, st) <- stations ]
                     skillNames = Map.fromList
                         [ (sid, T.unpack (skillName sk))
                         | (sid, sk) <- skills ]
@@ -508,7 +508,7 @@ handleCommand st cmd = case cmd of
                         let workerNames = Map.fromList
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList [(s, T.unpack n) | (s, n) <- stations]
+                            stationNames = Map.fromList [(s, T.unpack (stationName st)) | (s, st) <- stations]
                         displayViolationReport d workerNames stationNames violations
                         putStrLn ""
                 -- Load (possibly updated) draft assignments
@@ -565,8 +565,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack sname)
-                                | (StationId sid, sname) <- stations ]
+                                [ (StationId sid, T.unpack (stationName st))
+                                | (StationId sid, st) <- stations ]
                         putStr (displayScheduleTable workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
 
@@ -586,8 +586,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack sname)
-                                | (StationId sid, sname) <- stations ]
+                                [ (StationId sid, T.unpack (stationName st))
+                                | (StationId sid, st) <- stations ]
                         putStr (displayScheduleCompact workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
 
@@ -720,8 +720,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack sname)
-                                | (StationId sid, sname) <- stations ]
+                                [ (StationId sid, T.unpack (stationName st))
+                                | (StationId sid, st) <- stations ]
                             skillNames = Map.fromList
                                 [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
@@ -742,8 +742,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack sname)
-                                | (StationId sid, sname) <- stations ]
+                                [ (StationId sid, T.unpack (stationName st))
+                                | (StationId sid, st) <- stations ]
                         putStr (displayScheduleTable workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
@@ -780,8 +780,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack sname)
-                                | (StationId sid, sname) <- stations ]
+                                [ (StationId sid, T.unpack (stationName st))
+                                | (StationId sid, st) <- stations ]
                         putStr (displayScheduleCompact workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
@@ -843,8 +843,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack sname)
-                                | (StationId sid, sname) <- stations ]
+                                [ (StationId sid, T.unpack (stationName st))
+                                | (StationId sid, st) <- stations ]
                             skillNames = Map.fromList
                                 [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
@@ -1141,15 +1141,15 @@ handleCommand st cmd = case cmd of
 
     -- Stations (admin)
     StationAdd name -> requireAdmin st $ do
-        _sid <- SW.addStation (asRepo st) (T.pack name)
+        _sid <- SW.addStation (asRepo st) (T.pack name) 1 1
         putStrLn ("Added station: " ++ name)
 
     StationList -> do
         stations <- SW.listStations (asRepo st)
         if null stations
             then putStrLn "  (no stations)"
-            else mapM_ (\(_sid, name) ->
-                putStrLn ("  " ++ T.unpack name)
+            else mapM_ (\(_sid, st) ->
+                putStrLn ("  " ++ T.unpack (stationName st))
                 ) stations
 
     StationRemove sid -> requireAdmin st $ do
@@ -1254,7 +1254,7 @@ handleCommand st cmd = case cmd of
                 users <- repoListUsers (asRepo st)
                 stations <- repoListStations (asRepo st)
                 let workerNames = Map.fromList [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
-                    stationNames = Map.fromList [(s, T.unpack n) | (s, n) <- stations]
+                    stationNames = Map.fromList [(s, T.unpack (stationName st)) | (s, st) <- stations]
                     skillNames = Map.fromList [(s, skillName sk') | (s, sk') <- skills]
                 putStr (displaySkillView sid sk ctx wctx workerNames stationNames skillNames)
 
@@ -1915,8 +1915,8 @@ loadNameMaps st = do
             [ (userWorkerId u, T.unpack uname)
             | u <- users, let Username uname = userName u ]
         stationNames = Map.fromList
-            [ (StationId sid, T.unpack sname)
-            | (StationId sid, sname) <- stations ]
+            [ (StationId sid, T.unpack (stationName st))
+            | (StationId sid, st) <- stations ]
         skillNames = Map.fromList
             [ (sid, T.unpack (skillName sk))
             | (sid, sk) <- skills ]

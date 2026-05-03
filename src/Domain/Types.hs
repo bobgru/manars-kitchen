@@ -1,6 +1,7 @@
 module Domain.Types
     ( WorkerId(..)
     , StationId(..)
+    , Station(..)
     , SkillId(..)
     , AbsenceId(..)
     , AbsenceTypeId(..)
@@ -17,6 +18,7 @@ module Domain.Types
     , scheduleWithSwappable
     ) where
 
+import Data.Text (Text)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Time (Day, TimeOfDay(..), DiffTime,
@@ -33,6 +35,12 @@ newtype WorkerId = WorkerId Int
 -- | Terminal unit: a station, identified by an opaque ID.
 newtype StationId = StationId Int
     deriving (Eq, Ord, Show, Read)
+
+data Station = Station
+    { stationName     :: !Text
+    , stationMinStaff :: !Int
+    , stationMaxStaff :: !Int
+    } deriving (Eq, Ord, Show, Read)
 
 -- | Terminal unit: a skill, identified by an opaque ID.
 -- Skills form a preorder under implication: if skill A implies skill B,

@@ -233,7 +233,7 @@ gatherExport repo mSchedName = do
                     (map (\(SkillId s) -> s) $ Set.toList $
                         Map.findWithDefault Set.empty (StationId sid) (scStationRequires skillCtx))
                     mStart mEnd
-                | (StationId sid, nm) <- stationList ]
+                | (StationId sid, st) <- stationList, let nm = stationName st ]
 
     -- Workers / Users
     users <- repoListUsers repo
@@ -307,7 +307,7 @@ applyImport repo dat = do
         pure ("Imported skill " ++ show sid ++ ": " ++ T.unpack nm)
 
     importStation (ExportStation _oldSid nm reqSkills mSh mEh) = do
-        newSid <- repoCreateStation repo nm
+        newSid <- repoCreateStation repo nm 1 1
         skillCtx <- repoLoadSkillCtx repo
         let hours = case (mSh, mEh) of
                 (Just sh, Just eh) ->

@@ -13,7 +13,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
-import Domain.Types (WorkerId, StationId, SkillId, Schedule)
+import Domain.Types (WorkerId, StationId, Station, SkillId, Schedule)
 import Domain.Shift (ShiftDef)
 import Domain.Skill (Skill, SkillContext)
 import Audit.CommandMeta (CommandMeta)
@@ -105,9 +105,10 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Stations (entity CRUD)
       -- ---------------------------------------------------------------
-    , repoCreateStation  :: Text -> IO StationId
+    , repoCreateStation  :: Text -> Int -> Int -> IO StationId
     , repoDeleteStation  :: StationId -> IO ()
-    , repoListStations   :: IO [(StationId, Text)]
+    , repoListStations   :: IO [(StationId, Station)]
+    , repoRenameStation  :: StationId -> Text -> IO ()
 
       -- ---------------------------------------------------------------
       -- Skill context (relational data)

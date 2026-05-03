@@ -344,7 +344,7 @@ dispatchCommand env cmd = case cmd of
 
     -- Stations
     StationAdd name -> requireAdmin env $
-        runOk env (cCreateStation (CreateStationReq 0 name)) "Station added."
+        runOk env (cCreateStation (CreateStationReq name 1 1)) "Station added."
 
     StationList -> do
         result <- run env (cListStations RpcEmpty)

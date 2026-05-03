@@ -16,7 +16,7 @@ import qualified Data.Text as T
 import Repo.Types (Repository(..))
 import CLI.Commands (shellWords)
 import Auth.Types (User(..), Username(..))
-import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..))
+import Domain.Types (WorkerId(..), SkillId(..), StationId(..), Station(..), AbsenceTypeId(..))
 import Domain.Skill (Skill(..))
 import Domain.Absence (AbsenceType(..), AbsenceContext(..))
 
@@ -175,8 +175,8 @@ lookupByName repo EStation name = do
     stations <- repoListStations repo
     let nameLower = T.toLower (T.pack name)
         matches = [ sid
-                  | (StationId sid, sname) <- stations
-                  , T.toLower sname == nameLower
+                  | (StationId sid, st) <- stations
+                  , T.toLower (stationName st) == nameLower
                   ]
     case matches of
         [sid] -> return (Right (show sid))

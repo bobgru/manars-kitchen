@@ -592,7 +592,7 @@ spec = do
         it "generate populates schedule" $ withSeededApp $ \repo env -> do
             -- Add a skill, station, and worker so the scheduler has something to do
             _ <- SW.addSkill repo "grill" ""
-            sid <- SW.addStation repo "grill"
+            sid <- SW.addStation repo "grill" 1 1
             SW.grantWorkerSkill repo (WorkerId 1) (SkillId 1)
             SW.setStationRequiredSkills repo sid
                 (Set.singleton (SkillId 1))
@@ -670,12 +670,12 @@ spec = do
 
     describe "Station CRUD" $ do
         it "create and list station" $ withTestApp $ \env -> do
-            Right _ <- runClientM (createStationC (CreateStationReq 1 "grill")) env
+            Right _ <- runClientM (createStationC (CreateStationReq "grill" 1 1)) env
             Right stations <- runClientM listStationsC env
             length stations `shouldBe` 1
 
         it "set station hours" $ withTestApp $ \env -> do
-            Right _ <- runClientM (createStationC (CreateStationReq 1 "grill")) env
+            Right _ <- runClientM (createStationC (CreateStationReq "grill" 1 1)) env
             Right _ <- runClientM (setStationHoursC 1 (SetStationHoursReq 9 17)) env
             pure ()  -- no error means success
 

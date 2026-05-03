@@ -58,7 +58,7 @@ module Server.Json
     ) where
 
 import Data.Aeson
-    ( ToJSON(..), FromJSON(..), (.=), (.:), (.:?)
+    ( ToJSON(..), FromJSON(..), (.=), (.:), (.:?), (.!=)
     , object, withObject, withText
     )
 import qualified Data.Aeson.Types
@@ -562,16 +562,17 @@ instance FromJSON AddImplicationReq where
         AddImplicationReq <$> v .: "impliesSkillName"
 
 data CreateStationReq = CreateStationReq
-    { cstrId   :: !Int
-    , cstrName :: !String
+    { cstrName     :: !String
+    , cstrMinStaff :: !Int
+    , cstrMaxStaff :: !Int
     } deriving (Show)
 
 instance ToJSON CreateStationReq where
-    toJSON r = object ["id" .= cstrId r, "name" .= cstrName r]
+    toJSON r = object ["name" .= cstrName r, "minStaff" .= cstrMinStaff r, "maxStaff" .= cstrMaxStaff r]
 
 instance FromJSON CreateStationReq where
     parseJSON = withObject "CreateStationReq" $ \v ->
-        CreateStationReq <$> v .: "id" <*> v .: "name"
+        CreateStationReq <$> v .: "name" <*> (v .:? "minStaff" .!= (1 :: Int)) <*> (v .:? "maxStaff" .!= (1 :: Int))
 
 data SetStationHoursReq = SetStationHoursReq
     { sshrStart :: !Int
