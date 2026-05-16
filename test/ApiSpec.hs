@@ -807,7 +807,7 @@ spec = do
 
         it "station add via dispatchCommand creates server-side station" $
             withRemoteApp $ \_ env rpc -> do
-                dispatchCommand rpc (StationAdd "kitchen")
+                dispatchCommand rpc (StationCreate "kitchen" 1 1)
                 Right stations <- runClientM (_rpcListStationsC RpcEmpty) env
                 length stations `shouldBe` 1
 
@@ -836,7 +836,7 @@ spec = do
         it "RPC commands produce audit entries with source=rpc" $
             withRemoteApp $ \_ env rpc -> do
                 dispatchCommand rpc (SkillCreate "grill")
-                dispatchCommand rpc (StationAdd "kitchen")
+                dispatchCommand rpc (StationCreate "kitchen" 1 1)
                 Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
                 all (\e -> aeSource e == "rpc") entries `shouldBe` True

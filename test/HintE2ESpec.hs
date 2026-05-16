@@ -31,7 +31,7 @@ spec = do
                             , WaiveOvertime (WorkerId 5)
                             ]
                 -- Log a command to establish a checkpoint
-                publishCommand bus CLI "alice" "station add 1 grill"
+                publishCommand bus CLI "alice" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 -- Save hint session
@@ -63,13 +63,13 @@ spec = do
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
                 -- Establish checkpoint
-                publishCommand bus CLI "bob" "station add 1 grill"
+                publishCommand bus CLI "bob" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 -- Save hint session
                 repoSaveHintSession repo sid did hints cp
                 -- Make a compatible mutation (different station, doesn't touch worker 3 or skill 2)
-                publishCommand bus CLI "bob" "station add 5 dishwash"
+                publishCommand bus CLI "bob" "station create 5 dishwash"
                 -- Get entries since checkpoint
                 since <- repoAuditSince repo cp
                 length since `shouldBe` 1
@@ -97,7 +97,7 @@ spec = do
                             , WaiveOvertime (WorkerId 5)
                             ]
                 -- Establish checkpoint
-                publishCommand bus CLI "carol" "station add 1 grill"
+                publishCommand bus CLI "carol" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
@@ -141,7 +141,7 @@ spec = do
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
-                publishCommand bus CLI "dave" "station add 1 grill"
+                publishCommand bus CLI "dave" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
@@ -161,7 +161,7 @@ spec = do
                 (sid, _tok) <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [WaiveOvertime (WorkerId 1)]
-                publishCommand bus CLI "eve" "station add 1 grill"
+                publishCommand bus CLI "eve" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
@@ -183,7 +183,7 @@ spec = do
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , CloseStation (StationId 1) testSlot
                             ]
-                publishCommand bus CLI "frank" "station add 1 grill"
+                publishCommand bus CLI "frank" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp

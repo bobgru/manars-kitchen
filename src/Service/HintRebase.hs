@@ -204,8 +204,8 @@ spec = do
             classifyChange 1 (mkEntry 1 "user create alice pass admin") hints
                 `shouldBe` Irrelevant
 
-        it "station add (different station) is compatible" $
-            classifyChange 1 (mkEntry 2 "station add 5 dishwash") hints
+        it "station create (different station) is compatible" $
+            classifyChange 1 (mkEntry 2 "station create 5 dishwash") hints
                 `shouldBe` Compatible
 
         it "worker revoke-skill same pair is conflicting" $

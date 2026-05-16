@@ -1,39 +1,39 @@
 ## 1. Domain and Repository
 
-- [ ] 1.1 Add `Station` record type to `Domain/Types.hs` with `stationName :: Text`, `stationMinStaff :: Int`, `stationMaxStaff :: Int`
-- [ ] 1.2 Change `repoListStations` signature from `IO [(StationId, Text)]` to `IO [(StationId, Station)]` in `Repo/Types.hs`
-- [ ] 1.3 Add `repoRenameStation :: StationId -> Text -> IO ()` to `Repo/Types.hs`
-- [ ] 1.4 Update `sqlListStations` in `Repo/SQLite.hs` to SELECT name, min_staff, max_staff and return `Station` records
-- [ ] 1.5 Implement `sqlRenameStation` in `Repo/SQLite.hs` and wire into `newSQLiteRepo`
-- [ ] 1.6 Fix all call sites that destructure `(sid, name)` from `repoListStations` to use `(sid, station)` with `stationName station`
+- [x] 1.1 Add `Station` record type to `Domain/Types.hs` with `stationName :: Text`, `stationMinStaff :: Int`, `stationMaxStaff :: Int`
+- [x] 1.2 Change `repoListStations` signature from `IO [(StationId, Text)]` to `IO [(StationId, Station)]` in `Repo/Types.hs`
+- [x] 1.3 Add `repoRenameStation :: StationId -> Text -> IO ()` to `Repo/Types.hs`
+- [x] 1.4 Update `sqlListStations` in `Repo/SQLite.hs` to SELECT name, min_staff, max_staff and return `Station` records
+- [x] 1.5 Implement `sqlRenameStation` in `Repo/SQLite.hs` and wire into `newSQLiteRepo`
+- [x] 1.6 Fix all call sites that destructure `(sid, name)` from `repoListStations` to use `(sid, station)` with `stationName station`
 
 ## 2. Service Layer
 
-- [ ] 2.1 Add `StationReferences` type with `strWorkerPrefs :: [(WorkerId, String)]` and `strRequiredSkills :: [(SkillId, String)]`
-- [ ] 2.2 Add `checkStationReferences :: Repository -> StationId -> IO StationReferences` that checks worker station preferences (`wcStationPrefs`) and station required skills (`scStationRequires`)
-- [ ] 2.3 Add `isStationUnreferenced :: StationReferences -> Bool`
-- [ ] 2.4 Add `safeDeleteStation :: Repository -> StationId -> IO (Either StationReferences ())` that checks references and returns Left with details if any exist
-- [ ] 2.5 Add `renameStation :: Repository -> StationId -> Text -> IO ()` to `Service/Worker.hs`
-- [ ] 2.6 Update `addStation` to accept optional min/max staff (default 1); update `repoCreateStation` signature accordingly
+- [x] 2.1 Add `StationReferences` type with `strWorkerPrefs :: [(WorkerId, String)]` and `strRequiredSkills :: [(SkillId, String)]`
+- [x] 2.2 Add `checkStationReferences :: Repository -> StationId -> IO StationReferences` that checks worker station preferences (`wcStationPrefs`) and station required skills (`scStationRequires`)
+- [x] 2.3 Add `isStationUnreferenced :: StationReferences -> Bool`
+- [x] 2.4 Add `safeDeleteStation :: Repository -> StationId -> IO (Either StationReferences ())` that checks references and returns Left with details if any exist
+- [x] 2.5 Add `renameStation :: Repository -> StationId -> Text -> IO ()` to `Service/Worker.hs`
+- [x] 2.6 Update `addStation` to accept optional min/max staff (default 1); update `repoCreateStation` signature accordingly
 
 ## 3. CLI Commands
 
-- [ ] 3.1 Rename command constructors: `StationAdd` → `StationCreate`, `StationRemove` → `StationDelete`
-- [ ] 3.2 Add new command constructors: `StationForceDelete`, `StationRename`, `StationView`
-- [ ] 3.3 Change all station command constructors from `Int` ID arguments to `String` name arguments
-- [ ] 3.4 Update CLI parser: `station add` → `station create` (with optional positional min/max staff defaulting to 1), `station remove` → `station delete`, add `station rename <old> <new>`, `station view <name>`, `station force-delete <name>`
-- [ ] 3.5 Update CLI executor in `App.hs`:
+- [x] 3.1 Rename command constructors: `StationAdd` → `StationCreate`, `StationRemove` → `StationDelete`
+- [x] 3.2 Add new command constructors: `StationForceDelete`, `StationRename`, `StationView`
+- [x] 3.3 Change all station command constructors from `Int` ID arguments to `String` name arguments
+- [x] 3.4 Update CLI parser: `station add` → `station create` (with optional positional min/max staff defaulting to 1), `station remove` → `station delete`, add `station rename <old> <new>`, `station view <name>`, `station force-delete <name>`
+- [x] 3.5 Update CLI executor in `App.hs`:
   - `StationCreate`: resolve name, pass optional min/max staff to `addStation`
   - `StationDelete`: resolve name to ID, call `safeDeleteStation`, print references if blocked
   - `StationForceDelete`: check references; for each worker with station in prefs, load pref list, filter out station, call `WorkerSetPrefs`; for each required skill, call `StationRemoveRequiredSkill`; then call `StationDelete`
   - `StationRename`: resolve old name to ID, call `renameStation`
   - `StationView`: resolve name to ID, display name, min/max staff, hours/closures/multi-station hours, required skills, worker preferences
-- [ ] 3.6 Update `Resolve.hs` `commandEntityMap` for renamed verbs and new commands (`station create`, `station delete`, `station force-delete`, `station rename`, `station view`)
+- [x] 3.6 Update `Resolve.hs` `commandEntityMap` for renamed verbs and new commands (`station create`, `station delete`, `station force-delete`, `station rename`, `station view`)
 
 ## 4. Audit Log
 
-- [ ] 4.1 Update `classifyStation` in `Audit/CommandMeta.hs` for new verb names (create/delete/force-delete/rename/view)
-- [ ] 4.2 Update demo script `demo/restaurant-setup.txt`: rename `station add` to `station create`
+- [x] 4.1 Update `classifyStation` in `Audit/CommandMeta.hs` for new verb names (create/delete/force-delete/rename/view)
+- [x] 4.2 Update demo script `demo/restaurant-setup.txt`: rename `station add` to `station create`
 
 ## 5. REST API
 

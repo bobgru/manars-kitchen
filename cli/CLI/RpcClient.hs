@@ -18,6 +18,7 @@ import Servant.Client
     , parseBaseUrl, ClientError(..), responseStatusCode
     )
 import Network.HTTP.Types.Status (statusCode)
+import Text.Read (readMaybe)
 
 import Auth.Types (User(..), Username(..), Role(..))
 import Domain.Types (SkillId(..), Schedule(..))
@@ -343,8 +344,9 @@ dispatchCommand env cmd = case cmd of
         runOk env (cRevokeSkill (RpcWorkerSkill wid sid)) "Skill revoked."
 
     -- Stations
-    StationAdd name -> requireAdmin env $
-        runOk env (cCreateStation (CreateStationReq name 1 1)) "Station added."
+    StationCreate name minStaff maxStaff -> requireAdmin env $
+        runOk env (cCreateStation (CreateStationReq name minStaff maxStaff))
+            "Station created."
 
     StationList -> do
         result <- run env (cListStations RpcEmpty)
@@ -353,14 +355,27 @@ dispatchCommand env cmd = case cmd of
                 putStrLn ("  " ++ T.unpack n)) stations
             Left err -> putStrLn err
 
-    StationRemove sid -> requireAdmin env $
-        runOk env (cDeleteStation (RpcStationId sid)) "Station removed."
+    StationDelete arg -> requireAdmin env $
+        case readMaybeInt arg of
+            Just sid -> runOk env (cDeleteStation (RpcStationId sid)) "Station deleted."
+            Nothing  -> putStrLn "station delete by name not yet supported via RPC."
 
-    StationSetHours sid start end -> requireAdmin env $
-        runOk env (cSetStationHours (RpcStationHours sid start end))
-            "Station hours set."
+    StationForceDelete _ ->
+        putStrLn "station force-delete not yet supported via RPC."
 
-    StationCloseDay _sid _dayStr ->
+    StationRename _ _ ->
+        putStrLn "station rename not yet supported via RPC."
+
+    StationView _ ->
+        putStrLn "station view not yet supported via RPC."
+
+    StationSetHours arg start end -> requireAdmin env $
+        case readMaybeInt arg of
+            Just sid -> runOk env (cSetStationHours (RpcStationHours sid start end))
+                "Station hours set."
+            Nothing  -> putStrLn "station set-hours by name not yet supported via RPC."
+
+    StationCloseDay _arg _dayStr ->
         putStrLn "station close-day via RPC requires date-based closure. Not yet mapped."
 
     StationSetMultiHours {} ->
@@ -829,3 +844,6 @@ parsePayTracking :: String -> Maybe PayPeriodTracking
 parsePayTracking "standard" = Just PPStandard
 parsePayTracking "exempt"   = Just PPExempt
 parsePayTracking _          = Nothing
+
+readMaybeInt :: String -> Maybe Int
+readMaybeInt = readMaybe

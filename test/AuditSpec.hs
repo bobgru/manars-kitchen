@@ -31,10 +31,10 @@ spec = do
                 cmIsMutation m `shouldBe` False
 
         describe "station commands" $ do
-            it "classifies station add" $ do
-                let m = classify "station add grill"
+            it "classifies station create" $ do
+                let m = classify "station create grill"
                 cmEntityType m `shouldBe` Just "station"
-                cmOperation m `shouldBe` Just "add"
+                cmOperation m `shouldBe` Just "create"
                 cmEntityId m `shouldBe` Nothing
                 cmIsMutation m `shouldBe` True
 
@@ -184,9 +184,9 @@ spec = do
 
     -- 8.2: render round-trip tests
     describe "render" $ do
-        it "round-trips station add" $ do
-            let m = classify "station add grill"
-            render m `shouldBe` "station add"
+        it "round-trips station create" $ do
+            let m = classify "station create grill"
+            render m `shouldBe` "station create"
 
         it "round-trips worker grant-skill" $ do
             render (classify "worker grant-skill 3 5") `shouldBe` "worker grant-skill 3 5"
@@ -231,7 +231,7 @@ spec = do
                     cmIsMutation meta `shouldBe` isMutating cmd
 
         -- Mutating commands
-        testConsistency "station add grill"
+        testConsistency "station create grill"
         testConsistency "skill create pastry"
         testConsistency "worker grant-skill 3 5"
         testConsistency "worker set-hours 3 40"
@@ -276,8 +276,8 @@ spec = do
     -- 8.4: Every mutating command has non-Nothing cmEntityType
     describe "mutating commands have entity type" $ do
         let mutatingCommands =
-                [ "station add grill"
-                , "station remove 1"
+                [ "station create grill"
+                , "station delete 1"
                 , "skill create pastry"
                 , "skill implication 1 2"
                 , "worker grant-skill 3 5"

@@ -26,14 +26,17 @@ data Command
     | CmdAssign String Int Int String Int    -- ^ schedule worker station date hour
     | CmdUnassign String Int Int String Int  -- ^ schedule worker station date hour
     -- Skills / Stations (admin)
-    | StationAdd String               -- ^ name
+    | StationCreate String Int Int    -- ^ name min-staff max-staff
     | StationList
-    | StationRemove Int
-    | StationSetHours Int Int Int   -- ^ station-id start-hour end-hour
-    | StationCloseDay Int String   -- ^ station-id day-of-week
-    | StationSetMultiHours Int Int Int  -- ^ station-id start-hour end-hour
-    | StationRequireSkill Int SkillId    -- ^ station-id skill-id
-    | StationRemoveRequiredSkill Int SkillId -- ^ station-id skill-id
+    | StationDelete String            -- ^ name (safe delete)
+    | StationForceDelete String       -- ^ name (remove refs + delete)
+    | StationRename String String     -- ^ old-name new-name
+    | StationView String              -- ^ name
+    | StationSetHours String Int Int  -- ^ name start-hour end-hour
+    | StationCloseDay String String   -- ^ name day-of-week
+    | StationSetMultiHours String Int Int  -- ^ name start-hour end-hour
+    | StationRequireSkill String SkillId    -- ^ name skill-id
+    | StationRemoveRequiredSkill String SkillId -- ^ name skill-id
     | SkillCreate String                  -- ^ name
     | SkillRename SkillId String          -- ^ skill-id new-name
     | SkillDelete SkillId                 -- ^ skill-id (safe delete)
@@ -182,20 +185,24 @@ parseCommand input = case shellWords input of
     ["unassign", sched, wid, sid, date, hr]
         | all isDigit' [wid, sid, hr] -> CmdUnassign sched (read wid) (read sid) date (read hr)
 
-    ["station", "add", name] -> StationAdd name
+    ["station", "create", name] -> StationCreate name 1 1
+    ["station", "create", name, mn, mx]
+        | all isDigit' [mn, mx] -> StationCreate name (read mn) (read mx)
     ["station", "list"]            -> StationList
-    ["station", "remove", sid]
-        | isDigit' sid -> StationRemove (read sid)
+    ["station", "delete", name]    -> StationDelete name
+    ["station", "force-delete", name] -> StationForceDelete name
+    ["station", "rename", old, new] -> StationRename old new
+    ["station", "view", name]      -> StationView name
     ["station", "set-hours", sid, sh, eh]
-        | all isDigit' [sid, sh, eh] -> StationSetHours (read sid) (read sh) (read eh)
+        | all isDigit' [sh, eh] -> StationSetHours sid (read sh) (read eh)
     ["station", "close-day", sid, day]
-        | isDigit' sid -> StationCloseDay (read sid) day
+        -> StationCloseDay sid day
     ["station", "set-multi-hours", sid, sh, eh]
-        | all isDigit' [sid, sh, eh] -> StationSetMultiHours (read sid) (read sh) (read eh)
+        | all isDigit' [sh, eh] -> StationSetMultiHours sid (read sh) (read eh)
     ["station", "require-skill", sid, skid]
-        | all isDigit' [sid, skid] -> StationRequireSkill (read sid) (SkillId (read skid))
+        | isDigit' skid -> StationRequireSkill sid (SkillId (read skid))
     ["station", "remove-required-skill", sid, skid]
-        | all isDigit' [sid, skid] -> StationRemoveRequiredSkill (read sid) (SkillId (read skid))
+        | isDigit' skid -> StationRemoveRequiredSkill sid (SkillId (read skid))
 
     ["skill", "create", name] -> SkillCreate name
     ["skill", "rename", sid, name]

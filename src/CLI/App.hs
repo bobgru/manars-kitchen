@@ -246,8 +246,8 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, T.unpack (stationName st))
-                        | (StationId sid, st) <- stations ]
+                        [ (StationId sid, T.unpack (stationName station))
+                        | (StationId sid, station) <- stations ]
                 putStr (displayScheduleTable workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
@@ -263,8 +263,8 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, T.unpack (stationName st))
-                        | (StationId sid, st) <- stations ]
+                        [ (StationId sid, T.unpack (stationName station))
+                        | (StationId sid, station) <- stations ]
                 putStr (displayScheduleCompact workerNames stationNames
                            Calendar.defaultHours (scStationHours skillCtx) s)
 
@@ -338,8 +338,8 @@ handleCommand st cmd = case cmd of
                         [ (userWorkerId u, T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
-                        [ (StationId sid, T.unpack (stationName st))
-                        | (StationId sid, st) <- stations ]
+                        [ (StationId sid, T.unpack (stationName station))
+                        | (StationId sid, station) <- stations ]
                     skillNames = Map.fromList
                         [ (sid, T.unpack (skillName sk))
                         | (sid, sk) <- skills ]
@@ -508,7 +508,7 @@ handleCommand st cmd = case cmd of
                         let workerNames = Map.fromList
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList [(s, T.unpack (stationName st)) | (s, st) <- stations]
+                            stationNames = Map.fromList [(s, T.unpack (stationName station)) | (s, station) <- stations]
                         displayViolationReport d workerNames stationNames violations
                         putStrLn ""
                 -- Load (possibly updated) draft assignments
@@ -565,8 +565,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName st))
-                                | (StationId sid, st) <- stations ]
+                                [ (StationId sid, T.unpack (stationName station))
+                                | (StationId sid, station) <- stations ]
                         putStr (displayScheduleTable workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
 
@@ -586,8 +586,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName st))
-                                | (StationId sid, st) <- stations ]
+                                [ (StationId sid, T.unpack (stationName station))
+                                | (StationId sid, station) <- stations ]
                         putStr (displayScheduleCompact workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
 
@@ -720,8 +720,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName st))
-                                | (StationId sid, st) <- stations ]
+                                [ (StationId sid, T.unpack (stationName station))
+                                | (StationId sid, station) <- stations ]
                             skillNames = Map.fromList
                                 [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
@@ -742,8 +742,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName st))
-                                | (StationId sid, st) <- stations ]
+                                [ (StationId sid, T.unpack (stationName station))
+                                | (StationId sid, station) <- stations ]
                         putStr (displayScheduleTable workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
@@ -780,8 +780,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName st))
-                                | (StationId sid, st) <- stations ]
+                                [ (StationId sid, T.unpack (stationName station))
+                                | (StationId sid, station) <- stations ]
                         putStr (displayScheduleCompact workerNames stationNames
                                    Calendar.defaultHours (scStationHours skillCtx) sched)
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
@@ -843,8 +843,8 @@ handleCommand st cmd = case cmd of
                                 [ (userWorkerId u, T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName st))
-                                | (StationId sid, st) <- stations ]
+                                [ (StationId sid, T.unpack (stationName station))
+                                | (StationId sid, station) <- stations ]
                             skillNames = Map.fromList
                                 [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
@@ -1140,48 +1140,87 @@ handleCommand st cmd = case cmd of
                 return ()
 
     -- Stations (admin)
-    StationAdd name -> requireAdmin st $ do
-        _sid <- SW.addStation (asRepo st) (T.pack name) 1 1
-        putStrLn ("Added station: " ++ name)
+    StationCreate name minStaff maxStaff -> requireAdmin st $ do
+        _sid <- SW.addStation (asRepo st) (T.pack name) minStaff maxStaff
+        putStrLn ("Created station: " ++ name)
 
     StationList -> do
         stations <- SW.listStations (asRepo st)
         if null stations
             then putStrLn "  (no stations)"
-            else mapM_ (\(_sid, st) ->
-                putStrLn ("  " ++ T.unpack (stationName st))
+            else mapM_ (\(_sid, station) ->
+                putStrLn ("  " ++ T.unpack (stationName station))
                 ) stations
 
-    StationRemove sid -> requireAdmin st $ do
-        SW.removeStation (asRepo st) (StationId sid)
-        putStrLn ("Removed station " ++ show sid)
+    StationDelete arg -> requireAdmin st $ withStationArg st arg $ \sid -> do
+        sname <- lookupStationName (asRepo st) sid
+        result <- SW.safeDeleteStation (asRepo st) sid
+        case result of
+            Right () -> putStrLn ("Deleted " ++ sname)
+            Left refs -> do
+                putStrLn ("Error: " ++ sname ++ " is still referenced:")
+                displayStationRefs refs
 
-    StationSetHours sid sh eh -> requireAdmin st $ do
-        SW.setStationHours (asRepo st) (StationId sid) sh eh
+    StationForceDelete arg -> requireAdmin st $ withStationArg st arg $ \sid -> do
+        refs <- SW.checkStationReferences (asRepo st) sid
+        if SW.isStationUnreferenced refs
+            then handleCommand st (StationDelete arg)
+            else do
+                wctx <- repoLoadWorkerCtx (asRepo st)
+                forM_ (SW.strWorkerPrefs refs) $ \(wid, _) ->
+                    let prefs = Map.findWithDefault [] wid (wcStationPrefs wctx)
+                        prefs' = filter (/= sid) prefs
+                        WorkerId w = wid
+                    in handleCommand st (WorkerSetPrefs w [s | StationId s <- prefs'])
+                forM_ (SW.strRequiredSkills refs) $ \(skid, _) ->
+                    handleCommand st (StationRemoveRequiredSkill arg skid)
+                handleCommand st (StationDelete arg)
+
+    StationRename oldArg newName -> requireAdmin st $ withStationArg st oldArg $ \sid -> do
+        oldName <- lookupStationName (asRepo st) sid
+        SW.renameStation (asRepo st) sid (T.pack newName)
+        putStrLn ("Renamed " ++ oldName ++ " to \"" ++ newName ++ "\"")
+
+    StationView arg -> withStationArg st arg $ \sid -> do
+        stations <- repoListStations (asRepo st)
+        case lookup sid stations of
+            Nothing -> putStrLn ("Unknown station: " ++ arg)
+            Just station -> do
+                sctx <- repoLoadSkillCtx (asRepo st)
+                wctx <- repoLoadWorkerCtx (asRepo st)
+                users <- repoListUsers (asRepo st)
+                skills <- repoListSkills (asRepo st)
+                let workerNames = Map.fromList
+                        [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
+                    skillNames = Map.fromList [(s, skillName sk) | (s, sk) <- skills]
+                putStr (displayStationView sid station sctx wctx workerNames skillNames)
+
+    StationSetHours arg sh eh -> requireAdmin st $ withStationArg st arg $ \sid -> do
+        SW.setStationHours (asRepo st) sid sh eh
         putStrLn ("Set station hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
 
-    StationSetMultiHours sid sh eh -> requireAdmin st $ do
-        SW.setMultiStationHours (asRepo st) (StationId sid) sh eh
+    StationSetMultiHours arg sh eh -> requireAdmin st $ withStationArg st arg $ \sid -> do
+        SW.setMultiStationHours (asRepo st) sid sh eh
         putStrLn ("Set station multi-station hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
 
-    StationCloseDay sid dayStr -> requireAdmin st $
+    StationCloseDay arg dayStr -> requireAdmin st $ withStationArg st arg $ \sid ->
         case parseDayOfWeek dayStr of
             Nothing -> putStrLn ("Unknown day: " ++ dayStr)
             Just dow -> do
-                SW.closeStationDay (asRepo st) (StationId sid) dow
+                SW.closeStationDay (asRepo st) sid dow
                 putStrLn ("Station closed on " ++ dayStr)
 
-    StationRequireSkill sid skid -> requireAdmin st $ do
+    StationRequireSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid -> do
         ctx <- repoLoadSkillCtx (asRepo st)
-        let current = Map.findWithDefault Set.empty (StationId sid) (scStationRequires ctx)
-        SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.insert skid current)
+        let current = Map.findWithDefault Set.empty sid (scStationRequires ctx)
+        SW.setStationRequiredSkills (asRepo st) sid (Set.insert skid current)
         sname <- lookupSkillName (asRepo st) skid
         putStrLn ("Station now requires skill " ++ sname)
 
-    StationRemoveRequiredSkill sid skid -> requireAdmin st $ do
+    StationRemoveRequiredSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid -> do
         ctx <- repoLoadSkillCtx (asRepo st)
-        let current = Map.findWithDefault Set.empty (StationId sid) (scStationRequires ctx)
-        SW.setStationRequiredSkills (asRepo st) (StationId sid) (Set.delete skid current)
+        let current = Map.findWithDefault Set.empty sid (scStationRequires ctx)
+        SW.setStationRequiredSkills (asRepo st) sid (Set.delete skid current)
         sname <- lookupSkillName (asRepo st) skid
         putStrLn ("Station no longer requires skill " ++ sname)
 
@@ -1213,7 +1252,7 @@ handleCommand st cmd = case cmd of
                 forM_ (SW.srWorkers refs) $ \(wid, _) ->
                     handleCommand st (WorkerRevokeSkill (let WorkerId w = wid in w) sid)
                 forM_ (SW.srStations refs) $ \(stid, _) ->
-                    handleCommand st (StationRemoveRequiredSkill (let StationId s = stid in s) sid)
+                    handleCommand st (StationRemoveRequiredSkill (show (let StationId s = stid in s)) sid)
                 forM_ (SW.srCrossTraining refs) $ \(wid, _) ->
                     handleCommand st (WorkerClearCrossTraining (let WorkerId w = wid in w) sid)
                 forM_ (SW.srImpliedBy refs) $ \(implier, _) ->
@@ -1254,7 +1293,7 @@ handleCommand st cmd = case cmd of
                 users <- repoListUsers (asRepo st)
                 stations <- repoListStations (asRepo st)
                 let workerNames = Map.fromList [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
-                    stationNames = Map.fromList [(s, T.unpack (stationName st)) | (s, st) <- stations]
+                    stationNames = Map.fromList [(s, T.unpack (stationName station)) | (s, station) <- stations]
                     skillNames = Map.fromList [(s, skillName sk') | (s, sk') <- skills]
                 putStr (displaySkillView sid sk ctx wctx workerNames stationNames skillNames)
 
@@ -1915,8 +1954,8 @@ loadNameMaps st = do
             [ (userWorkerId u, T.unpack uname)
             | u <- users, let Username uname = userName u ]
         stationNames = Map.fromList
-            [ (StationId sid, T.unpack (stationName st))
-            | (StationId sid, st) <- stations ]
+            [ (StationId sid, T.unpack (stationName station))
+            | (StationId sid, station) <- stations ]
         skillNames = Map.fromList
             [ (sid, T.unpack (skillName sk))
             | (sid, sk) <- skills ]
@@ -2466,6 +2505,45 @@ lookupSkillName repo sid = do
     case [sk | (sid', sk) <- skills, sid' == sid] of
         (sk:_) -> return (T.unpack (skillName sk))
         []     -> let SkillId s = sid in return ("Skill " ++ show s)
+
+lookupStationName :: Repository -> StationId -> IO String
+lookupStationName repo sid = do
+    stations <- repoListStations repo
+    case [station | (sid', station) <- stations, sid' == sid] of
+        (station:_) -> return (T.unpack (stationName station))
+        []          -> let StationId s = sid in return ("Station " ++ show s)
+
+-- | Resolve a station name or numeric ID string to a StationId.
+-- Names are matched case-insensitively.
+resolveStationArg :: Repository -> String -> IO (Either String StationId)
+resolveStationArg repo arg
+    | not (null arg) && all (`elem` ("0123456789" :: String)) arg =
+        return (Right (StationId (read arg)))
+    | otherwise = do
+        stations <- repoListStations repo
+        let argLower = T.toLower (T.pack arg)
+            matches = [ sid | (sid, station) <- stations
+                      , T.toLower (stationName station) == argLower ]
+        case matches of
+            [sid] -> return (Right sid)
+            []    -> return (Left ("Unknown station: " ++ arg))
+            _     -> return (Left ("Ambiguous station: " ++ arg))
+
+-- | Resolve a station name argument and run the action; print error otherwise.
+withStationArg :: AppState -> String -> (StationId -> IO ()) -> IO ()
+withStationArg st arg action = do
+    result <- resolveStationArg (asRepo st) arg
+    case result of
+        Left err  -> putStrLn err
+        Right sid -> action sid
+
+-- | Print the references that block a station deletion.
+displayStationRefs :: SW.StationReferences -> IO ()
+displayStationRefs refs = do
+    forM_ (SW.strWorkerPrefs refs) $ \(_wid, name) ->
+        putStrLn ("  " ++ name ++ " has this station in their preferences")
+    forM_ (SW.strRequiredSkills refs) $ \(_skid, name) ->
+        putStrLn ("  " ++ name ++ " is a required skill at this station")
 
 absenceNameMaps :: Repository -> IO (Map.Map WorkerId String, Map.Map AbsenceTypeId String)
 absenceNameMaps repo = do

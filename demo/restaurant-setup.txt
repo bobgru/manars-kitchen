@@ -38,13 +38,13 @@ skill implication sandwich register
 skill implication beverage register
 
 # === Stations ===
-station add grill
-station add pizza
-station add sandwich
-station add beverage
-station add receiving
-station add register
-station add busboy
+station create grill
+station create pizza
+station create sandwich
+station create beverage
+station create receiving
+station create register
+station create busboy
 
 station require-skill grill grill
 station require-skill pizza pizza

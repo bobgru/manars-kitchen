@@ -152,12 +152,21 @@ classifyUnassign _ = mutating etSchedule "unassign"
 -- Station
 classifyStation :: String -> [String] -> CommandMeta
 classifyStation op rest = case op of
-    "add" -> case rest of
-        (sid : _) -> (mutating etStation "add") { cmEntityId = readMaybe sid }
-        _         -> mutating etStation "add"
-    "remove" -> case rest of
-        (sid : _) -> (mutating etStation "remove") { cmEntityId = readMaybe sid }
-        _         -> mutating etStation "remove"
+    "create" -> case rest of
+        (sid : _) -> (mutating etStation "create") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "create"
+    "delete" -> case rest of
+        (sid : _) -> (mutating etStation "delete") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "delete"
+    "force-delete" -> case rest of
+        (sid : _) -> (mutating etStation "force-delete") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "force-delete"
+    "rename" -> case rest of
+        (sid : _) -> (mutating etStation "rename") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "rename"
+    "view" -> case rest of
+        (sid : _) -> (nonMutating etStation "view") { cmEntityId = readMaybe sid }
+        _         -> nonMutating etStation "view"
     "set-hours" -> case rest of
         (sid : _) -> (mutating etStation "set-hours") { cmEntityId = readMaybe sid }
         _         -> mutating etStation "set-hours"

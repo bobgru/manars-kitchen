@@ -12,6 +12,7 @@ module CLI.Display
     , displayAbsences
     , displaySkillCtx
     , displaySkillView
+    , displayStationView
     , displayWorkerCtx
     , displayAbsenceTypes
     , displayConfig
@@ -512,6 +513,29 @@ showSkillSet :: Set.Set SkillId -> String
 showSkillSet s
     | Set.null s = "(none)"
     | otherwise  = intercalate ", " [showSkill sk | sk <- Set.toList s]
+
+displayStationView :: StationId -> Station -> SkillContext -> WorkerContext
+                   -> Map.Map WorkerId String -> Map.Map SkillId Text -> String
+displayStationView sid station sctx wctx workerNames skillNames =
+    let namedSkill skid = Map.findWithDefault (T.pack $ showSkill skid) skid skillNames
+        namedWorker wid = Map.findWithDefault (showWorker wid) wid workerNames
+        required = Set.toList (Map.findWithDefault Set.empty sid (scStationRequires sctx))
+        prefs = [ (wid, namedWorker wid)
+                | (wid, ps) <- Map.toList (wcStationPrefs wctx)
+                , sid `elem` ps ]
+        hoursNote = showStationHoursNote sid sctx
+        hoursLine = if null hoursNote then "Hours: all" else "Hours" ++ hoursNote
+        StationId s = sid
+    in unlines $ concat
+        [ [T.unpack (stationName station) ++ " (" ++ show s ++ ")"]
+        , ["  Min staff: " ++ show (stationMinStaff station)]
+        , ["  Max staff: " ++ show (stationMaxStaff station)]
+        , ["  " ++ hoursLine]
+        , ["  Required skills: " ++ if null required then "(none)"
+            else intercalate ", " [T.unpack (namedSkill skid) | skid <- required]]
+        , ["  Worker preferences: " ++ if null prefs then "(none)"
+            else intercalate ", " [name | (_, name) <- prefs]]
+        ]
 
 displaySkillView :: SkillId -> Skill -> SkillContext -> WorkerContext
                  -> Map.Map WorkerId String -> Map.Map StationId String
