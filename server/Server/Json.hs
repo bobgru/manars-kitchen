@@ -15,6 +15,7 @@ module Server.Json
     , RenameSkillReq(..)
     , AddImplicationReq(..)
     , CreateStationReq(..)
+    , RenameStationReq(..)
     , SetStationHoursReq(..)
     , SetStationClosureReq(..)
     , CreateShiftReq(..)
@@ -55,6 +56,8 @@ module Server.Json
     , RebaseResultResp(..)
       -- * Skill references (for 409 response)
     , SkillReferencesResp(..)
+      -- * Station references (for 409 response)
+    , StationReferencesResp(..)
     ) where
 
 import Data.Aeson
@@ -163,6 +166,18 @@ instance ToJSON Skill where
 instance FromJSON Skill where
     parseJSON = withObject "Skill" $ \v ->
         Skill <$> v .: "name" <*> v .: "description"
+
+-- | Station serialized as {name, minStaff, maxStaff}
+instance ToJSON Station where
+    toJSON s = object
+        [ "name"     .= stationName s
+        , "minStaff" .= stationMinStaff s
+        , "maxStaff" .= stationMaxStaff s
+        ]
+
+instance FromJSON Station where
+    parseJSON = withObject "Station" $ \v ->
+        Station <$> v .: "name" <*> v .: "minStaff" <*> v .: "maxStaff"
 
 -- | ShiftDef serialized as {name, start, end}
 instance ToJSON ShiftDef where
@@ -562,7 +577,7 @@ instance FromJSON AddImplicationReq where
         AddImplicationReq <$> v .: "impliesSkillName"
 
 data CreateStationReq = CreateStationReq
-    { cstrName     :: !String
+    { cstrName     :: !Text
     , cstrMinStaff :: !Int
     , cstrMaxStaff :: !Int
     } deriving (Show)
@@ -573,6 +588,17 @@ instance ToJSON CreateStationReq where
 instance FromJSON CreateStationReq where
     parseJSON = withObject "CreateStationReq" $ \v ->
         CreateStationReq <$> v .: "name" <*> (v .:? "minStaff" .!= (1 :: Int)) <*> (v .:? "maxStaff" .!= (1 :: Int))
+
+data RenameStationReq = RenameStationReq
+    { rstrName :: !Text
+    } deriving (Show)
+
+instance ToJSON RenameStationReq where
+    toJSON r = object ["name" .= rstrName r]
+
+instance FromJSON RenameStationReq where
+    parseJSON = withObject "RenameStationReq" $ \v ->
+        RenameStationReq <$> v .: "name"
 
 data SetStationHoursReq = SetStationHoursReq
     { sshrStart :: !Int
@@ -974,6 +1000,18 @@ instance ToJSON SkillReferencesResp where
         , "crossTraining" .= [object ["name" .= n] | (_, n) <- SW.srCrossTraining refs]
         , "impliedBy"     .= [object ["name" .= n] | (_, n) <- SW.srImpliedBy refs]
         , "implies"       .= [object ["name" .= n] | (_, n) <- SW.srImplies refs]
+        ]
+
+-- -----------------------------------------------------------------
+-- Station references (409 response for safe delete)
+-- -----------------------------------------------------------------
+
+newtype StationReferencesResp = StationReferencesResp SW.StationReferences
+
+instance ToJSON StationReferencesResp where
+    toJSON (StationReferencesResp refs) = object
+        [ "workerPrefs"    .= [object ["name" .= n] | (_, n) <- SW.strWorkerPrefs refs]
+        , "requiredSkills" .= [object ["name" .= n] | (_, n) <- SW.strRequiredSkills refs]
         ]
 
 -- -----------------------------------------------------------------

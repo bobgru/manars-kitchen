@@ -27,7 +27,7 @@ import System.Directory (removeFile, doesFileExist)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Auth.Types (Role(..), User(..))
-import Domain.Types (WorkerId(..), SkillId(..), AbsenceTypeId(..), Schedule(..))
+import Domain.Types (WorkerId(..), SkillId(..), AbsenceTypeId(..), Schedule(..), Station)
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
@@ -65,7 +65,7 @@ logoutC          :: ClientM NoContent
 
 -- Original endpoints
 listSkillsC      :: ClientM [Skill]
-listStationsC    :: ClientM [(Int, Text)]
+listStationsC    :: ClientM [Station]
 listShiftsC      :: ClientM [ShiftDef]
 listSchedulesC   :: ClientM [Text]
 getScheduleC     :: String -> ClientM Schedule
@@ -95,10 +95,12 @@ _addImplicationC :: Text -> AddImplicationReq -> ClientM NoContent
 _removeImplicationC :: Text -> Text -> ClientM NoContent
 
 -- Station CRUD
-createStationC    :: CreateStationReq -> ClientM NoContent
-_deleteStationC   :: Int -> ClientM NoContent
-setStationHoursC  :: Int -> SetStationHoursReq -> ClientM NoContent
-_setStationClosureC :: Int -> SetStationClosureReq -> ClientM NoContent
+createStationC      :: CreateStationReq -> ClientM NoContent
+_deleteStationC     :: Text -> ClientM NoContent
+_forceDeleteStationC :: Text -> ClientM NoContent
+_renameStationC     :: Text -> RenameStationReq -> ClientM NoContent
+setStationHoursC    :: Text -> SetStationHoursReq -> ClientM NoContent
+_setStationClosureC :: Text -> SetStationClosureReq -> ClientM NoContent
 
 -- Shift CRUD
 createShiftC     :: CreateShiftReq -> ClientM NoContent
@@ -199,6 +201,8 @@ logoutC
     :<|> _removeImplicationC
     :<|> createStationC
     :<|> _deleteStationC
+    :<|> _forceDeleteStationC
+    :<|> _renameStationC
     :<|> setStationHoursC
     :<|> _setStationClosureC
     :<|> createShiftC
@@ -676,7 +680,7 @@ spec = do
 
         it "set station hours" $ withTestApp $ \env -> do
             Right _ <- runClientM (createStationC (CreateStationReq "grill" 1 1)) env
-            Right _ <- runClientM (setStationHoursC 1 (SetStationHoursReq 9 17)) env
+            Right _ <- runClientM (setStationHoursC "grill" (SetStationHoursReq 9 17)) env
             pure ()  -- no error means success
 
     describe "Shift CRUD" $ do

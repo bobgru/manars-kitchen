@@ -67,13 +67,22 @@ lookupSkillName repo sid = do
         Just sk -> return (T.unpack (skillName sk))
         Nothing -> let SkillId i = sid in return (show i)
 
+-- | Resolve a station name to a StationId; throws 404 if not found.
+resolveStationName :: Repository -> Text -> Handler StationId
+resolveStationName repo name = do
+    stations <- liftIO $ repoListStations repo
+    let nameLower = T.toLower name
+    case [sid | (sid, st) <- stations, T.toLower (stationName st) == nameLower] of
+        (sid:_) -> pure sid
+        []      -> throwApiError (NotFound ("Unknown station: " ++ T.unpack name))
+
 -- | Look up a station name by ID; returns the ID as a string if not found.
-lookupStationName :: Repository -> StationId -> IO String
+lookupStationName :: Repository -> StationId -> IO Text
 lookupStationName repo stid = do
     stations <- repoListStations repo
     case lookup stid stations of
-        Just st -> return (T.unpack (stationName st))
-        Nothing -> let StationId i = stid in return (show i)
+        Just st -> return (stationName st)
+        Nothing -> let StationId i = stid in return (T.pack (show i))
 
 -- | Look up a worker name by ID; returns the ID as a string if not found.
 lookupWorkerName :: Repository -> WorkerId -> IO String
@@ -121,6 +130,8 @@ server execEnv cmdBus repo user =
     -- Station CRUD
     :<|> handleCreateStation cmdBus repo user
     :<|> handleDeleteStation cmdBus repo user
+    :<|> handleForceDeleteStation execEnv repo user
+    :<|> handleRenameStation cmdBus repo user
     :<|> handleSetStationHours cmdBus repo user
     :<|> handleSetStationClosure cmdBus repo user
     -- Shift CRUD
@@ -202,10 +213,10 @@ handleListSkills repo = do
     skills <- liftIO $ SW.listSkills repo
     pure [sk | (_, sk) <- skills]
 
-handleListStations :: Repository -> Handler [(Int, T.Text)]
+handleListStations :: Repository -> Handler [Station]
 handleListStations repo = do
     stations <- liftIO $ SW.listStations repo
-    pure [(i, stationName st) | (StationId i, st) <- stations]
+    pure [st | (_, st) <- stations]
 
 handleListShifts :: Repository -> Handler [ShiftDef]
 handleListShifts repo = liftIO $ repoLoadShifts repo
@@ -434,32 +445,53 @@ handleRemoveImplication cmdBus repo user name impliedName = do
 handleCreateStation :: TopicBus CommandEvent -> Repository -> User -> CreateStationReq -> Handler NoContent
 handleCreateStation cmdBus repo user req = do
     requireAdmin user
-    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req)) (cstrMinStaff req) (cstrMaxStaff req)
-    logRest cmdBus user ("station add " ++ shellQuote (cstrName req))
+    _sid <- liftIO $ SW.addStation repo (cstrName req) (cstrMinStaff req) (cstrMaxStaff req)
+    logRest cmdBus user ("station create " ++ shellQuote (T.unpack (cstrName req)))
     pure NoContent
 
-handleDeleteStation :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
-handleDeleteStation cmdBus repo user sid = do
+handleDeleteStation :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
+handleDeleteStation cmdBus repo user name = do
     requireAdmin user
-    sName <- liftIO $ lookupStationName repo (StationId sid)
-    liftIO $ SW.removeStation repo (StationId sid)
-    logRest cmdBus user ("station remove " ++ shellQuote sName)
+    sid <- resolveStationName repo name
+    result <- liftIO $ SW.safeDeleteStation repo sid
+    case result of
+        Right () -> do
+            logRest cmdBus user ("station delete " ++ shellQuote (T.unpack name))
+            pure NoContent
+        Left refs -> throwError $ err409
+            { errBody = encode (toJSON (StationReferencesResp refs))
+            , errHeaders = [("Content-Type", "application/json")]
+            }
+
+handleForceDeleteStation :: ExecuteEnv -> Repository -> User -> Text -> Handler NoContent
+handleForceDeleteStation execEnv repo user name = do
+    requireAdmin user
+    _ <- resolveStationName repo name
+    _ <- liftIO $ executeCommandText execEnv user ("station force-delete " ++ shellQuote (T.unpack name))
     pure NoContent
 
-handleSetStationHours :: TopicBus CommandEvent -> Repository -> User -> Int -> SetStationHoursReq -> Handler NoContent
-handleSetStationHours cmdBus repo user sid req = do
+handleRenameStation :: TopicBus CommandEvent -> Repository -> User -> Text -> RenameStationReq -> Handler NoContent
+handleRenameStation cmdBus repo user name req = do
     requireAdmin user
-    sName <- liftIO $ lookupStationName repo (StationId sid)
-    liftIO $ SW.setStationHours repo (StationId sid) (sshrStart req) (sshrEnd req)
-    logRest cmdBus user ("station set-hours " ++ shellQuote sName ++ " " ++ show (sshrStart req) ++ " " ++ show (sshrEnd req))
+    sid <- resolveStationName repo name
+    liftIO $ SW.renameStation repo sid (rstrName req)
+    logRest cmdBus user ("station rename " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack (rstrName req)))
     pure NoContent
 
-handleSetStationClosure :: TopicBus CommandEvent -> Repository -> User -> Int -> SetStationClosureReq -> Handler NoContent
-handleSetStationClosure cmdBus repo user sid req = do
+handleSetStationHours :: TopicBus CommandEvent -> Repository -> User -> Text -> SetStationHoursReq -> Handler NoContent
+handleSetStationHours cmdBus repo user name req = do
     requireAdmin user
-    sName <- liftIO $ lookupStationName repo (StationId sid)
-    liftIO $ SW.closeStationDay repo (StationId sid) (sscrDay req)
-    logRest cmdBus user ("station close-day " ++ shellQuote sName ++ " " ++ show (sscrDay req))
+    sid <- resolveStationName repo name
+    liftIO $ SW.setStationHours repo sid (sshrStart req) (sshrEnd req)
+    logRest cmdBus user ("station set-hours " ++ shellQuote (T.unpack name) ++ " " ++ show (sshrStart req) ++ " " ++ show (sshrEnd req))
+    pure NoContent
+
+handleSetStationClosure :: TopicBus CommandEvent -> Repository -> User -> Text -> SetStationClosureReq -> Handler NoContent
+handleSetStationClosure cmdBus repo user name req = do
+    requireAdmin user
+    sid <- resolveStationName repo name
+    liftIO $ SW.closeStationDay repo sid (sscrDay req)
+    logRest cmdBus user ("station close-day " ++ shellQuote (T.unpack name) ++ " " ++ show (sscrDay req))
     pure NoContent
 
 -- -----------------------------------------------------------------
@@ -639,7 +671,7 @@ handleAddPin cmdBus repo user pin = do
     wName <- liftIO $ lookupWorkerName repo (pinWorker pin)
     sName <- liftIO $ lookupStationName repo (pinStation pin)
     liftIO $ SW.addPin repo pin
-    logRest cmdBus user ("pin " ++ shellQuote wName ++ " " ++ shellQuote sName)
+    logRest cmdBus user ("pin " ++ shellQuote wName ++ " " ++ shellQuote (T.unpack sName))
     pure NoContent
 
 handleRemovePin :: TopicBus CommandEvent -> Repository -> User -> PinnedAssignment -> Handler NoContent
@@ -648,7 +680,7 @@ handleRemovePin cmdBus repo user pin = do
     wName <- liftIO $ lookupWorkerName repo (pinWorker pin)
     sName <- liftIO $ lookupStationName repo (pinStation pin)
     liftIO $ SW.removePin repo pin
-    logRest cmdBus user ("unpin " ++ shellQuote wName ++ " " ++ shellQuote sName)
+    logRest cmdBus user ("unpin " ++ shellQuote wName ++ " " ++ shellQuote (T.unpack sName))
     pure NoContent
 
 -- -----------------------------------------------------------------

@@ -20,7 +20,7 @@ import Servant.API
 import Servant.Server.Experimental.Auth (AuthServerData)
 
 import Auth.Types (User)
-import Domain.Types (SkillId, Schedule)
+import Domain.Types (SkillId, Schedule, Station)
 import Domain.Skill (Skill)
 import Domain.Shift (ShiftDef)
 import Domain.Scheduler (ScheduleResult)
@@ -45,7 +45,7 @@ type RawAPI =
          "api" :> "logout" :> PostNoContent
 
     -- Stations (read)
-    :<|> "api" :> "stations" :> Get '[JSON] [(Int, Text)]
+    :<|> "api" :> "stations" :> Get '[JSON] [Station]
     -- Shifts (read)
     :<|> "api" :> "shifts" :> Get '[JSON] [ShiftDef]
     -- Schedules
@@ -94,10 +94,13 @@ type RawAPI =
     -- Station CRUD
     -- -----------------------------------------------------------------
     :<|> "api" :> "stations" :> ReqBody '[JSON] CreateStationReq :> PostNoContent
-    :<|> "api" :> "stations" :> Capture "id" Int :> DeleteNoContent
-    :<|> "api" :> "stations" :> Capture "id" Int :> "hours"
+    :<|> "api" :> "stations" :> Capture "name" Text :> DeleteNoContent
+    :<|> "api" :> "stations" :> Capture "name" Text :> "force" :> DeleteNoContent
+    :<|> "api" :> "stations" :> Capture "name" Text
+         :> ReqBody '[JSON] RenameStationReq :> PutNoContent
+    :<|> "api" :> "stations" :> Capture "name" Text :> "hours"
          :> ReqBody '[JSON] SetStationHoursReq :> PutNoContent
-    :<|> "api" :> "stations" :> Capture "id" Int :> "closure"
+    :<|> "api" :> "stations" :> Capture "name" Text :> "closure"
          :> ReqBody '[JSON] SetStationClosureReq :> PutNoContent
 
     -- -----------------------------------------------------------------

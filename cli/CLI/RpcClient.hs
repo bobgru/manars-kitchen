@@ -345,7 +345,7 @@ dispatchCommand env cmd = case cmd of
 
     -- Stations
     StationCreate name minStaff maxStaff -> requireAdmin env $
-        runOk env (cCreateStation (CreateStationReq name minStaff maxStaff))
+        runOk env (cCreateStation (CreateStationReq (T.pack name) minStaff maxStaff))
             "Station created."
 
     StationList -> do

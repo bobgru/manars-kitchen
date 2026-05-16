@@ -500,14 +500,14 @@ rpcListSkills repo _ = liftIO $ SW.listSkills repo
 
 rpcCreateStation :: TopicBus CommandEvent -> Repository -> CreateStationReq -> Handler RpcOk
 rpcCreateStation cmdBus repo req = do
-    _sid <- liftIO $ SW.addStation repo (T.pack (cstrName req)) (cstrMinStaff req) (cstrMaxStaff req)
-    logRpcBus cmdBus ("station add " ++ shellQuote (cstrName req))
+    _sid <- liftIO $ SW.addStation repo (cstrName req) (cstrMinStaff req) (cstrMaxStaff req)
+    logRpcBus cmdBus ("station create " ++ shellQuote (T.unpack (cstrName req)))
     pure RpcOk
 
 rpcDeleteStation :: TopicBus CommandEvent -> Repository -> RpcStationId -> Handler RpcOk
 rpcDeleteStation cmdBus repo req = do
     liftIO $ SW.removeStation repo (StationId (rstId req))
-    logRpcBus cmdBus ("station remove " ++ show (rstId req))
+    logRpcBus cmdBus ("station delete " ++ show (rstId req))
     pure RpcOk
 
 rpcSetStationHours :: TopicBus CommandEvent -> Repository -> RpcStationHours -> Handler RpcOk
