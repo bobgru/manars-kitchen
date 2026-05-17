@@ -1,16 +1,17 @@
 ## ADDED Requirements
 
 ### Requirement: Entity arguments accept names or IDs
-The system SHALL accept entity names in addition to numeric IDs for all command arguments that reference workers, skills, stations, or absence types. Numeric IDs SHALL continue to work as before. The system SHALL resolve names to IDs before executing the command.
+The system SHALL accept entity names in addition to numeric IDs for all command arguments that reference workers, skills, stations, or absence types. Numeric IDs SHALL continue to work as before. The system SHALL resolve names to IDs before executing the command. After this change, **every** command that references a worker accepts a worker name; previously this was true for many but not all worker verbs.
 
-Station commands SHALL use the following verb names:
+Station commands SHALL use the following verb names (unchanged from the prior version):
 - `station create` (formerly `station add`)
 - `station delete` (formerly `station remove`)
-- `station force-delete` (new)
-- `station rename` (new)
-- `station view` (new)
+- `station force-delete`
+- `station rename`
+- `station view`
 
-The resolver's `commandEntityMap` SHALL be updated to use the new verb names.
+Worker resolution SHALL delegate to `Service.Worker.resolveWorkerByName`, which distinguishes three error categories: (1) user not found, (2) user exists but `worker_status = 'none'` (not a worker), (3) user is a worker (active or inactive). The resolver's `commandEntityMap` SHALL list all worker-keyed verbs:
+`worker grant-skill`, `worker revoke-skill`, `worker set-hours`, `worker set-overtime`, `worker set-prefs`, `worker set-shift-pref`, `worker set-variety`, `worker set-weekend-only`, `worker set-status`, `worker set-overtime-model`, `worker set-pay-tracking`, `worker set-temp`, `worker set-seniority`, `worker set-cross-training`, `worker clear-cross-training`, `worker avoid-pairing`, `worker clear-avoid-pairing`, `worker prefer-pairing`, `worker clear-prefer-pairing`, `worker view`, `worker deactivate`, `worker activate`, `worker delete`, `worker force-delete`, `pin`, `unpin`, `assign`, `unassign`, and the worker-referencing `what-if` verbs.
 
 #### Scenario: Worker referenced by name
 - **WHEN** user types `worker grant-skill marco grill`
@@ -31,6 +32,14 @@ The resolver's `commandEntityMap` SHALL be updated to use the new verb names.
 #### Scenario: Station rename resolution
 - **WHEN** user types `station rename "Grill" "Main Grill"`
 - **THEN** system resolves "Grill" to the station ID; "Main Grill" is passed through as the new name (not resolved)
+
+#### Scenario: Worker resolver distinguishes "not a worker"
+- **WHEN** user types `worker set-hours admin-only 40` and `admin-only` is a user with `worker_status = 'none'`
+- **THEN** system displays a "not a worker" error distinct from "not found"
+
+#### Scenario: Worker resolver permits inactive workers
+- **WHEN** user types `worker set-hours alice 40` and alice's status is `inactive`
+- **THEN** system resolves alice and updates her stored hours; she remains inactive
 
 ### Requirement: Name resolution is case-insensitive
 The system SHALL resolve entity names case-insensitively. If the user types "Marco", "marco", or "MARCO", all SHALL resolve to the same worker.
