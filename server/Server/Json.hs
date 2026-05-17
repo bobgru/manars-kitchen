@@ -50,6 +50,10 @@ module Server.Json
     , SetAbsenceAllowanceReq(..)
       -- * Users
     , CreateUserReq(..)
+    , RenameUserReq(..)
+    , WorkerProfileResp(..)
+    , WorkerReferencesResp(..)
+    , DeactivateResultResp(..)
       -- * Hint sessions
     , AddHintReq(..)
     , HintSessionRef(..)
@@ -74,7 +78,7 @@ import Data.Time
     , formatTime, defaultTimeLocale, parseTimeM
     )
 
-import Auth.Types (User(..), UserId(..), Username(..), Role(..))
+import Auth.Types (User(..), UserId(..), Username(..), Role(..), userIdToWorkerId)
 import Domain.Types
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef(..))
@@ -425,15 +429,24 @@ instance FromJSON Role where
 
 instance ToJSON User where
     toJSON u = object
-        [ "id"       .= userId u
-        , "username" .= userName u
-        , "role"     .= userRole u
-        , "workerId" .= userWorkerId u
+        [ "id"            .= userId u
+        , "username"      .= userName u
+        , "role"          .= userRole u
+        , "workerId"      .= userIdToWorkerId (userId u)
+        , "workerStatus"  .= workerStatusToText (userWorkerStatus u)
+        , "deactivatedAt" .= fmap show (userDeactivatedAt u)
         ]
 
 instance FromJSON User where
-    parseJSON = withObject "User" $ \v ->
-        User <$> v .: "id" <*> v .: "username" <*> pure "" <*> v .: "role" <*> v .: "workerId"
+    parseJSON = withObject "User" $ \v -> do
+        i <- v .: "id"
+        n <- v .: "username"
+        r <- v .: "role"
+        ws <- v .:? "workerStatus" .!= "active"
+        let status = case textToWorkerStatus ws of
+                Just s  -> s
+                Nothing -> WSActive
+        return $ User i n "" r status Nothing
 
 -- -----------------------------------------------------------------
 -- Pin types
@@ -925,19 +938,134 @@ data CreateUserReq = CreateUserReq
     { curUsername :: !T.Text
     , curPassword :: !T.Text
     , curRole     :: !Role
-    , curWorkerId :: !Int
+    , curNoWorker :: !Bool
     } deriving (Show)
 
 instance ToJSON CreateUserReq where
     toJSON r = object
         [ "username" .= curUsername r, "password" .= curPassword r
-        , "role" .= curRole r, "workerId" .= curWorkerId r
+        , "role"     .= curRole r,     "noWorker" .= curNoWorker r
         ]
 
 instance FromJSON CreateUserReq where
     parseJSON = withObject "CreateUserReq" $ \v ->
         CreateUserReq <$> v .: "username" <*> v .: "password"
-                      <*> v .: "role" <*> v .: "workerId"
+                      <*> v .: "role" <*> v .:? "noWorker" .!= False
+
+-- | Request body for renaming a user (= renaming a worker).
+newtype RenameUserReq = RenameUserReq { rurNewName :: T.Text }
+    deriving (Show)
+
+instance ToJSON RenameUserReq where
+    toJSON r = object ["name" .= rurNewName r]
+
+instance FromJSON RenameUserReq where
+    parseJSON = withObject "RenameUserReq" $ \v ->
+        RenameUserReq <$> v .: "name"
+
+-- | Worker view profile (from Service.Worker.WorkerProfile).
+data WorkerProfileResp = WorkerProfileResp
+    { wprName              :: !T.Text
+    , wprUserId            :: !Int
+    , wprWorkerId          :: !Int
+    , wprRole              :: !T.Text
+    , wprStatus            :: !T.Text
+    , wprDeactivatedAt     :: !(Maybe T.Text)
+    , wprOvertimeModel     :: !T.Text
+    , wprPayPeriodTracking :: !T.Text
+    , wprIsTemp            :: !Bool
+    , wprMaxPeriodHours    :: !(Maybe Int)
+    , wprOvertimeOptIn     :: !Bool
+    , wprWeekendOnly       :: !Bool
+    , wprPrefersVariety    :: !Bool
+    , wprSeniority         :: !Int
+    , wprSkills            :: ![T.Text]
+    , wprStationPrefs      :: ![T.Text]
+    , wprShiftPrefs        :: ![T.Text]
+    , wprCrossTraining     :: ![T.Text]
+    , wprAvoidPairing      :: ![T.Text]
+    , wprPreferPairing     :: ![T.Text]
+    } deriving (Show)
+
+instance ToJSON WorkerProfileResp where
+    toJSON p = object
+        [ "name"              .= wprName p
+        , "userId"            .= wprUserId p
+        , "workerId"          .= wprWorkerId p
+        , "role"              .= wprRole p
+        , "status"            .= wprStatus p
+        , "deactivatedAt"     .= wprDeactivatedAt p
+        , "overtimeModel"     .= wprOvertimeModel p
+        , "payPeriodTracking" .= wprPayPeriodTracking p
+        , "isTemp"            .= wprIsTemp p
+        , "maxPeriodHours"    .= wprMaxPeriodHours p
+        , "overtimeOptIn"     .= wprOvertimeOptIn p
+        , "weekendOnly"       .= wprWeekendOnly p
+        , "prefersVariety"    .= wprPrefersVariety p
+        , "seniority"         .= wprSeniority p
+        , "skills"            .= wprSkills p
+        , "stationPrefs"      .= wprStationPrefs p
+        , "shiftPrefs"        .= wprShiftPrefs p
+        , "crossTraining"     .= wprCrossTraining p
+        , "avoidPairing"      .= wprAvoidPairing p
+        , "preferPairing"     .= wprPreferPairing p
+        ]
+
+-- | References blocking a 'worker delete' (mirror of Skill/StationReferencesResp).
+data WorkerReferencesResp = WorkerReferencesResp
+    { wrrConfiguration :: ![T.Text]
+    , wrrSchedule      :: ![T.Text]
+    } deriving (Show)
+
+instance ToJSON WorkerReferencesResp where
+    toJSON r = object
+        [ "configuration" .= wrrConfiguration r
+        , "schedule"      .= wrrSchedule r
+        ]
+
+-- | Result of a 'worker deactivate' call: counts removed.
+data DeactivateResultResp = DeactivateResultResp
+    { drrPinsRemoved     :: !Int
+    , drrDraftsRemoved   :: !Int
+    , drrCalendarRemoved :: !Int
+    } deriving (Show)
+
+instance ToJSON DeactivateResultResp where
+    toJSON r = object
+        [ "pinsRemoved"     .= drrPinsRemoved r
+        , "draftsRemoved"   .= drrDraftsRemoved r
+        , "calendarRemoved" .= drrCalendarRemoved r
+        ]
+
+instance FromJSON DeactivateResultResp where
+    parseJSON = withObject "DeactivateResultResp" $ \v ->
+        DeactivateResultResp <$> v .: "pinsRemoved"
+                             <*> v .: "draftsRemoved"
+                             <*> v .: "calendarRemoved"
+
+instance FromJSON WorkerProfileResp where
+    parseJSON = withObject "WorkerProfileResp" $ \v ->
+        WorkerProfileResp
+            <$> v .:  "name"
+            <*> v .:  "userId"
+            <*> v .:  "workerId"
+            <*> v .:  "role"
+            <*> v .:  "status"
+            <*> v .:? "deactivatedAt"
+            <*> v .:  "overtimeModel"
+            <*> v .:  "payPeriodTracking"
+            <*> v .:  "isTemp"
+            <*> v .:? "maxPeriodHours"
+            <*> v .:  "overtimeOptIn"
+            <*> v .:  "weekendOnly"
+            <*> v .:  "prefersVariety"
+            <*> v .:  "seniority"
+            <*> v .:  "skills"
+            <*> v .:  "stationPrefs"
+            <*> v .:  "shiftPrefs"
+            <*> v .:  "crossTraining"
+            <*> v .:  "avoidPairing"
+            <*> v .:  "preferPairing"
 
 -- -----------------------------------------------------------------
 -- Hint session types

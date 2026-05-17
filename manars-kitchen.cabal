@@ -38,6 +38,7 @@ library
                      , Repo.Serialize
                      , Repo.SQLite
                      , Service.Auth
+                     , Service.User
                      , Service.Schedule
                      , Service.Worker
                      , Service.Absence
@@ -123,6 +124,7 @@ test-suite manars-kitchen-unit-test
                      , DraftValidationSpec
                      , FreezeLineSpec
                      , ShellWordsSpec
+                     , TestSeed
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen
@@ -149,7 +151,7 @@ test-suite manars-kitchen-integration-test
   hs-source-dirs:      test
                      , cli
   main-is:             IntegrationSpec.hs
-  other-modules:       
+  other-modules:
                        HintIntegrationSpec
                      , HintSessionSpec
                      , HintE2ESpec
@@ -159,6 +161,7 @@ test-suite manars-kitchen-integration-test
                      , ApiSpec
                      , ShellWordsSpec
                      , CLI.RpcClient
+                     , TestSeed
   default-language:    Haskell2010
   build-depends:       base >= 4.7 && < 5
                      , manars-kitchen

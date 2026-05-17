@@ -8,7 +8,7 @@ import System.Directory (removeFile, doesFileExist)
 
 import Data.Text (Text)
 import Auth.Types (UserId, Role(..))
-import Domain.Types (WorkerId(..))
+-- (no longer importing WorkerId — register no longer takes one)
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..))
 import Service.Auth (register)
@@ -76,7 +76,7 @@ withTestRepo action = do
 -- | Helper: create a test user and return their UserId.
 createTestUser :: Repository -> Text -> IO UserId
 createTestUser repo name = do
-    result <- register repo name "password" Admin (WorkerId 1)
+    result <- register repo name "password" Admin False
     case result of
         Right uid -> return uid
         Left err  -> error $ "Failed to create test user: " ++ show err

@@ -32,7 +32,7 @@ import Servant
 import Servant.Server.Experimental.Auth (AuthHandler, mkAuthHandler)
 import Data.Aeson (encode)
 
-import Auth.Types (User(..), UserId(..), Username(..), Role(..))
+import Auth.Types (User(..), UserId(..), Username(..), Role(..), userIdToWorkerId)
 import Domain.Types (WorkerId(..))
 import Repo.Types (Repository(..))
 import qualified Service.Auth as SAuth
@@ -87,7 +87,7 @@ requireAdmin u = when (userRole u /= Admin) $
 -- | Require the user to be Admin or the worker ID to match. Throws 403 if not.
 requireSelfOrAdmin :: User -> Int -> Handler ()
 requireSelfOrAdmin u wid =
-    when (userRole u /= Admin && userWorkerId u /= WorkerId wid) $
+    when (userRole u /= Admin && userIdToWorkerId (userId u) /= WorkerId wid) $
         throwError $ jsonError err403 "Forbidden"
 
 -- -----------------------------------------------------------------
@@ -150,7 +150,7 @@ handleLogin repo req = do
             (_sid, tok) <- liftIO $ repoCreateSession repo (userId user)
             let UserId uid = userId user
                 Username uname = userName user
-                WorkerId wid = userWorkerId user
+                WorkerId wid = userIdToWorkerId (userId user)
                 roleStr :: Text
                 roleStr = case userRole user of
                     Admin  -> "admin"

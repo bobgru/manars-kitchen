@@ -8,7 +8,7 @@ import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (formatTime, defaultTimeLocale)
 
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
-import Domain.Types (WorkerId(..))
+-- (worker IDs no longer allocated explicitly; users get worker_id == user_id)
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), SessionId(..))
 import Service.Auth (register, login)
@@ -72,7 +72,7 @@ ensureAdminExists repo = do
     users <- repoListUsers repo
     case filter (\u -> userRole u == Admin) users of
         [] -> do
-            result <- register repo (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
+            result <- register repo (T.pack "admin") (T.pack "admin") Admin False
             case result of
                 Right _uid ->
                     putStrLn "Created default admin user (admin/admin), Worker 1"

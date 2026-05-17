@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Domain.Types
     ( WorkerId(..)
     , StationId(..)
@@ -5,6 +6,9 @@ module Domain.Types
     , SkillId(..)
     , AbsenceId(..)
     , AbsenceTypeId(..)
+    , WorkerStatus(..)
+    , workerStatusToText
+    , textToWorkerStatus
     , Slot(..)
     , Assignment(..)
     , Schedule(..)
@@ -63,6 +67,24 @@ newtype AbsenceId = AbsenceId Int
 -- can be added as data without code changes.
 newtype AbsenceTypeId = AbsenceTypeId Int
     deriving (Eq, Ord, Show, Read)
+
+-- | The worker-status of a user. 'WSNone' means the user is not a worker
+-- (e.g., admin-only account). 'WSActive' means a worker who participates
+-- in scheduling. 'WSInactive' means a worker whose configuration is
+-- preserved but who is not currently being scheduled.
+data WorkerStatus = WSNone | WSActive | WSInactive
+    deriving (Eq, Ord, Show, Read, Enum, Bounded)
+
+workerStatusToText :: WorkerStatus -> Text
+workerStatusToText WSNone     = "none"
+workerStatusToText WSActive   = "active"
+workerStatusToText WSInactive = "inactive"
+
+textToWorkerStatus :: Text -> Maybe WorkerStatus
+textToWorkerStatus "none"     = Just WSNone
+textToWorkerStatus "active"   = Just WSActive
+textToWorkerStatus "inactive" = Just WSInactive
+textToWorkerStatus _          = Nothing
 
 -- | Terminal unit: a specific time interval on a specific date.
 -- Starts as 1-hour granularity but the algebra does not assume that.

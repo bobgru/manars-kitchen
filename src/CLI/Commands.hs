@@ -72,9 +72,17 @@ data Command
     | AbsenceListMine
     | VacationRemaining Int              -- ^ type-id
     -- Users (admin)
-    | UserCreate String String String    -- ^ username password role
+    | UserCreate String String String Bool    -- ^ username password role no-worker?
     | UserList
+    | UserRename String String                -- ^ old new username
     | UserDelete Int
+    | UserForceDelete Int
+    -- Worker entity (admin)
+    | WorkerView String                       -- ^ name
+    | WorkerDeactivate String
+    | WorkerActivate String
+    | WorkerDelete String
+    | WorkerForceDelete String
     -- Config
     | ConfigShow
     | ConfigSet String String       -- ^ key value
@@ -260,10 +268,20 @@ parseCommand input = case shellWords input of
     ["vacation", "remaining", tid]
         | isDigit' tid -> VacationRemaining (read tid)
 
-    ["user", "create", name, pass, role] -> UserCreate name pass role
+    ["user", "create", name, pass, role] -> UserCreate name pass role False
+    ["user", "create", name, pass, role, "--no-worker"] -> UserCreate name pass role True
     ["user", "list"]               -> UserList
+    ["user", "rename", oldName, newName] -> UserRename oldName newName
     ["user", "delete", uid]
         | isDigit' uid -> UserDelete (read uid)
+    ["user", "force-delete", uid]
+        | isDigit' uid -> UserForceDelete (read uid)
+
+    ["worker", "view", name]         -> WorkerView name
+    ["worker", "deactivate", name]   -> WorkerDeactivate name
+    ["worker", "activate", name]     -> WorkerActivate name
+    ["worker", "delete", name]       -> WorkerDelete name
+    ["worker", "force-delete", name] -> WorkerForceDelete name
 
     ["config", "show"]               -> ConfigShow
     ["config", "set", key, val]      -> ConfigSet key val

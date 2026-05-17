@@ -244,6 +244,14 @@ logoutC
     :<|> listUsersC
     :<|> _createUserC
     :<|> _deleteUserC
+    :<|> _renameUserC
+    :<|> _forceDeleteUserC
+    -- Worker entity
+    :<|> _viewWorkerC
+    :<|> _deactivateWorkerC
+    :<|> _activateWorkerC
+    :<|> _deleteWorkerC
+    :<|> _forceDeleteWorkerC
     -- Hint sessions
     :<|> _listHintsC
     :<|> _addHintC
@@ -468,7 +476,7 @@ loginAs env username password = do
 -- | App with admin user logged in. Provides authenticated ClientEnv.
 withTestApp :: (ClientEnv -> IO ()) -> IO ()
 withTestApp action = withServer $ \repo port -> do
-    _ <- register repo "admin" "password" Admin (WorkerId 1)
+    _ <- register repo "admin" "password" Admin False
     pEnv <- mkPlainEnv port
     token <- loginAs pEnv "admin" "password"
     aEnv <- mkAuthEnv token port
@@ -477,7 +485,7 @@ withTestApp action = withServer $ \repo port -> do
 -- | App with admin + seed data + logged in.
 withSeededApp :: (Repository -> ClientEnv -> IO ()) -> IO ()
 withSeededApp action = withServer $ \repo port -> do
-    _ <- register repo "admin" "password" Admin (WorkerId 1)
+    _ <- register repo "admin" "password" Admin False
     repoSaveAbsenceCtx repo emptyAbsenceContext
         { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
         , acYearlyAllowance = Map.singleton (WorkerId 1, AbsenceTypeId 1) 10
@@ -490,7 +498,7 @@ withSeededApp action = withServer $ \repo port -> do
 -- | App with admin + seed data + both ClientEnv and RpcEnv.
 withRemoteApp :: (Repository -> ClientEnv -> RpcEnv -> IO ()) -> IO ()
 withRemoteApp action = withServer $ \repo port -> do
-    _ <- register repo "admin" "password" Admin (WorkerId 1)
+    _ <- register repo "admin" "password" Admin False
     repoSaveAbsenceCtx repo emptyAbsenceContext
         { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
         , acYearlyAllowance = Map.singleton (WorkerId 1, AbsenceTypeId 1) 10
@@ -859,7 +867,7 @@ spec = do
     describe "Login and Logout" $ do
         it "login with valid credentials returns token and user info" $
             withServer $ \repo port -> do
-                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                _ <- register repo "alice" "secret" Admin False
                 env <- mkPlainEnv port
                 result <- runClientM (loginC (LoginReq "alice" "secret")) env
                 case result of
@@ -871,7 +879,7 @@ spec = do
 
         it "login with invalid password returns 401" $
             withServer $ \repo port -> do
-                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                _ <- register repo "alice" "secret" Admin False
                 env <- mkPlainEnv port
                 result <- runClientM (loginC (LoginReq "alice" "wrong")) env
                 result `shouldFailWith` 401
@@ -884,7 +892,7 @@ spec = do
 
         it "logout invalidates the session" $
             withServer $ \repo port -> do
-                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                _ <- register repo "alice" "secret" Admin False
                 env <- mkPlainEnv port
                 token <- loginAs env "alice" "secret"
                 aEnv <- mkAuthEnv token port
@@ -913,7 +921,7 @@ spec = do
 
         it "login endpoint is accessible without token" $
             withServer $ \repo port -> do
-                _ <- register repo "alice" "secret" Admin (WorkerId 1)
+                _ <- register repo "alice" "secret" Admin False
                 env <- mkPlainEnv port
                 result <- runClientM (loginC (LoginReq "alice" "secret")) env
                 case result of
@@ -929,7 +937,7 @@ spec = do
             exists <- doesFileExist testDbPath
             if exists then removeFile testDbPath else pure ()
             (conn, repo) <- mkSQLiteRepo testDbPath
-            _ <- register repo "alice" "secret" Admin (WorkerId 1)
+            _ <- register repo "alice" "secret" Admin False
             execEnv <- newExecuteEnv repo
             let ctx = authHandler repo :. EmptyContext
                 app = serveWithContext fullApi ctx (fullServer execEnv repo)
@@ -955,7 +963,7 @@ spec = do
     describe "Role enforcement" $ do
         it "admin can access admin-only endpoints" $
             withServer $ \repo port -> do
-                _ <- register repo "admin" "pass" Admin (WorkerId 1)
+                _ <- register repo "admin" "pass" Admin False
                 env <- mkPlainEnv port
                 token <- loginAs env "admin" "pass"
                 aEnv <- mkAuthEnv token port
@@ -969,7 +977,7 @@ spec = do
 
         it "normal user is blocked from admin-only endpoints" $
             withServer $ \repo port -> do
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                _ <- register repo "worker1" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
@@ -983,7 +991,7 @@ spec = do
 
         it "normal user is blocked from creating drafts" $
             withServer $ \repo port -> do
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                _ <- register repo "worker1" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
@@ -992,7 +1000,7 @@ spec = do
 
         it "normal user can read public data" $
             withServer $ \repo port -> do
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                _ <- register repo "worker1" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
@@ -1010,7 +1018,7 @@ spec = do
     describe "Worker self-scoping" $ do
         it "worker can modify own settings" $
             withServer $ \repo port -> do
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                _ <- register repo "worker1" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
@@ -1020,7 +1028,7 @@ spec = do
 
         it "worker is blocked from modifying another worker" $
             withServer $ \repo port -> do
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                _ <- register repo "worker1" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
@@ -1030,7 +1038,8 @@ spec = do
 
         it "admin can modify any worker" $
             withServer $ \repo port -> do
-                _ <- register repo "admin" "pass" Admin (WorkerId 1)
+                _ <- register repo "admin" "pass" Admin False
+                _ <- register repo "extra-worker" "pass" Normal False  -- needed for FK on worker 2
                 env <- mkPlainEnv port
                 token <- loginAs env "admin" "pass"
                 aEnv <- mkAuthEnv token port
@@ -1041,7 +1050,7 @@ spec = do
 
         it "worker absence request is self-scoped" $
             withServer $ \repo port -> do
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                _ <- register repo "worker1" "pass" Normal False
                 repoSaveAbsenceCtx repo emptyAbsenceContext
                     { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
                     , acYearlyAllowance = Map.singleton (WorkerId 1, AbsenceTypeId 1) 10
@@ -1059,13 +1068,18 @@ spec = do
 
         it "normal user only sees own pending absences" $
             withServer $ \repo port -> do
-                _ <- register repo "admin" "pass" Admin (WorkerId 99)
-                _ <- register repo "worker1" "pass" Normal (WorkerId 1)
+                -- Admin has user_id=1 (= WorkerId 1)
+                _ <- register repo "admin" "pass" Admin False
+                -- worker1 has user_id=2 (= WorkerId 2)
+                _ <- register repo "worker1" "pass" Normal False
+                -- worker99 has user_id=3 (= WorkerId 3); used as the
+                -- "other worker" whose absences worker1 should NOT see.
+                _ <- register repo "worker99" "pass" Normal False
                 repoSaveAbsenceCtx repo emptyAbsenceContext
                     { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
                     , acYearlyAllowance = Map.fromList
-                        [ ((WorkerId 1, AbsenceTypeId 1), 10)
-                        , ((WorkerId 99, AbsenceTypeId 1), 10)
+                        [ ((WorkerId 2, AbsenceTypeId 1), 10)
+                        , ((WorkerId 3, AbsenceTypeId 1), 10)
                         ]
                     }
                 env <- mkPlainEnv port
@@ -1073,9 +1087,9 @@ spec = do
                 adminToken <- loginAs env "admin" "pass"
                 aEnv <- mkAuthEnv adminToken port
                 Right _ <- runClientM (requestAbsenceC
-                    (RequestAbsenceReq 1 1 (may 1) (may 3))) aEnv
+                    (RequestAbsenceReq 2 1 (may 1) (may 3))) aEnv
                 Right _ <- runClientM (requestAbsenceC
-                    (RequestAbsenceReq 99 1 (may 5) (may 7))) aEnv
+                    (RequestAbsenceReq 3 1 (may 5) (may 7))) aEnv
                 -- Admin sees all pending
                 Right adminPending <- runClientM listPendingAbsencesC aEnv
                 length adminPending `shouldBe` 2
@@ -1142,7 +1156,7 @@ spec = do
 
         it "streams GUI events to authenticated client" $
             withServer $ \repo port -> do
-                _ <- register repo "admin" "password" Admin (WorkerId 1)
+                _ <- register repo "admin" "password" Admin False
                 _ <- SW.addSkill repo "grill" ""
                 pEnv <- mkPlainEnv port
                 token <- loginAs pEnv "admin" "password"

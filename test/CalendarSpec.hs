@@ -16,6 +16,7 @@ import Repo.Types (Repository(..), CalendarCommit(..))
 import qualified Service.Calendar as Cal
 
 import System.Directory (removeFile, doesFileExist)
+import TestSeed (seedTestUsers)
 
 -- | Create a temporary in-memory-like SQLite repo for testing.
 -- Uses a temp file that is cleaned up after each test.
@@ -25,6 +26,7 @@ withTestRepo action = do
     exists <- doesFileExist path
     if exists then removeFile path else return ()
     (_, repo) <- mkSQLiteRepo path
+    seedTestUsers repo 9
     action repo
     removeFile path
 

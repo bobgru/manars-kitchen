@@ -8,7 +8,6 @@ module Service.Auth
 import Data.Text (Text)
 import Auth.Types (UserId, Role, User(..))
 import Auth.Password (hashPassword, checkPassword)
-import Domain.Types (WorkerId)
 import Repo.Types (Repository(..))
 
 data AuthError
@@ -19,8 +18,10 @@ data AuthError
     | WrongOldPassword
     deriving (Eq, Show)
 
-register :: Repository -> Text -> Text -> Role -> WorkerId -> IO (Either AuthError UserId)
-register repo name plainPass role wid = do
+-- | Register a user. The Bool flag is True when creating a non-worker
+-- (admin-only) user; False when the user is also a worker (status = 'active').
+register :: Repository -> Text -> Text -> Role -> Bool -> IO (Either AuthError UserId)
+register repo name plainPass role noWorker = do
     existing <- repoGetUserByName repo name
     case existing of
         Just _  -> return (Left UsernameTaken)
@@ -28,7 +29,7 @@ register repo name plainPass role wid = do
             mHash <- hashPassword plainPass
             case mHash of
                 Nothing   -> return (Left HashingFailed)
-                Just hash -> Right <$> repoCreateUser repo name hash role wid
+                Just hash -> Right <$> repoCreateUser repo name hash role noWorker
 
 login :: Repository -> Text -> Text -> IO (Either AuthError User)
 login repo name plainPass = do

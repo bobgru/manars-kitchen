@@ -33,6 +33,7 @@ import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Types
     ( WorkerId(..), StationId(..), Station(..), SkillId(..)
     , AbsenceId(..), AbsenceTypeId(..)
+    , WorkerStatus(..), workerStatusToText, textToWorkerStatus
     , Slot(..), Assignment(..), Schedule(..)
     )
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
@@ -56,6 +57,13 @@ mkSQLiteRepo path = do
         , repoUpdatePassword = sqlUpdatePassword conn
         , repoListUsers      = sqlListUsers conn
         , repoDeleteUser     = sqlDeleteUser conn
+        , repoRenameUser     = sqlRenameUser conn
+        , repoSetWorkerStatus = sqlSetWorkerStatus conn
+        , repoLoadWorkerIdsByStatus = sqlLoadWorkerIdsByStatus conn
+        , repoCascadeWorkerConfig = sqlCascadeWorkerConfig conn
+        , repoCascadeWorkerSchedule = sqlCascadeWorkerSchedule conn
+        , repoDeactivateClearings = sqlDeactivateClearings conn
+        , repoForceDeleteUser = sqlForceDeleteUser conn
         , repoCreateSkill    = sqlCreateSkill conn
         , repoDeleteSkill    = sqlDeleteSkill conn
         , repoListSkills     = sqlListSkills conn
@@ -124,30 +132,32 @@ mkSQLiteRepo path = do
 -- Users
 -- =====================================================================
 
-sqlCreateUser :: Connection -> Text -> Text -> Role -> WorkerId -> IO UserId
-sqlCreateUser conn name passHash role (WorkerId wid) = do
+sqlCreateUser :: Connection -> Text -> Text -> Role -> Bool -> IO UserId
+sqlCreateUser conn name passHash role noWorker = do
+    let status = if noWorker then WSNone else WSActive
     execute conn
-        "INSERT INTO users (username, password_hash, role, worker_id) VALUES (?, ?, ?, ?)"
-        (name, passHash, roleToText role, wid)
+        "INSERT INTO users (username, password_hash, role, worker_status, deactivated_at) \
+        \VALUES (?, ?, ?, ?, NULL)"
+        (name, passHash, roleToText role, workerStatusToText status)
     UserId . fromIntegral <$> lastInsertRowId conn
 
 sqlGetUser :: Connection -> UserId -> IO (Maybe User)
 sqlGetUser conn (UserId uid) = do
     rows <- query conn
-        "SELECT id, username, password_hash, role, worker_id FROM users WHERE id = ?"
+        "SELECT id, username, password_hash, role, worker_status, deactivated_at FROM users WHERE id = ?"
         (Only uid)
     return $ case rows of
-        [(i, n, h, r, w)] -> Just (toUser i n h r w)
-        _                 -> Nothing
+        [(i, n, h, r, ws, da)] -> Just (toUser i n h r ws da)
+        _                       -> Nothing
 
 sqlGetUserByName :: Connection -> Text -> IO (Maybe User)
 sqlGetUserByName conn name = do
     rows <- query conn
-        "SELECT id, username, password_hash, role, worker_id FROM users WHERE username = ?"
+        "SELECT id, username, password_hash, role, worker_status, deactivated_at FROM users WHERE username = ?"
         (Only name)
     return $ case rows of
-        [(i, n, h, r, w)] -> Just (toUser i n h r w)
-        _                 -> Nothing
+        [(i, n, h, r, ws, da)] -> Just (toUser i n h r ws da)
+        _                       -> Nothing
 
 sqlUpdatePassword :: Connection -> UserId -> Text -> IO ()
 sqlUpdatePassword conn (UserId uid) passHash =
@@ -155,20 +165,92 @@ sqlUpdatePassword conn (UserId uid) passHash =
 
 sqlListUsers :: Connection -> IO [User]
 sqlListUsers conn = do
-    rows <- query_ conn "SELECT id, username, password_hash, role, worker_id FROM users"
-    return [toUser i n h r w | (i, n, h, r, w) <- rows]
+    rows <- query_ conn "SELECT id, username, password_hash, role, worker_status, deactivated_at FROM users"
+    return [toUser i n h r ws da | (i, n, h, r, ws, da) <- rows]
 
 sqlDeleteUser :: Connection -> UserId -> IO ()
 sqlDeleteUser conn (UserId uid) =
     execute conn "DELETE FROM users WHERE id = ?" (Only uid)
 
-toUser :: Int -> Text -> Text -> Text -> Int -> User
-toUser i n h r w = User
-    { userId       = UserId i
-    , userName     = Username n
-    , userPassHash = h
-    , userRole     = textToRole r
-    , userWorkerId = WorkerId w
+sqlRenameUser :: Connection -> UserId -> Text -> IO ()
+sqlRenameUser conn (UserId uid) newName =
+    execute conn "UPDATE users SET username = ? WHERE id = ?" (newName, uid)
+
+sqlSetWorkerStatus :: Connection -> UserId -> WorkerStatus -> Maybe Day -> IO ()
+sqlSetWorkerStatus conn (UserId uid) status mDay =
+    execute conn
+        "UPDATE users SET worker_status = ?, deactivated_at = ? WHERE id = ?"
+        (workerStatusToText status, fmap dayToText mDay, uid)
+
+sqlLoadWorkerIdsByStatus :: Connection -> WorkerStatus -> IO [WorkerId]
+sqlLoadWorkerIdsByStatus conn status = do
+    rows <- query conn
+        "SELECT id FROM users WHERE worker_status = ?"
+        (Only (workerStatusToText status))
+        :: IO [Only Int]
+    return [WorkerId i | Only i <- rows]
+
+sqlCascadeWorkerConfig :: Connection -> WorkerId -> IO ()
+sqlCascadeWorkerConfig conn (WorkerId wid) = withTransaction conn $ do
+    execute conn "DELETE FROM worker_skills WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_hours WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_overtime_optin WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_station_prefs WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_prefers_variety WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_shift_prefs WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_weekend_only WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_seniority WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_avoid_pairing WHERE worker_id = ? OR other_id = ?" (wid, wid)
+    execute conn "DELETE FROM worker_prefer_pairing WHERE worker_id = ? OR other_id = ?" (wid, wid)
+    execute conn "DELETE FROM worker_cross_training WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM worker_employment WHERE worker_id = ?" (Only wid)
+
+sqlCascadeWorkerSchedule :: Connection -> WorkerId -> IO ()
+sqlCascadeWorkerSchedule conn (WorkerId wid) = withTransaction conn $ do
+    execute conn "DELETE FROM pinned_assignments WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM calendar_assignments WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM draft_assignments WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM assignments WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM absence_requests WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM yearly_allowances WHERE worker_id = ?" (Only wid)
+
+sqlDeactivateClearings :: Connection -> WorkerId -> Day -> IO (Int, Int, Int)
+sqlDeactivateClearings conn (WorkerId wid) today = withTransaction conn $ do
+    pinRows  <- query conn "SELECT COUNT(*) FROM pinned_assignments WHERE worker_id = ?"
+                    (Only wid) :: IO [Only Int]
+    drftRows <- query conn "SELECT COUNT(*) FROM draft_assignments WHERE worker_id = ?"
+                    (Only wid) :: IO [Only Int]
+    calRows  <- query conn
+                    "SELECT COUNT(*) FROM calendar_assignments WHERE worker_id = ? AND slot_date >= ?"
+                    (wid, dayToText today) :: IO [Only Int]
+    let pinCount = case pinRows of  { [Only n] -> n; _ -> 0 }
+        drftCount = case drftRows of { [Only n] -> n; _ -> 0 }
+        calCount = case calRows of   { [Only n] -> n; _ -> 0 }
+    execute conn "DELETE FROM pinned_assignments WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM draft_assignments WHERE worker_id = ?" (Only wid)
+    execute conn "DELETE FROM calendar_assignments WHERE worker_id = ? AND slot_date >= ?"
+        (wid, dayToText today)
+    return (pinCount, drftCount, calCount)
+
+sqlForceDeleteUser :: Connection -> UserId -> IO ()
+sqlForceDeleteUser conn uid@(UserId i) = withTransaction conn $ do
+    sqlCascadeWorkerSchedule conn (WorkerId i)
+    sqlCascadeWorkerConfig conn (WorkerId i)
+    execute conn "DELETE FROM users WHERE id = ?" (Only i)
+    -- silence unused binding warning
+    _ <- pure uid
+    return ()
+
+toUser :: Int -> Text -> Text -> Text -> Text -> Maybe Text -> User
+toUser i n h r ws da = User
+    { userId            = UserId i
+    , userName          = Username n
+    , userPassHash      = h
+    , userRole          = textToRole r
+    , userWorkerStatus  = case textToWorkerStatus ws of
+                            Just s  -> s
+                            Nothing -> WSNone
+    , userDeactivatedAt = fmap textToDay da
     }
 
 -- =====================================================================
@@ -427,51 +509,64 @@ sqlSaveWorkerCtx conn ctx = withTransaction conn $ do
 
 sqlLoadWorkerCtx :: Connection -> IO WorkerContext
 sqlLoadWorkerCtx conn = do
+    -- Determine active worker IDs (we restrict every map/set below to these).
+    activeRows <- query_ conn "SELECT id FROM users WHERE worker_status = 'active'"
+        :: IO [Only Int]
+    let active = Set.fromList [WorkerId w | Only w <- activeRows]
+        keepK m = Map.filterWithKey (\k _ -> Set.member k active) m
+        keepS s = Set.intersection s active
+
     -- Max weekly hours
     hRows <- query_ conn "SELECT worker_id, max_period_seconds FROM worker_hours"
         :: IO [(Int, Int)]
-    let maxHours = Map.fromList
+    let maxHours = keepK $ Map.fromList
             [(WorkerId w, secondsToDiffTime s) | (w, s) <- hRows]
 
     -- Overtime opt-in
     oRows <- query_ conn "SELECT worker_id FROM worker_overtime_optin"
         :: IO [Only Int]
-    let overtime = Set.fromList [WorkerId w | Only w <- oRows]
+    let overtime = keepS $ Set.fromList [WorkerId w | Only w <- oRows]
 
     -- Station preferences (ordered by rank)
     pRows <- query_ conn
         "SELECT worker_id, station_id FROM worker_station_prefs ORDER BY worker_id, rank"
         :: IO [(Int, Int)]
-    let prefs = Map.fromListWith (++)
+    let prefs = keepK $ Map.fromListWith (++)
             [(WorkerId w, [StationId s]) | (w, s) <- pRows]
 
     -- Prefers variety
     vRows <- query_ conn "SELECT worker_id FROM worker_prefers_variety"
         :: IO [Only Int]
-    let variety = Set.fromList [WorkerId w | Only w <- vRows]
+    let variety = keepS $ Set.fromList [WorkerId w | Only w <- vRows]
 
     -- Shift preferences
     spRows <- query_ conn
         "SELECT worker_id, shift_name FROM worker_shift_prefs ORDER BY worker_id, rank"
         :: IO [(Int, Text)]
-    let shiftPrefs = Map.fromListWith (++) [(WorkerId w, [s]) | (w, s) <- spRows]
+    let shiftPrefs = keepK $ Map.fromListWith (++) [(WorkerId w, [s]) | (w, s) <- spRows]
 
     -- Weekend-only
     woRows <- query_ conn "SELECT worker_id FROM worker_weekend_only"
         :: IO [Only Int]
-    let weekendOnly = Set.fromList [WorkerId w | Only w <- woRows]
+    let weekendOnly = keepS $ Set.fromList [WorkerId w | Only w <- woRows]
 
     -- Seniority
-    seniority <- sqlLoadSeniority conn
+    seniority <- keepK <$> sqlLoadSeniority conn
 
     -- Cross-training goals
-    crossTraining <- sqlLoadCrossTraining conn
+    crossTraining <- keepK <$> sqlLoadCrossTraining conn
 
-    -- Pairing preferences
-    avoidPairing  <- sqlLoadPairing conn "worker_avoid_pairing"
-    preferPairing <- sqlLoadPairing conn "worker_prefer_pairing"
+    -- Pairing preferences (filter both keys and values: only keep relationships
+    -- among active workers).
+    let restrictPair :: Map.Map WorkerId (Set.Set WorkerId)
+                     -> Map.Map WorkerId (Set.Set WorkerId)
+        restrictPair m =
+            let stripped = Map.map (`Set.intersection` active) (keepK m)
+            in Map.filter (not . Set.null) stripped
+    avoidPairing  <- restrictPair <$> sqlLoadPairing conn "worker_avoid_pairing"
+    preferPairing <- restrictPair <$> sqlLoadPairing conn "worker_prefer_pairing"
 
-    -- Employment status
+    -- Employment status (already filtered to active by sqlLoadEmployment)
     (otModels, ppTracking, tempSet) <- sqlLoadEmployment conn
 
     return WorkerContext
@@ -501,7 +596,10 @@ sqlLoadEmployment :: Connection
                          Set.Set WorkerId)
 sqlLoadEmployment conn = do
     rows <- query_ conn
-        "SELECT worker_id, overtime_model, pay_period_tracking, is_temp FROM worker_employment"
+        "SELECT we.worker_id, we.overtime_model, we.pay_period_tracking, we.is_temp \
+        \FROM worker_employment we \
+        \JOIN users u ON u.id = we.worker_id \
+        \WHERE u.worker_status = 'active'"
         :: IO [(Int, String, String, Int)]
     let otMap = Map.fromList
             [(WorkerId w, textToOvertimeModel om) | (w, om, _, _) <- rows]

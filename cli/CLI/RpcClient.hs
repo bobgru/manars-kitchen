@@ -710,12 +710,22 @@ dispatchCommand env cmd = case cmd of
         putStrLn "Vacation remaining is not yet supported in remote mode."
 
     -- Users
-    UserCreate username password roleStr -> requireAdmin env $ do
+    UserCreate username password roleStr noWorker -> requireAdmin env $ do
         let role = case roleStr of
                 "admin" -> Admin
                 _       -> Normal
-        runOk env (cCreateUser (CreateUserReq (T.pack username) (T.pack password) role 0))
+        runOk env (cCreateUser (CreateUserReq (T.pack username) (T.pack password) role noWorker))
             ("User created: " ++ username)
+
+    UserRename _ _ -> putStrLn "user rename is not yet supported in remote mode."
+    UserForceDelete _ -> putStrLn "user force-delete is not yet supported in remote mode."
+
+    -- Worker entity (admin)
+    WorkerView _ -> putStrLn "worker view is not yet supported in remote mode."
+    WorkerDeactivate _ -> putStrLn "worker deactivate is not yet supported in remote mode."
+    WorkerActivate _ -> putStrLn "worker activate is not yet supported in remote mode."
+    WorkerDelete _ -> putStrLn "worker delete is not yet supported in remote mode."
+    WorkerForceDelete _ -> putStrLn "worker force-delete is not yet supported in remote mode."
 
     UserList -> do
         result <- run env (cListUsers RpcEmpty)

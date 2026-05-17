@@ -15,7 +15,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Repo.Types (Repository(..))
 import CLI.Commands (shellWords)
-import Auth.Types (User(..), Username(..))
+import Auth.Types (User(..), Username(..), userIdToWorkerId)
 import Domain.Types (WorkerId(..), SkillId(..), StationId(..), Station(..), AbsenceTypeId(..))
 import Domain.Skill (Skill(..))
 import Domain.Absence (AbsenceType(..), AbsenceContext(..))
@@ -60,6 +60,13 @@ commandEntityMap =
     , (["worker", "clear-avoid-pairing"],  [Resolve EWorker, Resolve EWorker])
     , (["worker", "prefer-pairing"],       [Resolve EWorker, Resolve EWorker])
     , (["worker", "clear-prefer-pairing"], [Resolve EWorker, Resolve EWorker])
+    , (["worker", "view"],                 [Skip])
+    , (["worker", "deactivate"],           [Skip])
+    , (["worker", "activate"],             [Skip])
+    , (["worker", "delete"],               [Skip])
+    , (["worker", "force-delete"],         [Skip])
+    , (["user", "rename"],                 [Skip, Skip])
+    , (["user", "force-delete"],           [Skip])
     , (["station", "delete"],              [Resolve EStation])
     , (["station", "force-delete"],        [Resolve EStation])
     , (["station", "rename"],              [Resolve EStation, Skip])
@@ -155,7 +162,7 @@ lookupByName :: Repository -> EntityKind -> String -> IO (Either String String)
 lookupByName repo EWorker name = do
     users <- repoListUsers repo
     let nameLower = T.toLower (T.pack name)
-        matches = [ userWorkerId u
+        matches = [ userIdToWorkerId (userId u)
                   | u <- users
                   , let Username uname = userName u
                   , T.toLower uname == nameLower

@@ -252,6 +252,13 @@ classifyWorker op rest = case op of
     "prefer-pairing" -> twoIds etWorker "prefer-pairing" rest
     "clear-prefer-pairing" -> twoIds etWorker "clear-prefer-pairing" rest
     "info" -> nonMutating etWorker "info"
+    "view" -> case rest of
+        (_name : _) -> nonMutating etWorker "view"
+        _           -> nonMutating etWorker "view"
+    "deactivate"   -> mutating etWorker "deactivate"
+    "activate"     -> mutating etWorker "activate"
+    "delete"       -> mutating etWorker "delete"
+    "force-delete" -> mutating etWorker "force-delete"
     _ -> nonMutating etWorker (pack op)
 
 -- Shift
@@ -306,9 +313,13 @@ classifyVacation op _rest = case op of
 classifyUser :: String -> [String] -> CommandMeta
 classifyUser op rest = case op of
     "create" -> mutating etUser "create"
+    "rename" -> mutating etUser "rename"
     "delete" -> case rest of
         (uid : _) -> (mutating etUser "delete") { cmEntityId = readMaybe uid }
         _         -> mutating etUser "delete"
+    "force-delete" -> case rest of
+        (uid : _) -> (mutating etUser "force-delete") { cmEntityId = readMaybe uid }
+        _         -> mutating etUser "force-delete"
     "list" -> nonMutating etUser "list"
     _ -> nonMutating etUser (pack op)
 

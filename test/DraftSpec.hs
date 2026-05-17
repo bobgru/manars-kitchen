@@ -19,6 +19,7 @@ import qualified Service.Draft as Draft
 import qualified Service.Calendar as Cal
 
 import System.Directory (removeFile, doesFileExist)
+import TestSeed (seedTestUsers)
 
 -- | Create a temporary SQLite repo for testing.
 withTestRepo :: (Repository -> IO ()) -> IO ()
@@ -27,6 +28,7 @@ withTestRepo action = do
     exists <- doesFileExist path
     if exists then removeFile path else return ()
     (_, repo) <- mkSQLiteRepo path
+    seedTestUsers repo 9
     action repo
     removeFile path
 

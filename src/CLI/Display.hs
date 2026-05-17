@@ -14,6 +14,8 @@ module CLI.Display
     , displaySkillView
     , displayStationView
     , displayWorkerCtx
+    , displayWorkerView
+    , formatWorkerRefs
     , displayAbsenceTypes
     , displayConfig
     , displayHintDiff
@@ -46,6 +48,7 @@ import Domain.Diagnosis (Diagnosis(..))
 import Domain.Scheduler (Unfilled(..), UnfilledKind(..), ScheduleResult(..))
 import Domain.Hint (Hint(..), Session(..))
 import Auth.Types (User(..), Username(..), Role(..))
+import qualified Service.Worker
 
 -- -----------------------------------------------------------------
 -- Tabular schedule view
@@ -737,3 +740,92 @@ displayConfig params =
     showVal v
         | v == fromIntegral (round v :: Int) = show (round v :: Int)
         | otherwise = show v
+
+-- -----------------------------------------------------------------
+-- Worker view + references (worker-foundation change)
+-- -----------------------------------------------------------------
+
+displayWorkerView :: Service.Worker.WorkerProfile -> IO ()
+displayWorkerView p = putStr (renderWorkerView p)
+
+renderWorkerView :: Service.Worker.WorkerProfile -> String
+renderWorkerView p = unlines $ concat
+    [ [ "Worker '" ++ T.unpack (Service.Worker.wpName p) ++ "'"
+      , "  user_id: " ++ show (Service.Worker.wpUserId p)
+      , "  worker_id: " ++ show (Service.Worker.wpWorkerId p)
+      , "  role: " ++ T.unpack (Service.Worker.wpRole p)
+      , "  status: " ++ statusStr (Service.Worker.wpStatus p)
+      ]
+    , case Service.Worker.wpDeactivatedAt p of
+        Just d  -> ["  deactivated_at: " ++ show d]
+        Nothing -> []
+    , [ "Employment:"
+      , "  overtime model: " ++ otModelStr (Service.Worker.wpOvertimeModel p)
+      , "  pay tracking: " ++ ppTrackStr (Service.Worker.wpPayPeriodTracking p)
+      , "  temp: " ++ yesNo (Service.Worker.wpIsTemp p)
+      , "Hours:"
+      , "  max period hours: " ++ maxH (Service.Worker.wpMaxPeriodHours p)
+      , "  overtime opt-in: " ++ yesNo (Service.Worker.wpOvertimeOptIn p)
+      , "Flags:"
+      , "  weekend-only: " ++ yesNo (Service.Worker.wpWeekendOnly p)
+      , "  prefers variety: " ++ yesNo (Service.Worker.wpPrefersVariety p)
+      , "  seniority: " ++ show (Service.Worker.wpSeniority p)
+      ]
+    , listSection "Granted skills" (map T.unpack (Service.Worker.wpSkills p))
+    , listSection "Station preferences" (map T.unpack (Service.Worker.wpStationPrefs p))
+    , listSection "Shift preferences" (map T.unpack (Service.Worker.wpShiftPrefs p))
+    , listSection "Cross-training goals" (map T.unpack (Service.Worker.wpCrossTraining p))
+    , listSection "Avoid pairing" (map T.unpack (Service.Worker.wpAvoidPairing p))
+    , listSection "Prefer pairing" (map T.unpack (Service.Worker.wpPreferPairing p))
+    ]
+  where
+    statusStr WSActive   = "active"
+    statusStr WSInactive = "inactive"
+    statusStr WSNone     = "none"
+    otModelStr OTEligible    = "eligible"
+    otModelStr OTManualOnly  = "manual-only"
+    otModelStr OTExempt      = "exempt"
+    ppTrackStr PPStandard = "standard"
+    ppTrackStr PPExempt   = "exempt"
+    yesNo True  = "yes"
+    yesNo False = "no"
+    maxH Nothing = "(no limit)"
+    maxH (Just s) = show (round (toRational s / 3600) :: Int) ++ "h"
+    listSection title [] = [title ++ ": (none)"]
+    listSection title xs = (title ++ ":") : map ("  - " ++) xs
+
+-- | Pretty-print a 'WorkerReferences' record, grouped by configuration vs.
+-- schedule. Returned with a trailing newline.
+formatWorkerRefs :: Service.Worker.WorkerReferences -> String
+formatWorkerRefs r = unlines $
+    "  Configuration:" :
+    map ("    - " ++) configRows ++
+    "  Schedule / history:" :
+    map ("    - " ++) scheduleRows
+  where
+    configRows = filter (not . null)
+        [ field "skills"           (Service.Worker.wrSkills r)
+        , flag  "employment record" (Service.Worker.wrEmployment r)
+        , flag  "max-period hours"  (Service.Worker.wrHours r)
+        , flag  "overtime opt-in"   (Service.Worker.wrOvertimeOptIn r)
+        , field "station prefs"    (Service.Worker.wrStationPrefs r)
+        , flag  "prefers variety"   (Service.Worker.wrPrefersVariety r)
+        , field "shift prefs"      (Service.Worker.wrShiftPrefs r)
+        , flag  "weekend-only flag" (Service.Worker.wrWeekendOnly r)
+        , flag  "seniority"         (Service.Worker.wrSeniority r)
+        , field "avoid-pairing"    (Service.Worker.wrAvoidPairing r)
+        , field "prefer-pairing"   (Service.Worker.wrPreferPairing r)
+        , field "cross-training"   (Service.Worker.wrCrossTraining r)
+        ]
+    scheduleRows = filter (not . null)
+        [ field "pinned assignments"   (Service.Worker.wrPinned r)
+        , field "calendar assignments" (Service.Worker.wrCalendar r)
+        , field "draft assignments"    (Service.Worker.wrDraft r)
+        , field "schedule assignments" (Service.Worker.wrSchedule r)
+        , field "absence requests"     (Service.Worker.wrAbsence r)
+        , field "yearly allowances"    (Service.Worker.wrAllowances r)
+        ]
+    field _    0 = ""
+    field name n = show n ++ "  " ++ name
+    flag _    False = ""
+    flag name True  = "yes  " ++ name

@@ -28,6 +28,7 @@ import qualified Service.Draft as Draft
 
 import System.Directory (removeFile, doesFileExist)
 import Control.Concurrent (threadDelay)  -- for timestamp separation
+import TestSeed (seedTestUsers)
 
 -- | Create a temporary SQLite repo for testing.
 withTestRepo :: (Repository -> IO ()) -> IO ()
@@ -36,6 +37,7 @@ withTestRepo action = do
     exists <- doesFileExist path
     if exists then removeFile path else return ()
     (_, repo) <- mkSQLiteRepo path
+    seedTestUsers repo 9
     action repo
     removeFile path
 

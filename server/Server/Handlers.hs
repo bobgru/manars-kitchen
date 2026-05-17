@@ -13,11 +13,13 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import Data.Time (Day)
+import Data.Time.Clock (getCurrentTime, utctDay)
 import Servant
 
-import Auth.Types (User(..), Username(..), Role(..))
+import Auth.Types (User(..), UserId(..), Username(..), Role(..), userIdToWorkerId)
 import Data.Text (Text)
-import Domain.Types (WorkerId(..), StationId(..), Station(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule)
+import Domain.Types (WorkerId(..), StationId(..), Station(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule, workerStatusToText)
+import Domain.Worker (OvertimeModel(..), PayPeriodTracking(..))
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef(..))
 import Domain.Scheduler (ScheduleResult)
@@ -27,6 +29,7 @@ import Domain.Pin (PinnedAssignment(..))
 import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
 import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), SessionId(..), HintSessionRecord(..))
 import qualified Service.Worker as SW
+import qualified Service.User as SU
 import qualified Service.Schedule as SS
 import qualified Service.Draft as SD
 import qualified Service.Calendar as SC
@@ -88,7 +91,7 @@ lookupStationName repo stid = do
 lookupWorkerName :: Repository -> WorkerId -> IO String
 lookupWorkerName repo wid = do
     users <- repoListUsers repo
-    case [uname | u <- users, userWorkerId u == wid, let Username uname = userName u] of
+    case [uname | u <- users, userIdToWorkerId (userId u) == wid, let Username uname = userName u] of
         (n:_) -> return (T.unpack n)
         []    -> let WorkerId i = wid in return (show i)
 
@@ -185,6 +188,14 @@ server execEnv cmdBus repo user =
     :<|> handleListUsers repo user
     :<|> handleCreateUser cmdBus repo user
     :<|> handleDeleteUser cmdBus repo user
+    :<|> handleRenameUser cmdBus repo user
+    :<|> handleForceDeleteUser cmdBus repo user
+    -- Worker entity
+    :<|> handleViewWorker repo user
+    :<|> handleDeactivateWorker cmdBus repo user
+    :<|> handleActivateWorker cmdBus repo user
+    :<|> handleDeleteWorker cmdBus repo user
+    :<|> handleForceDeleteWorker cmdBus repo user
     -- Hint sessions
     :<|> handleListHints repo user
     :<|> handleAddHint repo user
@@ -318,7 +329,7 @@ handleListPendingAbsences repo user = do
     allPending <- liftIO $ SA.listPendingAbsences repo
     case userRole user of
         Admin  -> pure allPending
-        Normal -> pure $ filter (\a -> arWorker a == userWorkerId user) allPending
+        Normal -> pure $ filter (\a -> arWorker a == userIdToWorkerId (userId user)) allPending
 
 handleRequestAbsence :: TopicBus CommandEvent -> Repository -> User -> RequestAbsenceReq -> Handler AbsenceCreatedResp
 handleRequestAbsence cmdBus repo user req = do
@@ -852,7 +863,7 @@ handleCreateUser :: TopicBus CommandEvent -> Repository -> User -> CreateUserReq
 handleCreateUser cmdBus repo user req = do
     requireAdmin user
     result <- liftIO $ SAuth.register repo
-        (curUsername req) (curPassword req) (curRole req) (WorkerId (curWorkerId req))
+        (curUsername req) (curPassword req) (curRole req) (curNoWorker req)
     case result of
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))
@@ -867,9 +878,170 @@ handleDeleteUser cmdBus repo user uname = do
     case mUser of
         Nothing -> throwApiError (NotFound ("User not found: " ++ uname))
         Just u  -> do
-            liftIO $ repoDeleteUser repo (userId u)
-            logRest cmdBus user ("user delete " ++ shellQuote uname)
+            r <- liftIO $ SU.safeDeleteUser repo (userId u)
+            case r of
+                Right () -> do
+                    logRest cmdBus user ("user delete " ++ shellQuote uname)
+                    pure NoContent
+                Left err -> throwApiError (Conflict err)
+
+handleRenameUser :: TopicBus CommandEvent -> Repository -> User -> Int -> RenameUserReq -> Handler NoContent
+handleRenameUser cmdBus repo user uid req = do
+    requireAdmin user
+    mUser <- liftIO $ repoGetUser repo (UserId uid)
+    case mUser of
+        Nothing -> throwApiError (NotFound ("User not found: " ++ show uid))
+        Just u  -> do
+            let Username old = userName u
+            r <- liftIO $ SU.renameUser repo old (rurNewName req)
+            case r of
+                Right () -> do
+                    logRest cmdBus user
+                        ("user rename " ++ shellQuote (T.unpack old) ++ " "
+                         ++ shellQuote (T.unpack (rurNewName req)))
+                    pure NoContent
+                Left err -> throwApiError (Conflict err)
+
+handleForceDeleteUser :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
+handleForceDeleteUser cmdBus repo user uid = do
+    requireAdmin user
+    mUser <- liftIO $ repoGetUser repo (UserId uid)
+    case mUser of
+        Nothing -> throwApiError (NotFound ("User not found: " ++ show uid))
+        Just u  -> do
+            liftIO $ SU.forceDeleteUser repo (userId u)
+            logRest cmdBus user ("user force-delete " ++ show uid)
             pure NoContent
+
+-- -----------------------------------------------------------------
+-- Worker entity (view, deactivate, activate, delete)
+-- -----------------------------------------------------------------
+
+-- | Resolve a worker by name, mapping CLI errors onto Servant 4xx codes.
+resolveWorkerName :: Repository -> Text -> Handler WorkerId
+resolveWorkerName repo name = do
+    r <- liftIO $ SW.resolveWorkerByName repo name
+    case r of
+        Right (wid, _) -> pure wid
+        Left (SW.WorkerNotFound n) -> throwApiError (NotFound ("User not found: " ++ n))
+        Left (SW.NotAWorker n)     -> throwApiError (NotFound ("User '" ++ n ++ "' is not a worker"))
+
+handleViewWorker :: Repository -> User -> Text -> Handler WorkerProfileResp
+handleViewWorker repo user name = do
+    requireAdmin user
+    wid <- resolveWorkerName repo name
+    mp <- liftIO $ SW.viewWorker repo wid
+    case mp of
+        Nothing -> throwApiError (NotFound ("No profile for worker '" ++ T.unpack name ++ "'"))
+        Just p  -> pure (toProfileResp p)
+
+handleDeactivateWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler DeactivateResultResp
+handleDeactivateWorker cmdBus repo user name = do
+    requireAdmin user
+    wid <- resolveWorkerName repo name
+    today <- liftIO $ utctDay <$> getCurrentTime
+    r <- liftIO $ SW.safeDeactivateWorker repo wid today
+    case r of
+        Right (SW.DeactivateResult pn dn cn) -> do
+            logRest cmdBus user ("worker deactivate " ++ shellQuote (T.unpack name))
+            pure (DeactivateResultResp pn dn cn)
+        Left err -> throwApiError (Conflict err)
+
+handleActivateWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
+handleActivateWorker cmdBus repo user name = do
+    requireAdmin user
+    wid <- resolveWorkerName repo name
+    r <- liftIO $ SW.activateWorker repo wid
+    case r of
+        Right () -> do
+            logRest cmdBus user ("worker activate " ++ shellQuote (T.unpack name))
+            pure NoContent
+        Left err -> throwApiError (Conflict err)
+
+handleDeleteWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
+handleDeleteWorker cmdBus repo user name = do
+    requireAdmin user
+    wid <- resolveWorkerName repo name
+    r <- liftIO $ SW.safeDeleteWorker repo wid
+    case r of
+        Right () -> do
+            logRest cmdBus user ("worker delete " ++ shellQuote (T.unpack name))
+            pure NoContent
+        Left refs ->
+            -- 409 Conflict with a body listing references (configuration vs. schedule).
+            throwConflictWithBody (toWorkerRefsResp refs)
+
+handleForceDeleteWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
+handleForceDeleteWorker cmdBus repo user name = do
+    requireAdmin user
+    wid <- resolveWorkerName repo name
+    liftIO $ SW.forceDeleteWorker repo wid
+    logRest cmdBus user ("worker force-delete " ++ shellQuote (T.unpack name))
+    pure NoContent
+
+-- -----------------------------------------------------------------
+-- Conversion helpers
+-- -----------------------------------------------------------------
+
+toProfileResp :: SW.WorkerProfile -> WorkerProfileResp
+toProfileResp p = WorkerProfileResp
+    { wprName              = SW.wpName p
+    , wprUserId            = SW.wpUserId p
+    , wprWorkerId          = SW.wpWorkerId p
+    , wprRole              = SW.wpRole p
+    , wprStatus            = workerStatusToText (SW.wpStatus p)
+    , wprDeactivatedAt     = T.pack . show <$> SW.wpDeactivatedAt p
+    , wprOvertimeModel     = case SW.wpOvertimeModel p of
+                                OTEligible    -> "eligible"
+                                OTManualOnly  -> "manual-only"
+                                OTExempt      -> "exempt"
+    , wprPayPeriodTracking = case SW.wpPayPeriodTracking p of
+                                PPStandard -> "standard"
+                                PPExempt   -> "exempt"
+    , wprIsTemp            = SW.wpIsTemp p
+    , wprMaxPeriodHours    = (\dt -> round (toRational dt / 3600)) <$> SW.wpMaxPeriodHours p
+    , wprOvertimeOptIn     = SW.wpOvertimeOptIn p
+    , wprWeekendOnly       = SW.wpWeekendOnly p
+    , wprPrefersVariety    = SW.wpPrefersVariety p
+    , wprSeniority         = SW.wpSeniority p
+    , wprSkills            = SW.wpSkills p
+    , wprStationPrefs      = SW.wpStationPrefs p
+    , wprShiftPrefs        = SW.wpShiftPrefs p
+    , wprCrossTraining     = SW.wpCrossTraining p
+    , wprAvoidPairing      = SW.wpAvoidPairing p
+    , wprPreferPairing     = SW.wpPreferPairing p
+    }
+
+toWorkerRefsResp :: SW.WorkerReferences -> WorkerReferencesResp
+toWorkerRefsResp r = WorkerReferencesResp
+    { wrrConfiguration = filter (not . T.null)
+        [ countTxt "skills" (SW.wrSkills r)
+        , flagTxt  "employment"      (SW.wrEmployment r)
+        , flagTxt  "max-period hours" (SW.wrHours r)
+        , flagTxt  "overtime opt-in"  (SW.wrOvertimeOptIn r)
+        , countTxt "station prefs"   (SW.wrStationPrefs r)
+        , flagTxt  "prefers variety"  (SW.wrPrefersVariety r)
+        , countTxt "shift prefs"     (SW.wrShiftPrefs r)
+        , flagTxt  "weekend-only flag" (SW.wrWeekendOnly r)
+        , flagTxt  "seniority"        (SW.wrSeniority r)
+        , countTxt "avoid-pairing"   (SW.wrAvoidPairing r)
+        , countTxt "prefer-pairing"  (SW.wrPreferPairing r)
+        , countTxt "cross-training"  (SW.wrCrossTraining r)
+        ]
+    , wrrSchedule = filter (not . T.null)
+        [ countTxt "pinned"   (SW.wrPinned r)
+        , countTxt "calendar" (SW.wrCalendar r)
+        , countTxt "draft"    (SW.wrDraft r)
+        , countTxt "schedule" (SW.wrSchedule r)
+        , countTxt "absence"  (SW.wrAbsence r)
+        , countTxt "yearly allowances" (SW.wrAllowances r)
+        ]
+    }
+  where
+    countTxt _ 0 = ""
+    countTxt n k = T.pack (show k ++ " " ++ n)
+    flagTxt _ False = ""
+    flagTxt n True  = T.pack ("yes " ++ n)
 
 -- -----------------------------------------------------------------
 -- Hint sessions

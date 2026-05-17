@@ -216,7 +216,7 @@ withTestRepo action = do
 -- | Helper: create a test user and return their UserId.
 createTestUser :: Repository -> Text -> IO UserId
 createTestUser repo name = do
-    result <- register repo name "password" Admin (WorkerId 1)
+    result <- register repo name "password" Admin False
     case result of
         Right uid -> return uid
         Left err  -> error $ "Failed to create test user: " ++ show err

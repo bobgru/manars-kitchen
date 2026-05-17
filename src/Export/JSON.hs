@@ -31,7 +31,7 @@ import Domain.Types
 import Domain.Skill (Skill(..), SkillContext(..))
 import Domain.Worker (WorkerContext(..))
 import Domain.Absence (AbsenceContext(..), AbsenceType(..))
-import Auth.Types (User(..), Username(..), Role(..))
+import Auth.Types (User(..), Username(..), Role(..), userIdToWorkerId)
 import Service.Auth (register)
 import Repo.Types (Repository(..))
 
@@ -250,7 +250,7 @@ gatherExport repo mSchedName = do
                     (Set.member (WorkerId wid) (wcPrefersVariety workerCtx))
                     (Map.findWithDefault [] (WorkerId wid) (wcShiftPrefs workerCtx))
                 | u <- users
-                , let WorkerId wid = userWorkerId u
+                , let WorkerId wid = userIdToWorkerId (userId u)
                       Username uname = userName u
                 ]
 
@@ -291,7 +291,7 @@ applyImport :: Repository -> ExportData -> IO [String]
 applyImport repo dat = do
     -- Load existing users to validate worker references
     users <- repoListUsers repo
-    let existingWorkers = Set.fromList [userWorkerId u | u <- users]
+    let existingWorkers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
     msgs <- sequence $ concat
         [ map importSkill (expSkills dat)
         , map importStation (expStations dat)
@@ -341,7 +341,7 @@ applyImport repo dat = do
         createMsg <- if Set.member wid existingWorkers
             then pure Nothing
             else do
-                result <- register repo (ewUsername ew) "changeme" role wid
+                result <- register repo (ewUsername ew) "changeme" role False
                 pure $ Just $ case result of
                     Right _  -> "Created user '" ++ T.unpack (ewUsername ew)
                                 ++ "' (worker " ++ show (ewId ew)

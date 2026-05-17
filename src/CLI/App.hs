@@ -40,11 +40,12 @@ import Domain.Pin (expandPins, PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
-import Auth.Types (User(..), UserId(..), Username(..), Role(..))
+import Auth.Types (User(..), UserId(..), Username(..), Role(..), userIdToWorkerId)
 import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
 import Service.HintRebase (ChangeCategory(..), RebaseResult(..), classifyChange, rebaseSession)
 import qualified Audit.CommandMeta as Meta
 import Service.Auth (AuthError(..), register, changePassword)
+import qualified Service.User as SU
 import qualified Service.Worker as SW
 import qualified Service.Absence as SA
 import qualified Service.Config as SC
@@ -243,7 +244,7 @@ handleCommand st cmd = case cmd of
                 stations <- SW.listStations (asRepo st)
                 skillCtx <- repoLoadSkillCtx (asRepo st)
                 let workerNames = Map.fromList
-                        [ (userWorkerId u, T.unpack uname)
+                        [ (userIdToWorkerId (userId u), T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
                         [ (StationId sid, T.unpack (stationName station))
@@ -260,7 +261,7 @@ handleCommand st cmd = case cmd of
                 stations <- SW.listStations (asRepo st)
                 skillCtx <- repoLoadSkillCtx (asRepo st)
                 let workerNames = Map.fromList
-                        [ (userWorkerId u, T.unpack uname)
+                        [ (userIdToWorkerId (userId u), T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
                         [ (StationId sid, T.unpack (stationName station))
@@ -292,7 +293,7 @@ handleCommand st cmd = case cmd of
                 users <- repoListUsers (asRepo st)
                 workerCtx <- repoLoadWorkerCtx (asRepo st)
                 let workerNames = Map.fromList
-                        [ (userWorkerId u, T.unpack uname)
+                        [ (userIdToWorkerId (userId u), T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                 putStr (displayWorkerHours workerNames
                            (wcMaxPeriodHours workerCtx)
@@ -311,7 +312,7 @@ handleCommand st cmd = case cmd of
                 absenceCtx <- repoLoadAbsenceCtx (asRepo st)
                 shifts     <- repoLoadShifts (asRepo st)
                 cfg        <- repoLoadSchedulerConfig (asRepo st)
-                let workers = Set.fromList [userWorkerId u | u <- users]
+                let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
                     -- Reconstruct the slots from the schedule's assignments
                     slots = Set.toList $ Set.map assignSlot (unSchedule sched)
                     closed = stationClosedSlots skillCtx slots
@@ -335,7 +336,7 @@ handleCommand st cmd = case cmd of
                     result = Scheduler.buildScheduleFrom sched ctx
                     diags = Diagnosis.diagnose result ctx
                     workerNames = Map.fromList
-                        [ (userWorkerId u, T.unpack uname)
+                        [ (userIdToWorkerId (userId u), T.unpack uname)
                         | u <- users, let Username uname = userName u ]
                     stationNames = Map.fromList
                         [ (StationId sid, T.unpack (stationName station))
@@ -396,7 +397,7 @@ handleCommand st cmd = case cmd of
                     then putStrLn "No slots generated."
                     else do
                         users <- repoListUsers (asRepo st)
-                        let workers = Set.fromList [userWorkerId u | u <- users]
+                        let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
                         putStrLn ("Generating schedule '" ++ name ++ "' for week of "
                                  ++ dateStr
                                  ++ " (" ++ show (length slots) ++ " slots, "
@@ -506,7 +507,7 @@ handleCommand st cmd = case cmd of
                         users <- repoListUsers (asRepo st)
                         stations <- SW.listStations (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList [(s, T.unpack (stationName station)) | (s, station) <- stations]
                         displayViolationReport d workerNames stationNames violations
@@ -562,7 +563,7 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
                                 [ (StationId sid, T.unpack (stationName station))
@@ -583,7 +584,7 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
                                 [ (StationId sid, T.unpack (stationName station))
@@ -597,7 +598,7 @@ handleCommand st cmd = case cmd of
             Left err -> putStrLn err
             Right did -> do
                 users <- repoListUsers (asRepo st)
-                let workers = Set.fromList [userWorkerId u | u <- users]
+                let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
                 result <- Draft.generateDraft (asRepo st) did workers
                 case result of
                     Left err -> putStrLn ("Error: " ++ err)
@@ -672,7 +673,7 @@ handleCommand st cmd = case cmd of
                         users <- repoListUsers (asRepo st)
                         workerCtx <- repoLoadWorkerCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                         putStr (displayWorkerHours workerNames
                                    (wcMaxPeriodHours workerCtx) sched)
@@ -694,7 +695,7 @@ handleCommand st cmd = case cmd of
                         absenceCtx <- repoLoadAbsenceCtx (asRepo st)
                         shifts     <- repoLoadShifts (asRepo st)
                         cfg        <- repoLoadSchedulerConfig (asRepo st)
-                        let workers = Set.fromList [userWorkerId u | u <- users]
+                        let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
                             slots = Set.toList $ Set.map assignSlot (unSchedule sched)
                             closed = stationClosedSlots skillCtx slots
                             slotDates = map slotDate slots
@@ -717,7 +718,7 @@ handleCommand st cmd = case cmd of
                             result = Scheduler.buildScheduleFrom sched ctx
                             diags = Diagnosis.diagnose result ctx
                             workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
                                 [ (StationId sid, T.unpack (stationName station))
@@ -739,7 +740,7 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
                                 [ (StationId sid, T.unpack (stationName station))
@@ -777,7 +778,7 @@ handleCommand st cmd = case cmd of
                         stations <- SW.listStations (asRepo st)
                         skillCtx <- repoLoadSkillCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
                                 [ (StationId sid, T.unpack (stationName station))
@@ -796,7 +797,7 @@ handleCommand st cmd = case cmd of
                         users <- repoListUsers (asRepo st)
                         workerCtx <- repoLoadWorkerCtx (asRepo st)
                         let workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                         putStr (displayWorkerHours workerNames
                                    (wcMaxPeriodHours workerCtx) sched)
@@ -817,7 +818,7 @@ handleCommand st cmd = case cmd of
                         absenceCtx <- repoLoadAbsenceCtx (asRepo st)
                         shifts     <- repoLoadShifts (asRepo st)
                         cfg        <- repoLoadSchedulerConfig (asRepo st)
-                        let workers = Set.fromList [userWorkerId u | u <- users]
+                        let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
                             slots = Set.toList $ Set.map assignSlot (unSchedule sched)
                             closed = stationClosedSlots skillCtx slots
                             slotDates = map slotDate slots
@@ -840,7 +841,7 @@ handleCommand st cmd = case cmd of
                             result = Scheduler.buildScheduleFrom sched ctx
                             diags = Diagnosis.diagnose result ctx
                             workerNames = Map.fromList
-                                [ (userWorkerId u, T.unpack uname)
+                                [ (userIdToWorkerId (userId u), T.unpack uname)
                                 | u <- users, let Username uname = userName u ]
                             stationNames = Map.fromList
                                 [ (StationId sid, T.unpack (stationName station))
@@ -1191,7 +1192,7 @@ handleCommand st cmd = case cmd of
                 users <- repoListUsers (asRepo st)
                 skills <- repoListSkills (asRepo st)
                 let workerNames = Map.fromList
-                        [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
+                        [(userIdToWorkerId (userId u), let Username n = userName u in T.unpack n) | u <- users]
                     skillNames = Map.fromList [(s, skillName sk) | (s, sk) <- skills]
                 putStr (displayStationView sid station sctx wctx workerNames skillNames)
 
@@ -1292,7 +1293,7 @@ handleCommand st cmd = case cmd of
                 wctx <- repoLoadWorkerCtx (asRepo st)
                 users <- repoListUsers (asRepo st)
                 stations <- repoListStations (asRepo st)
-                let workerNames = Map.fromList [(userWorkerId u, let Username n = userName u in T.unpack n) | u <- users]
+                let workerNames = Map.fromList [(userIdToWorkerId (userId u), let Username n = userName u in T.unpack n) | u <- users]
                     stationNames = Map.fromList [(s, T.unpack (stationName station)) | (s, station) <- stations]
                     skillNames = Map.fromList [(s, skillName sk') | (s, sk') <- skills]
                 putStr (displaySkillView sid sk ctx wctx workerNames stationNames skillNames)
@@ -1601,32 +1602,29 @@ handleCommand st cmd = case cmd of
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
 
     AbsenceListMine -> do
-        reqs <- SA.listWorkerAbsences (asRepo st) (userWorkerId (asUser st))
+        reqs <- SA.listWorkerAbsences (asRepo st) (userIdToWorkerId (userId (asUser st)))
                     (read "2020-01-01") (read "2030-12-31")
         (wNames, tNames) <- absenceNameMaps (asRepo st)
         putStr (displayAbsences wNames tNames reqs)
 
     VacationRemaining tid -> do
-        mRemaining <- SA.vacationRemaining (asRepo st) (userWorkerId (asUser st))
+        mRemaining <- SA.vacationRemaining (asRepo st) (userIdToWorkerId (userId (asUser st)))
                           (AbsenceTypeId tid) 2026
         case mRemaining of
             Nothing -> putStrLn "No yearly limit for this absence type."
             Just r  -> putStrLn ("Vacation days remaining: " ++ show r)
 
     -- Users (admin)
-    UserCreate name pass role -> requireAdmin st $ do
+    UserCreate name pass role noWorker -> requireAdmin st $ do
         let r = case role of
                     "admin" -> Admin
                     _       -> Normal
-        -- For user creation, we need a worker ID. Use next available.
-        users <- repoListUsers (asRepo st)
-        let nextWid = if null users
-                      then 1
-                      else maximum [w | User { userWorkerId = WorkerId w } <- users] + 1
-        result <- register (asRepo st) (T.pack name) (T.pack pass) r (WorkerId nextWid)
+        result <- register (asRepo st) (T.pack name) (T.pack pass) r noWorker
         case result of
-            Right (UserId uid) -> putStrLn ("Created user #" ++ show uid
-                                            ++ " (Worker " ++ show nextWid ++ ")")
+            Right (UserId uid)
+              | noWorker  -> putStrLn ("Created user #" ++ show uid ++ " (non-worker)")
+              | otherwise -> putStrLn ("Created user #" ++ show uid
+                                            ++ " (Worker " ++ show uid ++ ")")
             Left UsernameTaken -> putStrLn "Username already taken."
             Left err -> putStrLn ("Error: " ++ show err)
 
@@ -1634,9 +1632,83 @@ handleCommand st cmd = case cmd of
         users <- repoListUsers (asRepo st)
         putStr (displayUsers users)
 
+    UserRename oldName newName -> requireAdmin st $ do
+        result <- SU.renameUser (asRepo st) (T.pack oldName) (T.pack newName)
+        case result of
+            Right () -> putStrLn ("Renamed user '" ++ oldName ++ "' to '" ++ newName ++ "'")
+            Left err -> putStrLn ("Error: " ++ err)
+
     UserDelete uid -> requireAdmin st $ do
-        repoDeleteUser (asRepo st) (UserId uid)
-        putStrLn ("Deleted user #" ++ show uid)
+        result <- SU.safeDeleteUser (asRepo st) (UserId uid)
+        case result of
+            Right () -> putStrLn ("Deleted user #" ++ show uid)
+            Left err -> putStrLn err
+
+    UserForceDelete uid -> requireAdmin st $ do
+        SU.forceDeleteUser (asRepo st) (UserId uid)
+        putStrLn ("Force-deleted user #" ++ show uid)
+
+    -- Worker entity (admin)
+    WorkerView name -> requireAdmin st $ do
+        mres <- SW.resolveWorkerByName (asRepo st) (T.pack name)
+        case mres of
+            Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
+            Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
+            Right (wid, _status) -> do
+                mp <- SW.viewWorker (asRepo st) wid
+                case mp of
+                    Nothing -> putStrLn ("No profile for worker '" ++ name ++ "'.")
+                    Just p  -> displayWorkerView p
+
+    WorkerDeactivate name -> requireAdmin st $ do
+        mres <- SW.resolveWorkerByName (asRepo st) (T.pack name)
+        case mres of
+            Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
+            Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
+            Right (wid, _) -> do
+                today <- utctDay <$> getCurrentTime
+                r <- SW.safeDeactivateWorker (asRepo st) wid today
+                case r of
+                    Left err -> putStrLn ("Error: " ++ err)
+                    Right (SW.DeactivateResult pn dn cn) ->
+                        putStrLn $ "Deactivated " ++ name ++ ". Removed "
+                            ++ show pn ++ " pins, "
+                            ++ show dn ++ " draft entries, "
+                            ++ show cn ++ " future calendar slots."
+
+    WorkerActivate name -> requireAdmin st $ do
+        mres <- SW.resolveWorkerByName (asRepo st) (T.pack name)
+        case mres of
+            Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
+            Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
+            Right (wid, _) -> do
+                r <- SW.activateWorker (asRepo st) wid
+                case r of
+                    Left err -> putStrLn ("Error: " ++ err)
+                    Right () -> putStrLn ("Activated " ++ name ++ ".")
+
+    WorkerDelete name -> requireAdmin st $ do
+        mres <- SW.resolveWorkerByName (asRepo st) (T.pack name)
+        case mres of
+            Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
+            Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
+            Right (wid, _) -> do
+                r <- SW.safeDeleteWorker (asRepo st) wid
+                case r of
+                    Right () -> putStrLn ("Deleted worker concept for '" ++ name ++ "' (user remains).")
+                    Left refs -> do
+                        putStrLn ("Cannot delete worker '" ++ name ++ "'; references found:")
+                        putStr (formatWorkerRefs refs)
+                        putStrLn "Use 'worker deactivate' to take out of scheduling, or 'worker force-delete' to cascade."
+
+    WorkerForceDelete name -> requireAdmin st $ do
+        mres <- SW.resolveWorkerByName (asRepo st) (T.pack name)
+        case mres of
+            Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
+            Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
+            Right (wid, _) -> do
+                SW.forceDeleteWorker (asRepo st) wid
+                putStrLn ("Force-deleted worker '" ++ name ++ "' (user remains).")
 
     -- Import / Export
     CmdExport file -> requireAdmin st $ do
@@ -1693,7 +1765,7 @@ handleCommand st cmd = case cmd of
             else do
                 putStrLn ("Wiping database and replaying " ++ show (length entries) ++ " commands...")
                 repoWipeAll (asRepo st)
-                _ <- register (asRepo st) (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
+                _ <- register (asRepo st) (T.pack "admin") (T.pack "admin") Admin False
                 putStrLn "Created default admin user (admin/admin), Worker 1"
                 replayCommands fastReplay st entries
                 putStrLn "Replay complete."
@@ -1813,7 +1885,7 @@ buildSessionForDraft st did hints = do
             let dateFrom = diDateFrom draft
                 dateTo   = diDateTo draft
             users <- repoListUsers (asRepo st)
-            let workers = Set.fromList [userWorkerId u | u <- users]
+            let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
             let slots = Calendar.generateDateRangeSlots Calendar.defaultHours dateFrom dateTo Set.empty
             skillCtx   <- repoLoadSkillCtx (asRepo st)
             workerCtx  <- repoLoadWorkerCtx (asRepo st)
@@ -1951,7 +2023,7 @@ loadNameMaps st = do
     stations <- SW.listStations (asRepo st)
     skills <- SW.listSkills (asRepo st)
     let workerNames = Map.fromList
-            [ (userWorkerId u, T.unpack uname)
+            [ (userIdToWorkerId (userId u), T.unpack uname)
             | u <- users, let Username uname = userName u ]
         stationNames = Map.fromList
             [ (StationId sid, T.unpack (stationName station))
@@ -2084,7 +2156,7 @@ auditEntryToMeta ae = Meta.CommandMeta
 runDemo :: Repository -> Int -> [String] -> IO ()
 runDemo repo delayUs cmdLines = do
     -- Create default admin
-    result <- register repo (T.pack "admin") (T.pack "admin") Admin (WorkerId 1)
+    result <- register repo (T.pack "admin") (T.pack "admin") Admin False
     case result of
         Right _  -> putStrLn "Created default admin user (admin/admin)"
         Left err -> putStrLn ("Warning: " ++ show err)
@@ -2401,9 +2473,17 @@ helpRegistry =
     , ("audit",    True,  "replay",                          "Wipe DB and replay audit log")
     , ("audit",    True,  "replay <file>",                   "Wipe DB and replay from file")
     -- User
-    , ("user",     True,  "user create <name> <pass> <role>", "Create a user")
+    , ("user",     True,  "user create <name> <pass> <role> [--no-worker]", "Create a user (default: also a worker)")
     , ("user",     True,  "user list",                       "List all users")
-    , ("user",     True,  "user delete <id>",                "Delete a user")
+    , ("user",     True,  "user rename <old> <new>",         "Rename a user (= rename their worker)")
+    , ("user",     True,  "user delete <id>",                "Delete a user (blocks if user is a worker)")
+    , ("user",     True,  "user force-delete <id>",          "Cascade-delete user and all worker refs")
+    -- Worker entity (admin)
+    , ("worker",   True,  "worker view <name>",              "Show a worker's full profile")
+    , ("worker",   True,  "worker deactivate <name>",        "Take a worker out of active scheduling (preserves config)")
+    , ("worker",   True,  "worker activate <name>",          "Reactivate an inactive worker")
+    , ("worker",   True,  "worker delete <name>",            "Permanently remove worker concept (blocks if refs)")
+    , ("worker",   True,  "worker force-delete <name>",      "Cascade-remove all worker refs (user remains)")
     -- Context
     , ("context",  False, "use <type> <name|id>",            "Set session context (worker/skill/station/absence-type)")
     , ("context",  False, "context view",                    "Show current context")
@@ -2495,7 +2575,7 @@ when False _      = return ()
 lookupWorkerName :: Repository -> WorkerId -> IO String
 lookupWorkerName repo wid = do
     users <- repoListUsers repo
-    case [u | u <- users, userWorkerId u == wid] of
+    case [u | u <- users, userIdToWorkerId (userId u) == wid] of
         (u:_) -> let Username uname = userName u in return (T.unpack uname)
         []    -> let WorkerId w = wid in return ("Worker " ++ show w)
 
@@ -2550,7 +2630,7 @@ absenceNameMaps repo = do
     users <- repoListUsers repo
     ctx <- repoLoadAbsenceCtx repo
     let wNames = Map.fromList
-            [ (userWorkerId u, T.unpack uname)
+            [ (userIdToWorkerId (userId u), T.unpack uname)
             | u <- users, let Username uname = userName u ]
         tNames = Map.fromList
             [ (tid, T.unpack (atName at))

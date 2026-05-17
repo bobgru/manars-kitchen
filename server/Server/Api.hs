@@ -205,6 +205,19 @@ type RawAPI =
     :<|> "api" :> "users" :> Get '[JSON] [User]
     :<|> "api" :> "users" :> ReqBody '[JSON] CreateUserReq :> PostNoContent
     :<|> "api" :> "users" :> Capture "username" String :> DeleteNoContent
+    :<|> "api" :> "users" :> Capture "id" Int
+         :> "rename" :> ReqBody '[JSON] RenameUserReq :> PutNoContent
+    :<|> "api" :> "users" :> Capture "id" Int :> "force" :> DeleteNoContent
+
+    -- -----------------------------------------------------------------
+    -- Worker entity (view, deactivate, activate, delete, force-delete)
+    -- -----------------------------------------------------------------
+    :<|> "api" :> "workers" :> Capture "name" Text :> Get '[JSON] WorkerProfileResp
+    :<|> "api" :> "workers" :> Capture "name" Text
+         :> "deactivate" :> Put '[JSON] DeactivateResultResp
+    :<|> "api" :> "workers" :> Capture "name" Text :> "activate" :> PutNoContent
+    :<|> "api" :> "workers" :> Capture "name" Text :> DeleteNoContent
+    :<|> "api" :> "workers" :> Capture "name" Text :> "force" :> DeleteNoContent
 
     -- -----------------------------------------------------------------
     -- Hint sessions

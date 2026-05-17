@@ -13,7 +13,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import Data.Time (Day, UTCTime)
-import Domain.Types (WorkerId, StationId, Station, SkillId, Schedule)
+import Domain.Types (WorkerId, StationId, Station, SkillId, Schedule, WorkerStatus)
 import Domain.Shift (ShiftDef)
 import Domain.Skill (Skill, SkillContext)
 import Audit.CommandMeta (CommandMeta)
@@ -79,14 +79,29 @@ data Repository = Repository
     { -- ---------------------------------------------------------------
       -- Users
       -- ---------------------------------------------------------------
-      repoCreateUser     :: Text -> Text -> Role -> WorkerId -> IO UserId
-      -- ^ username, password hash, role, worker id
+      repoCreateUser     :: Text -> Text -> Role -> Bool -> IO UserId
+      -- ^ username, password hash, role, noWorker flag (True = create with worker_status='none')
     , repoGetUser        :: UserId -> IO (Maybe User)
     , repoGetUserByName  :: Text -> IO (Maybe User)
     , repoUpdatePassword :: UserId -> Text -> IO ()
       -- ^ user id, new password hash
     , repoListUsers      :: IO [User]
     , repoDeleteUser     :: UserId -> IO ()
+    , repoRenameUser     :: UserId -> Text -> IO ()
+      -- ^ user id, new username
+    , repoSetWorkerStatus :: UserId -> WorkerStatus -> Maybe Day -> IO ()
+      -- ^ user id, new status, deactivated_at (Nothing clears it)
+    , repoLoadWorkerIdsByStatus :: WorkerStatus -> IO [WorkerId]
+      -- ^ list of worker ids whose users have the given status
+    , repoCascadeWorkerConfig :: WorkerId -> IO ()
+      -- ^ delete all worker_* configuration rows for the given worker_id
+    , repoCascadeWorkerSchedule :: WorkerId -> IO ()
+      -- ^ delete all worker-keyed schedule/history rows for the given worker_id
+    , repoDeactivateClearings :: WorkerId -> Day -> IO (Int, Int, Int)
+      -- ^ delete pins, drafts, and future calendar entries for a worker on/after today;
+      -- returns (pinsRemoved, draftsRemoved, calendarRemoved)
+    , repoForceDeleteUser :: UserId -> IO ()
+      -- ^ cascade all worker refs (config + schedule), then DELETE the user row
 
       -- ---------------------------------------------------------------
       -- Skills (entity CRUD)

@@ -21,7 +21,8 @@ statements =
       \  username TEXT NOT NULL UNIQUE,\
       \  password_hash TEXT NOT NULL,\
       \  role TEXT NOT NULL CHECK (role IN ('admin', 'normal')),\
-      \  worker_id INTEGER NOT NULL\
+      \  worker_status TEXT NOT NULL DEFAULT 'active' CHECK (worker_status IN ('none', 'active', 'inactive')),\
+      \  deactivated_at TEXT\
       \)"
 
       -- Skills metadata
@@ -67,40 +68,40 @@ statements =
 
       -- Workers
     , "CREATE TABLE IF NOT EXISTS worker_skills (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  skill_id INTEGER NOT NULL REFERENCES skills(id),\
       \  PRIMARY KEY (worker_id, skill_id)\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_hours (\
-      \  worker_id INTEGER PRIMARY KEY,\
+      \  worker_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,\
       \  max_period_seconds INTEGER NOT NULL\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_overtime_optin (\
-      \  worker_id INTEGER PRIMARY KEY\
+      \  worker_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_station_prefs (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  station_id INTEGER NOT NULL,\
       \  rank INTEGER NOT NULL,\
       \  PRIMARY KEY (worker_id, rank)\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_prefers_variety (\
-      \  worker_id INTEGER PRIMARY KEY\
+      \  worker_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_shift_prefs (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  shift_name TEXT NOT NULL,\
       \  rank INTEGER NOT NULL,\
       \  PRIMARY KEY (worker_id, rank)\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_weekend_only (\
-      \  worker_id INTEGER PRIMARY KEY\
+      \  worker_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT\
       \)"
 
       -- Absences
@@ -112,7 +113,7 @@ statements =
 
     , "CREATE TABLE IF NOT EXISTS absence_requests (\
       \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  type_id INTEGER NOT NULL,\
       \  start_day TEXT NOT NULL,\
       \  end_day TEXT NOT NULL,\
@@ -120,7 +121,7 @@ statements =
       \)"
 
     , "CREATE TABLE IF NOT EXISTS yearly_allowances (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  type_id INTEGER NOT NULL,\
       \  days INTEGER NOT NULL,\
       \  PRIMARY KEY (worker_id, type_id)\
@@ -141,7 +142,7 @@ statements =
 
     , "CREATE TABLE IF NOT EXISTS assignments (\
       \  schedule_name TEXT NOT NULL,\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  station_id INTEGER NOT NULL,\
       \  slot_date TEXT NOT NULL,\
       \  slot_start TEXT NOT NULL,\
@@ -157,33 +158,33 @@ statements =
 
       -- Worker seniority levels (controls max concurrent station assignments)
     , "CREATE TABLE IF NOT EXISTS worker_seniority (\
-      \  worker_id INTEGER PRIMARY KEY,\
+      \  worker_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,\
       \  level INTEGER NOT NULL\
       \)"
 
       -- Worker pairing (avoid / prefer)
     , "CREATE TABLE IF NOT EXISTS worker_avoid_pairing (\
-      \  worker_id INTEGER NOT NULL,\
-      \  other_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
+      \  other_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  PRIMARY KEY (worker_id, other_id)\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS worker_prefer_pairing (\
-      \  worker_id INTEGER NOT NULL,\
-      \  other_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
+      \  other_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  PRIMARY KEY (worker_id, other_id)\
       \)"
 
       -- Worker cross-training goals
     , "CREATE TABLE IF NOT EXISTS worker_cross_training (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  skill_id INTEGER NOT NULL REFERENCES skills(id),\
       \  PRIMARY KEY (worker_id, skill_id)\
       \)"
 
       -- Pinned assignments (recurring weekly)
     , "CREATE TABLE IF NOT EXISTS pinned_assignments (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  station_id INTEGER NOT NULL,\
       \  day_of_week TEXT NOT NULL,\
       \  shift_name TEXT,\
@@ -210,7 +211,7 @@ statements =
 
       -- Calendar assignments (continuous calendar, no schedule name)
     , "CREATE TABLE IF NOT EXISTS calendar_assignments (\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  station_id INTEGER NOT NULL,\
       \  slot_date TEXT NOT NULL,\
       \  slot_start TEXT NOT NULL,\
@@ -250,7 +251,7 @@ statements =
       -- Draft assignments (working copy, same shape as calendar_assignments + draft_id)
     , "CREATE TABLE IF NOT EXISTS draft_assignments (\
       \  draft_id INTEGER NOT NULL,\
-      \  worker_id INTEGER NOT NULL,\
+      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
       \  station_id INTEGER NOT NULL,\
       \  slot_date TEXT NOT NULL,\
       \  slot_start TEXT NOT NULL,\
@@ -260,7 +261,7 @@ statements =
 
       -- Worker employment status (decomposed properties)
     , "CREATE TABLE IF NOT EXISTS worker_employment (\
-      \  worker_id INTEGER PRIMARY KEY,\
+      \  worker_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE RESTRICT,\
       \  overtime_model TEXT NOT NULL DEFAULT 'eligible' CHECK (overtime_model IN ('eligible', 'manual-only', 'exempt')),\
       \  pay_period_tracking TEXT NOT NULL DEFAULT 'standard' CHECK (pay_period_tracking IN ('standard', 'exempt')),\
       \  is_temp BOOLEAN NOT NULL DEFAULT 0\

@@ -912,7 +912,7 @@ rpcListPendingAbsences repo _ = liftIO $ SA.listPendingAbsences repo
 rpcCreateUser :: TopicBus CommandEvent -> Repository -> CreateUserReq -> Handler RpcOk
 rpcCreateUser cmdBus repo req = do
     result <- liftIO $ SAuth.register repo
-        (curUsername req) (curPassword req) (curRole req) (WorkerId (curWorkerId req))
+        (curUsername req) (curPassword req) (curRole req) (curNoWorker req)
     case result of
         Left SAuth.UsernameTaken -> throwApiError (Conflict "Username already taken")
         Left err -> throwApiError (InternalError (show err))

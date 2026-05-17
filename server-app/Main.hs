@@ -11,7 +11,7 @@ import System.Environment (getArgs)
 import WaiAppStatic.Types (unsafeToPiece, LookupResult(..))
 
 import Auth.Types (Role(..))
-import Domain.Types (WorkerId(..))
+-- (worker IDs no longer allocated explicitly; users get worker_id == user_id)
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..))
 import qualified Service.Auth as SAuth
@@ -40,7 +40,7 @@ seedAdminUser repo = do
     users <- repoListUsers repo
     case users of
         [] -> do
-            result <- SAuth.register repo "admin" "admin" Admin (WorkerId 1)
+            result <- SAuth.register repo "admin" "admin" Admin False
             case result of
                 Right _ -> putStrLn "Seeded default admin user (username: admin, password: admin)"
                 Left _  -> putStrLn "Warning: failed to seed default admin user"
