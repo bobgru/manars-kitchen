@@ -15,7 +15,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Repo.Types (Repository(..))
 import CLI.Commands (shellWords)
-import Auth.Types (User(..), Username(..), userIdToWorkerId)
+import Auth.Types (User(..), Username(..), userIdToWorkerId, userIsWorker)
 import Domain.Types (WorkerId(..), SkillId(..), StationId(..), Station(..), AbsenceTypeId(..))
 import Domain.Skill (Skill(..))
 import Domain.Absence (AbsenceType(..), AbsenceContext(..))
@@ -60,6 +60,10 @@ commandEntityMap =
     , (["worker", "clear-avoid-pairing"],  [Resolve EWorker, Resolve EWorker])
     , (["worker", "prefer-pairing"],       [Resolve EWorker, Resolve EWorker])
     , (["worker", "clear-prefer-pairing"], [Resolve EWorker, Resolve EWorker])
+    , (["worker", "set-status"],           [Resolve EWorker, Skip])
+    , (["worker", "set-overtime-model"],   [Resolve EWorker, Skip])
+    , (["worker", "set-pay-tracking"],     [Resolve EWorker, Skip])
+    , (["worker", "set-temp"],             [Resolve EWorker, Skip])
     , (["worker", "view"],                 [Skip])
     , (["worker", "deactivate"],           [Skip])
     , (["worker", "activate"],             [Skip])
@@ -162,15 +166,17 @@ lookupByName :: Repository -> EntityKind -> String -> IO (Either String String)
 lookupByName repo EWorker name = do
     users <- repoListUsers repo
     let nameLower = T.toLower (T.pack name)
-        matches = [ userIdToWorkerId (userId u)
-                  | u <- users
-                  , let Username uname = userName u
-                  , T.toLower uname == nameLower
-                  ]
-    case matches of
-        [WorkerId wid] -> return (Right (show wid))
-        []             -> return (Left ("Unknown worker: " ++ name))
-        _              -> return (Left ("Ambiguous worker: " ++ name))
+        userMatches = [ u
+                      | u <- users
+                      , let Username uname = userName u
+                      , T.toLower uname == nameLower
+                      ]
+    case userMatches of
+        []   -> return (Left ("Unknown worker: " ++ name))
+        [u] | userIsWorker u ->
+                let WorkerId wid = userIdToWorkerId (userId u) in return (Right (show wid))
+            | otherwise -> return (Left ("'" ++ name ++ "' is not a worker"))
+        _    -> return (Left ("Ambiguous worker: " ++ name))
 lookupByName repo ESkill name = do
     skills <- repoListSkills repo
     let matches = [ sid

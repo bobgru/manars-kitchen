@@ -107,24 +107,24 @@ createShiftC     :: CreateShiftReq -> ClientM NoContent
 deleteShiftC     :: String -> ClientM NoContent
 
 -- Worker configuration
-setWorkerHoursC :: Int -> SetWorkerHoursReq -> ClientM NoContent
-_setWorkerOvertimeC :: Int -> SetWorkerOvertimeReq -> ClientM NoContent
-_setWorkerPrefsC :: Int -> SetWorkerPrefsReq -> ClientM NoContent
-_setWorkerVarietyC :: Int -> SetWorkerVarietyReq -> ClientM NoContent
-_setWorkerShiftPrefsC :: Int -> SetWorkerShiftPrefsReq -> ClientM NoContent
-_setWorkerWeekendOnlyC :: Int -> SetWorkerWeekendOnlyReq -> ClientM NoContent
-_setWorkerSeniorityC :: Int -> SetWorkerSeniorityReq -> ClientM NoContent
-_setWorkerCrossTrainingC :: Int -> SetWorkerCrossTrainingReq -> ClientM NoContent
-_setWorkerEmploymentStatusC :: Int -> SetWorkerEmploymentStatusReq -> ClientM NoContent
-_setWorkerOvertimeModelC :: Int -> SetWorkerOvertimeModelReq -> ClientM NoContent
-_setWorkerPayTrackingC :: Int -> SetWorkerPayTrackingReq -> ClientM NoContent
-_setWorkerTempC :: Int -> SetWorkerTempReq -> ClientM NoContent
+setWorkerHoursC :: Text -> SetWorkerHoursReq -> ClientM NoContent
+_setWorkerOvertimeC :: Text -> SetWorkerOvertimeReq -> ClientM NoContent
+_setWorkerPrefsC :: Text -> SetWorkerPrefsReq -> ClientM NoContent
+_setWorkerVarietyC :: Text -> SetWorkerVarietyReq -> ClientM NoContent
+_setWorkerShiftPrefsC :: Text -> SetWorkerShiftPrefsReq -> ClientM NoContent
+_setWorkerWeekendOnlyC :: Text -> SetWorkerWeekendOnlyReq -> ClientM NoContent
+_setWorkerSeniorityC :: Text -> SetWorkerSeniorityReq -> ClientM NoContent
+_setWorkerCrossTrainingC :: Text -> SetWorkerCrossTrainingReq -> ClientM NoContent
+_setWorkerEmploymentStatusC :: Text -> SetWorkerEmploymentStatusReq -> ClientM NoContent
+_setWorkerOvertimeModelC :: Text -> SetWorkerOvertimeModelReq -> ClientM NoContent
+_setWorkerPayTrackingC :: Text -> SetWorkerPayTrackingReq -> ClientM NoContent
+_setWorkerTempC :: Text -> SetWorkerTempReq -> ClientM NoContent
 
 -- Worker skills / pairing
-grantWorkerSkillC :: Int -> SkillId -> ClientM NoContent
-revokeWorkerSkillC :: Int -> SkillId -> ClientM NoContent
-_avoidPairingC :: Int -> WorkerPairingReq -> ClientM NoContent
-_preferPairingC :: Int -> WorkerPairingReq -> ClientM NoContent
+grantWorkerSkillC :: Text -> Text -> ClientM NoContent
+revokeWorkerSkillC :: Text -> Text -> ClientM NoContent
+_avoidPairingC :: Text -> WorkerPairingReq -> ClientM NoContent
+_preferPairingC :: Text -> WorkerPairingReq -> ClientM NoContent
 
 -- Pins
 _listPinsC :: ClientM [PinnedAssignment]
@@ -705,13 +705,13 @@ spec = do
 
     describe "Worker configuration" $ do
         it "set worker hours" $ withSeededApp $ \_ env -> do
-            Right _ <- runClientM (setWorkerHoursC 1 (SetWorkerHoursReq 40)) env
+            Right _ <- runClientM (setWorkerHoursC "admin" (SetWorkerHoursReq 40)) env
             pure ()
 
         it "grant and revoke worker skill" $ withSeededApp $ \repo env -> do
             _ <- SW.addSkill repo "grill" ""
-            Right _ <- runClientM (grantWorkerSkillC 1 (SkillId 1)) env
-            Right _ <- runClientM (revokeWorkerSkillC 1 (SkillId 1)) env
+            Right _ <- runClientM (grantWorkerSkillC "admin" "grill") env
+            Right _ <- runClientM (revokeWorkerSkillC "admin" "grill") env
             pure ()
 
     describe "Config writes" $ do
@@ -1023,29 +1023,30 @@ spec = do
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
                 -- Worker 1 can set their own hours
-                Right _ <- runClientM (setWorkerHoursC 1 (SetWorkerHoursReq 40)) wEnv
+                Right _ <- runClientM (setWorkerHoursC "worker1" (SetWorkerHoursReq 40)) wEnv
                 pure ()
 
         it "worker is blocked from modifying another worker" $
             withServer $ \repo port -> do
                 _ <- register repo "worker1" "pass" Normal False
+                _ <- register repo "worker2" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "worker1" "pass"
                 wEnv <- mkAuthEnv token port
-                -- Worker 1 cannot set worker 2's hours
-                result <- runClientM (setWorkerHoursC 2 (SetWorkerHoursReq 40)) wEnv
+                -- worker1 cannot set worker2's hours
+                result <- runClientM (setWorkerHoursC "worker2" (SetWorkerHoursReq 40)) wEnv
                 result `shouldFailWith` 403
 
         it "admin can modify any worker" $
             withServer $ \repo port -> do
                 _ <- register repo "admin" "pass" Admin False
-                _ <- register repo "extra-worker" "pass" Normal False  -- needed for FK on worker 2
+                _ <- register repo "extra-worker" "pass" Normal False
                 env <- mkPlainEnv port
                 token <- loginAs env "admin" "pass"
                 aEnv <- mkAuthEnv token port
                 -- Admin can set any worker's hours
-                Right _ <- runClientM (setWorkerHoursC 1 (SetWorkerHoursReq 40)) aEnv
-                Right _ <- runClientM (setWorkerHoursC 2 (SetWorkerHoursReq 35)) aEnv
+                Right _ <- runClientM (setWorkerHoursC "admin" (SetWorkerHoursReq 40)) aEnv
+                Right _ <- runClientM (setWorkerHoursC "extra-worker" (SetWorkerHoursReq 35)) aEnv
                 pure ()
 
         it "worker absence request is self-scoped" $

@@ -20,7 +20,7 @@ import Servant.API
 import Servant.Server.Experimental.Auth (AuthServerData)
 
 import Auth.Types (User)
-import Domain.Types (SkillId, Schedule, Station)
+import Domain.Types (Schedule, Station)
 import Domain.Skill (Skill)
 import Domain.Shift (ShiftDef)
 import Domain.Scheduler (ScheduleResult)
@@ -112,41 +112,41 @@ type RawAPI =
     -- -----------------------------------------------------------------
     -- Worker configuration
     -- -----------------------------------------------------------------
-    :<|> "api" :> "workers" :> Capture "id" Int :> "hours"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "hours"
          :> ReqBody '[JSON] SetWorkerHoursReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "overtime"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "overtime"
          :> ReqBody '[JSON] SetWorkerOvertimeReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "prefs"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "prefs"
          :> ReqBody '[JSON] SetWorkerPrefsReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "variety"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "variety"
          :> ReqBody '[JSON] SetWorkerVarietyReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "shift-prefs"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "shift-prefs"
          :> ReqBody '[JSON] SetWorkerShiftPrefsReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "weekend-only"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "weekend-only"
          :> ReqBody '[JSON] SetWorkerWeekendOnlyReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "seniority"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "seniority"
          :> ReqBody '[JSON] SetWorkerSeniorityReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "cross-training"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "cross-training"
          :> ReqBody '[JSON] SetWorkerCrossTrainingReq :> PostNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "employment-status"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "employment-status"
          :> ReqBody '[JSON] SetWorkerEmploymentStatusReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "overtime-model"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "overtime-model"
          :> ReqBody '[JSON] SetWorkerOvertimeModelReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "pay-tracking"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "pay-tracking"
          :> ReqBody '[JSON] SetWorkerPayTrackingReq :> PutNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "temp"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "temp"
          :> ReqBody '[JSON] SetWorkerTempReq :> PutNoContent
 
     -- Worker skill grant/revoke
-    :<|> "api" :> "workers" :> Capture "id" Int :> "skills" :> Capture "skillId" SkillId
+    :<|> "api" :> "workers" :> Capture "name" Text :> "skills" :> Capture "skillName" Text
          :> PostNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "skills" :> Capture "skillId" SkillId
+    :<|> "api" :> "workers" :> Capture "name" Text :> "skills" :> Capture "skillName" Text
          :> DeleteNoContent
 
     -- Worker pairing
-    :<|> "api" :> "workers" :> Capture "id" Int :> "avoid-pairing"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "avoid-pairing"
          :> ReqBody '[JSON] WorkerPairingReq :> PostNoContent
-    :<|> "api" :> "workers" :> Capture "id" Int :> "prefer-pairing"
+    :<|> "api" :> "workers" :> Capture "name" Text :> "prefer-pairing"
          :> ReqBody '[JSON] WorkerPairingReq :> PostNoContent
 
     -- -----------------------------------------------------------------

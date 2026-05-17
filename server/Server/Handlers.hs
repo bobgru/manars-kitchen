@@ -527,146 +527,138 @@ handleDeleteShift cmdBus repo user name = do
 -- Worker configuration
 -- -----------------------------------------------------------------
 
-handleSetWorkerHours :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerHoursReq -> Handler NoContent
-handleSetWorkerHours cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setMaxHours repo (WorkerId wid) (fromIntegral (swhrHours req))
-    logRest cmdBus user ("worker set-hours " ++ shellQuote wName ++ " " ++ show (swhrHours req))
+-- | Helper: resolve worker name + check self-or-admin in one step.
+-- Returns the resolved 'WorkerId' on success.
+resolveAndAuthorize :: Repository -> User -> Text -> Handler WorkerId
+resolveAndAuthorize repo u name = do
+    wid <- resolveWorkerName repo name
+    let WorkerId i = wid in requireSelfOrAdmin u i
+    pure wid
+
+handleSetWorkerHours :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerHoursReq -> Handler NoContent
+handleSetWorkerHours cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setMaxHours repo wid (fromIntegral (swhrHours req))
+    logRest cmdBus user ("worker set-hours " ++ shellQuote (T.unpack name) ++ " " ++ show (swhrHours req))
     pure NoContent
 
-handleSetWorkerOvertime :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerOvertimeReq -> Handler NoContent
-handleSetWorkerOvertime cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    _ <- liftIO $ SW.setOvertimeOptIn repo (WorkerId wid) (sworOptIn req)
-    logRest cmdBus user ("worker set-overtime " ++ shellQuote wName ++ " " ++ show (sworOptIn req))
+handleSetWorkerOvertime :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerOvertimeReq -> Handler NoContent
+handleSetWorkerOvertime cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    _ <- liftIO $ SW.setOvertimeOptIn repo wid (sworOptIn req)
+    logRest cmdBus user ("worker set-overtime " ++ shellQuote (T.unpack name) ++ " " ++ show (sworOptIn req))
     pure NoContent
 
-handleSetWorkerPrefs :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerPrefsReq -> Handler NoContent
-handleSetWorkerPrefs cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setStationPreferences repo (WorkerId wid)
+handleSetWorkerPrefs :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerPrefsReq -> Handler NoContent
+handleSetWorkerPrefs cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setStationPreferences repo wid
         (map StationId (swprStationIds req))
-    logRest cmdBus user ("worker set-prefs " ++ shellQuote wName)
+    logRest cmdBus user ("worker set-prefs " ++ shellQuote (T.unpack name))
     pure NoContent
 
-handleSetWorkerVariety :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerVarietyReq -> Handler NoContent
-handleSetWorkerVariety cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setVarietyPreference repo (WorkerId wid) (swvrPrefer req)
-    logRest cmdBus user ("worker set-variety " ++ shellQuote wName ++ " " ++ show (swvrPrefer req))
+handleSetWorkerVariety :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerVarietyReq -> Handler NoContent
+handleSetWorkerVariety cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setVarietyPreference repo wid (swvrPrefer req)
+    logRest cmdBus user ("worker set-variety " ++ shellQuote (T.unpack name) ++ " " ++ show (swvrPrefer req))
     pure NoContent
 
-handleSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerShiftPrefsReq -> Handler NoContent
-handleSetWorkerShiftPrefs cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setShiftPreferences repo (WorkerId wid) (map T.pack (swsprShifts req))
-    logRest cmdBus user ("worker set-shift-pref " ++ shellQuote wName)
+handleSetWorkerShiftPrefs :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerShiftPrefsReq -> Handler NoContent
+handleSetWorkerShiftPrefs cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setShiftPreferences repo wid (map T.pack (swsprShifts req))
+    logRest cmdBus user ("worker set-shift-pref " ++ shellQuote (T.unpack name))
     pure NoContent
 
-handleSetWorkerWeekendOnly :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerWeekendOnlyReq -> Handler NoContent
-handleSetWorkerWeekendOnly cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setWeekendOnly repo (WorkerId wid) (swwoVal req)
-    logRest cmdBus user ("worker set-weekend-only " ++ shellQuote wName ++ " " ++ show (swwoVal req))
+handleSetWorkerWeekendOnly :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerWeekendOnlyReq -> Handler NoContent
+handleSetWorkerWeekendOnly cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setWeekendOnly repo wid (swwoVal req)
+    logRest cmdBus user ("worker set-weekend-only " ++ shellQuote (T.unpack name) ++ " " ++ show (swwoVal req))
     pure NoContent
 
-handleSetWorkerSeniority :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerSeniorityReq -> Handler NoContent
-handleSetWorkerSeniority cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setSeniority repo (WorkerId wid) (swsrLevel req)
-    logRest cmdBus user ("worker set-seniority " ++ shellQuote wName ++ " " ++ show (swsrLevel req))
+handleSetWorkerSeniority :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerSeniorityReq -> Handler NoContent
+handleSetWorkerSeniority cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setSeniority repo wid (swsrLevel req)
+    logRest cmdBus user ("worker set-seniority " ++ shellQuote (T.unpack name) ++ " " ++ show (swsrLevel req))
     pure NoContent
 
-handleSetWorkerCrossTraining :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerCrossTrainingReq -> Handler NoContent
-handleSetWorkerCrossTraining cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+handleSetWorkerCrossTraining :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerCrossTrainingReq -> Handler NoContent
+handleSetWorkerCrossTraining cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
     skName <- liftIO $ lookupSkillName repo (SkillId (swctrSkillId req))
-    liftIO $ SW.addCrossTraining repo (WorkerId wid) (SkillId (swctrSkillId req))
-    logRest cmdBus user ("worker set-cross-training " ++ shellQuote wName ++ " " ++ shellQuote skName)
+    liftIO $ SW.addCrossTraining repo wid (SkillId (swctrSkillId req))
+    logRest cmdBus user ("worker set-cross-training " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote skName)
     pure NoContent
 
-handleSetWorkerEmploymentStatus :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerEmploymentStatusReq -> Handler NoContent
-handleSetWorkerEmploymentStatus cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    _ <- liftIO $ SW.setEmploymentStatus repo (WorkerId wid) (swesStatus req)
-    logRest cmdBus user ("worker set-status " ++ shellQuote wName ++ " " ++ swesStatus req)
+handleSetWorkerEmploymentStatus :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerEmploymentStatusReq -> Handler NoContent
+handleSetWorkerEmploymentStatus cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    _ <- liftIO $ SW.setEmploymentStatus repo wid (swesStatus req)
+    logRest cmdBus user ("worker set-status " ++ shellQuote (T.unpack name) ++ " " ++ swesStatus req)
     pure NoContent
 
-handleSetWorkerOvertimeModel :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerOvertimeModelReq -> Handler NoContent
-handleSetWorkerOvertimeModel cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setOvertimeModel repo (WorkerId wid) (swomModel req)
-    logRest cmdBus user ("worker set-overtime-model " ++ shellQuote wName)
+handleSetWorkerOvertimeModel :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerOvertimeModelReq -> Handler NoContent
+handleSetWorkerOvertimeModel cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setOvertimeModel repo wid (swomModel req)
+    logRest cmdBus user ("worker set-overtime-model " ++ shellQuote (T.unpack name))
     pure NoContent
 
-handleSetWorkerPayTracking :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerPayTrackingReq -> Handler NoContent
-handleSetWorkerPayTracking cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setPayPeriodTracking repo (WorkerId wid) (swptTracking req)
-    logRest cmdBus user ("worker set-pay-tracking " ++ shellQuote wName)
+handleSetWorkerPayTracking :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerPayTrackingReq -> Handler NoContent
+handleSetWorkerPayTracking cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setPayPeriodTracking repo wid (swptTracking req)
+    logRest cmdBus user ("worker set-pay-tracking " ++ shellQuote (T.unpack name))
     pure NoContent
 
-handleSetWorkerTemp :: TopicBus CommandEvent -> Repository -> User -> Int -> SetWorkerTempReq -> Handler NoContent
-handleSetWorkerTemp cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    liftIO $ SW.setTempFlag repo (WorkerId wid) (swtTemp req)
-    logRest cmdBus user ("worker set-temp " ++ shellQuote wName ++ " " ++ show (swtTemp req))
+handleSetWorkerTemp :: TopicBus CommandEvent -> Repository -> User -> Text -> SetWorkerTempReq -> Handler NoContent
+handleSetWorkerTemp cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
+    liftIO $ SW.setTempFlag repo wid (swtTemp req)
+    logRest cmdBus user ("worker set-temp " ++ shellQuote (T.unpack name) ++ " " ++ show (swtTemp req))
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Worker skill grant / revoke
 -- -----------------------------------------------------------------
 
-handleGrantWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> SkillId -> Handler NoContent
-handleGrantWorkerSkill cmdBus repo user wid sid = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    skName <- liftIO $ lookupSkillName repo sid
-    liftIO $ SW.grantWorkerSkill repo (WorkerId wid) sid
-    logRest cmdBus user ("worker grant-skill " ++ shellQuote wName ++ " " ++ shellQuote skName)
+handleGrantWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Text -> Text -> Handler NoContent
+handleGrantWorkerSkill cmdBus repo user name skName = do
+    wid <- resolveAndAuthorize repo user name
+    sid <- resolveSkillName repo skName
+    liftIO $ SW.grantWorkerSkill repo wid sid
+    logRest cmdBus user ("worker grant-skill " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack skName))
     pure NoContent
 
-handleRevokeWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Int -> SkillId -> Handler NoContent
-handleRevokeWorkerSkill cmdBus repo user wid sid = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
-    skName <- liftIO $ lookupSkillName repo sid
-    liftIO $ SW.revokeWorkerSkill repo (WorkerId wid) sid
-    logRest cmdBus user ("worker revoke-skill " ++ shellQuote wName ++ " " ++ shellQuote skName)
+handleRevokeWorkerSkill :: TopicBus CommandEvent -> Repository -> User -> Text -> Text -> Handler NoContent
+handleRevokeWorkerSkill cmdBus repo user name skName = do
+    wid <- resolveAndAuthorize repo user name
+    sid <- resolveSkillName repo skName
+    liftIO $ SW.revokeWorkerSkill repo wid sid
+    logRest cmdBus user ("worker revoke-skill " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack skName))
     pure NoContent
 
 -- -----------------------------------------------------------------
 -- Worker pairing
 -- -----------------------------------------------------------------
 
-handleAvoidPairing :: TopicBus CommandEvent -> Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
-handleAvoidPairing cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+handleAvoidPairing :: TopicBus CommandEvent -> Repository -> User -> Text -> WorkerPairingReq -> Handler NoContent
+handleAvoidPairing cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
     otherName <- liftIO $ lookupWorkerName repo (WorkerId (wprOtherWorkerId req))
-    liftIO $ SW.addAvoidPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
-    logRest cmdBus user ("worker avoid-pairing " ++ shellQuote wName ++ " " ++ shellQuote otherName)
+    liftIO $ SW.addAvoidPairing repo wid (WorkerId (wprOtherWorkerId req))
+    logRest cmdBus user ("worker avoid-pairing " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote otherName)
     pure NoContent
 
-handlePreferPairing :: TopicBus CommandEvent -> Repository -> User -> Int -> WorkerPairingReq -> Handler NoContent
-handlePreferPairing cmdBus repo user wid req = do
-    requireSelfOrAdmin user wid
-    wName <- liftIO $ lookupWorkerName repo (WorkerId wid)
+handlePreferPairing :: TopicBus CommandEvent -> Repository -> User -> Text -> WorkerPairingReq -> Handler NoContent
+handlePreferPairing cmdBus repo user name req = do
+    wid <- resolveAndAuthorize repo user name
     otherName <- liftIO $ lookupWorkerName repo (WorkerId (wprOtherWorkerId req))
-    liftIO $ SW.addPreferPairing repo (WorkerId wid) (WorkerId (wprOtherWorkerId req))
-    logRest cmdBus user ("worker prefer-pairing " ++ shellQuote wName ++ " " ++ shellQuote otherName)
+    liftIO $ SW.addPreferPairing repo wid (WorkerId (wprOtherWorkerId req))
+    logRest cmdBus user ("worker prefer-pairing " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote otherName)
     pure NoContent
 
 -- -----------------------------------------------------------------
