@@ -18,7 +18,7 @@ import Servant
 
 import Auth.Types (User(..), UserId(..), Username(..), Role(..), userIdToWorkerId)
 import Data.Text (Text)
-import Domain.Types (WorkerId(..), StationId(..), Station(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule, workerStatusToText)
+import Domain.Types (WorkerId(..), StationId(..), Station(..), AbsenceId(..), AbsenceTypeId(..), SkillId(..), Schedule, WorkerStatus(..), workerStatusToText)
 import Domain.Worker (OvertimeModel(..), PayPeriodTracking(..))
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef(..))
@@ -27,7 +27,7 @@ import Domain.Absence (AbsenceRequest(..), AbsenceType(..), AbsenceContext(..))
 import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment(..))
 import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
-import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), SessionId(..), HintSessionRecord(..))
+import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), SessionId(..), HintSessionRecord(..), WorkerSummary(..))
 import qualified Service.Worker as SW
 import qualified Service.User as SU
 import qualified Service.Schedule as SS
@@ -191,8 +191,10 @@ server execEnv cmdBus repo user =
     :<|> handleRenameUser cmdBus repo user
     :<|> handleForceDeleteUser cmdBus repo user
     -- Worker entity
+    :<|> handleListWorkers repo user
     :<|> handleViewWorker repo user
     :<|> handleDeactivateWorker cmdBus repo user
+    :<|> handleForceDeactivateWorker cmdBus repo user
     :<|> handleActivateWorker cmdBus repo user
     :<|> handleDeleteWorker cmdBus repo user
     :<|> handleForceDeleteWorker cmdBus repo user
@@ -918,6 +920,28 @@ resolveWorkerName repo name = do
         Left (SW.WorkerNotFound n) -> throwApiError (NotFound ("User not found: " ++ n))
         Left (SW.NotAWorker n)     -> throwApiError (NotFound ("User '" ++ n ++ "' is not a worker"))
 
+handleListWorkers :: Repository -> User -> Maybe Text -> Handler [WorkerSummaryResp]
+handleListWorkers repo user mStatus = do
+    requireAdmin user
+    statusFilter <- case mStatus of
+        Nothing       -> pure (Just WSActive)
+        Just "active" -> pure (Just WSActive)
+        Just "inactive" -> pure (Just WSInactive)
+        Just "all"    -> pure Nothing
+        Just other    -> throwApiError (BadRequest ("Invalid status filter '" ++ T.unpack other ++ "'. Valid: active, inactive, all"))
+    summaries <- liftIO $ repoListWorkerSummaries repo statusFilter
+    pure (map toSummaryResp summaries)
+
+toSummaryResp :: WorkerSummary -> WorkerSummaryResp
+toSummaryResp s = WorkerSummaryResp
+    { wsrName        = wsName s
+    , wsrRole        = wsRole s
+    , wsrStatus      = workerStatusToText (wsStatus s)
+    , wsrIsTemp      = wsIsTemp s
+    , wsrWeekendOnly = wsWeekendOnly s
+    , wsrSeniority   = wsSeniority s
+    }
+
 handleViewWorker :: Repository -> User -> Text -> Handler WorkerProfileResp
 handleViewWorker repo user name = do
     requireAdmin user
@@ -927,15 +951,33 @@ handleViewWorker repo user name = do
         Nothing -> throwApiError (NotFound ("No profile for worker '" ++ T.unpack name ++ "'"))
         Just p  -> pure (toProfileResp p)
 
-handleDeactivateWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler DeactivateResultResp
+handleDeactivateWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler NoContent
 handleDeactivateWorker cmdBus repo user name = do
     requireAdmin user
     wid <- resolveWorkerName repo name
+    -- Verify worker is active before previewing
+    mUser <- liftIO $ SW.resolveWorkerByName repo name
+    case mUser of
+        Right (_, WSInactive) -> throwApiError (Conflict ("Worker '" ++ T.unpack name ++ "' is already inactive"))
+        _                     -> pure ()
     today <- liftIO $ utctDay <$> getCurrentTime
     r <- liftIO $ SW.safeDeactivateWorker repo wid today
     case r of
-        Right (SW.DeactivateResult pn dn cn) -> do
+        Right _ -> do
             logRest cmdBus user ("worker deactivate " ++ shellQuote (T.unpack name))
+            pure NoContent
+        Left (SW.DeactivateResult pn dn cn) ->
+            throwConflictWithBody (DeactivateResultResp pn dn cn)
+
+handleForceDeactivateWorker :: TopicBus CommandEvent -> Repository -> User -> Text -> Handler DeactivateResultResp
+handleForceDeactivateWorker cmdBus repo user name = do
+    requireAdmin user
+    wid <- resolveWorkerName repo name
+    today <- liftIO $ utctDay <$> getCurrentTime
+    r <- liftIO $ SW.forceDeactivateWorker repo wid today
+    case r of
+        Right (SW.DeactivateResult pn dn cn) -> do
+            logRest cmdBus user ("worker force-deactivate " ++ shellQuote (T.unpack name))
             pure (DeactivateResultResp pn dn cn)
         Left err -> throwApiError (Conflict err)
 

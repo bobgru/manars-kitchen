@@ -7,7 +7,8 @@ import Control.Concurrent (threadDelay)
 import System.Directory (removeFile, doesFileExist)
 
 import Data.Text (Text)
-import Auth.Types (UserId, Role(..))
+import Auth.Types (UserId, Role(..), userIsWorker, userWorkerStatus)
+import Domain.Types (WorkerStatus(..))
 -- (no longer importing WorkerId — register no longer takes one)
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..))
@@ -62,6 +63,31 @@ spec = do
             repoCloseSession repo sid2
             mActive <- repoGetActiveSession repo uid
             mActive `shouldBe` Nothing
+
+    describe "register with noWorker flag" $ do
+        it "creates a user with worker_status='none' when noWorker=True" $ withTestRepo $ \repo -> do
+            r <- register repo "frank" "password" Admin True
+            case r of
+                Right uid -> do
+                    mUser <- repoGetUser repo uid
+                    case mUser of
+                        Just u -> do
+                            userWorkerStatus u `shouldBe` WSNone
+                            userIsWorker u `shouldBe` False
+                        Nothing -> expectationFailure "user not found"
+                Left err -> expectationFailure ("register failed: " ++ show err)
+
+        it "creates a user with worker_status='active' when noWorker=False" $ withTestRepo $ \repo -> do
+            r <- register repo "grace" "password" Normal False
+            case r of
+                Right uid -> do
+                    mUser <- repoGetUser repo uid
+                    case mUser of
+                        Just u -> do
+                            userWorkerStatus u `shouldBe` WSActive
+                            userIsWorker u `shouldBe` True
+                        Nothing -> expectationFailure "user not found"
+                Left err -> expectationFailure ("register failed: " ++ show err)
 
 -- | Helper: create a temporary SQLite repo for testing.
 withTestRepo :: (Repository -> IO ()) -> IO ()

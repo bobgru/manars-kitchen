@@ -7,6 +7,8 @@ import SkillsListPage from "./components/SkillsListPage";
 import SkillDetailPage from "./components/SkillDetailPage";
 import StationsListPage from "./components/StationsListPage";
 import StationDetailPage from "./components/StationDetailPage";
+import WorkersListPage from "./components/WorkersListPage";
+import WorkerDetailPage from "./components/WorkerDetailPage";
 import { SSEProvider } from "./hooks/useSSE";
 import "./App.css";
 
@@ -69,6 +71,8 @@ function App() {
             <Route path="skills/:name" element={<SkillDetailPage />} />
             <Route path="stations" element={<StationsListPage />} />
             <Route path="stations/:name" element={<StationDetailPage />} />
+            <Route path="workers" element={<WorkersListPage />} />
+            <Route path="workers/:name" element={<WorkerDetailPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

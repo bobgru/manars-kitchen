@@ -247,8 +247,10 @@ logoutC
     :<|> _renameUserC
     :<|> _forceDeleteUserC
     -- Worker entity
+    :<|> _listWorkersC
     :<|> _viewWorkerC
     :<|> _deactivateWorkerC
+    :<|> _forceDeactivateWorkerC
     :<|> _activateWorkerC
     :<|> _deleteWorkerC
     :<|> _forceDeleteWorkerC

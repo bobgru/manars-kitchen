@@ -52,6 +52,7 @@ module Server.Json
     , CreateUserReq(..)
     , RenameUserReq(..)
     , WorkerProfileResp(..)
+    , WorkerSummaryResp(..)
     , WorkerReferencesResp(..)
     , DeactivateResultResp(..)
       -- * Hint sessions
@@ -1066,6 +1067,36 @@ instance FromJSON WorkerProfileResp where
             <*> v .:  "crossTraining"
             <*> v .:  "avoidPairing"
             <*> v .:  "preferPairing"
+
+-- | Slim summary row for the workers list page.
+data WorkerSummaryResp = WorkerSummaryResp
+    { wsrName        :: !Text
+    , wsrRole        :: !Text
+    , wsrStatus      :: !Text
+    , wsrIsTemp      :: !Bool
+    , wsrWeekendOnly :: !Bool
+    , wsrSeniority   :: !Int
+    } deriving (Show)
+
+instance ToJSON WorkerSummaryResp where
+    toJSON r = object
+        [ "name"        .= wsrName r
+        , "role"        .= wsrRole r
+        , "status"      .= wsrStatus r
+        , "isTemp"      .= wsrIsTemp r
+        , "weekendOnly" .= wsrWeekendOnly r
+        , "seniority"   .= wsrSeniority r
+        ]
+
+instance FromJSON WorkerSummaryResp where
+    parseJSON = withObject "WorkerSummaryResp" $ \v ->
+        WorkerSummaryResp
+            <$> v .: "name"
+            <*> v .: "role"
+            <*> v .: "status"
+            <*> v .: "isTemp"
+            <*> v .: "weekendOnly"
+            <*> v .: "seniority"
 
 -- -----------------------------------------------------------------
 -- Hint session types

@@ -1665,9 +1665,30 @@ handleCommand st cmd = case cmd of
         case mres of
             Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
             Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
-            Right (wid, _) -> do
+            Right (_, WSInactive)      -> putStrLn ("Worker '" ++ name ++ "' is already inactive.")
+            Right (wid, WSActive) -> do
                 today <- utctDay <$> getCurrentTime
                 r <- SW.safeDeactivateWorker (asRepo st) wid today
+                case r of
+                    Right _ ->
+                        putStrLn ("Deactivated " ++ name ++ ".")
+                    Left (SW.DeactivateResult pn dn cn) -> do
+                        putStrLn $ "Cannot deactivate " ++ name ++ ". Impact: "
+                            ++ show pn ++ " pins, "
+                            ++ show dn ++ " draft entries, "
+                            ++ show cn ++ " future calendar slots."
+                        putStrLn $ "Run 'worker force-deactivate " ++ name ++ "' to commit anyway."
+            Right (_, WSNone) ->
+                putStrLn ("User '" ++ name ++ "' is not a worker.")
+
+    WorkerForceDeactivate name -> requireAdmin st $ do
+        mres <- SW.resolveWorkerByName (asRepo st) (T.pack name)
+        case mres of
+            Left (SW.WorkerNotFound n) -> putStrLn ("No user named '" ++ n ++ "'.")
+            Left (SW.NotAWorker n)     -> putStrLn ("User '" ++ n ++ "' is not a worker.")
+            Right (wid, _) -> do
+                today <- utctDay <$> getCurrentTime
+                r <- SW.forceDeactivateWorker (asRepo st) wid today
                 case r of
                     Left err -> putStrLn ("Error: " ++ err)
                     Right (SW.DeactivateResult pn dn cn) ->
@@ -2480,7 +2501,8 @@ helpRegistry =
     , ("user",     True,  "user force-delete <id>",          "Cascade-delete user and all worker refs")
     -- Worker entity (admin)
     , ("worker",   True,  "worker view <name>",              "Show a worker's full profile")
-    , ("worker",   True,  "worker deactivate <name>",        "Take a worker out of active scheduling (preserves config)")
+    , ("worker",   True,  "worker deactivate <name>",        "Deactivate; only commits if no pins/drafts/future calendar refs")
+    , ("worker",   True,  "worker force-deactivate <name>",  "Deactivate unconditionally; clears pins/drafts/future calendar")
     , ("worker",   True,  "worker activate <name>",          "Reactivate an inactive worker")
     , ("worker",   True,  "worker delete <name>",            "Permanently remove worker concept (blocks if refs)")
     , ("worker",   True,  "worker force-delete <name>",      "Cascade-remove all worker refs (user remains)")

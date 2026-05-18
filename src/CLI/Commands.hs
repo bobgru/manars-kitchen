@@ -80,6 +80,7 @@ data Command
     -- Worker entity (admin)
     | WorkerView String                       -- ^ name
     | WorkerDeactivate String
+    | WorkerForceDeactivate String
     | WorkerActivate String
     | WorkerDelete String
     | WorkerForceDelete String
@@ -277,11 +278,12 @@ parseCommand input = case shellWords input of
     ["user", "force-delete", uid]
         | isDigit' uid -> UserForceDelete (read uid)
 
-    ["worker", "view", name]         -> WorkerView name
-    ["worker", "deactivate", name]   -> WorkerDeactivate name
-    ["worker", "activate", name]     -> WorkerActivate name
-    ["worker", "delete", name]       -> WorkerDelete name
-    ["worker", "force-delete", name] -> WorkerForceDelete name
+    ["worker", "view", name]               -> WorkerView name
+    ["worker", "deactivate", name]         -> WorkerDeactivate name
+    ["worker", "force-deactivate", name]   -> WorkerForceDeactivate name
+    ["worker", "activate", name]           -> WorkerActivate name
+    ["worker", "delete", name]             -> WorkerDelete name
+    ["worker", "force-delete", name]       -> WorkerForceDelete name
 
     ["config", "show"]               -> ConfigShow
     ["config", "set", key, val]      -> ConfigSet key val

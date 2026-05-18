@@ -6,6 +6,7 @@ module Repo.Types
     , SessionId(..)
     , Token
     , HintSessionRecord(..)
+    , WorkerSummary(..)
     ) where
 
 import Auth.Types (UserId, Role, User)
@@ -66,6 +67,16 @@ data AuditEntry = AuditEntry
     , aeSource     :: !Text
     } deriving (Show, Eq)
 
+-- | Slim summary row for the workers list endpoint.
+data WorkerSummary = WorkerSummary
+    { wsName        :: !Text
+    , wsRole        :: !Text   -- ^ "admin" | "normal"
+    , wsStatus      :: !WorkerStatus
+    , wsIsTemp      :: !Bool
+    , wsWeekendOnly :: !Bool
+    , wsSeniority   :: !Int
+    } deriving (Show, Eq)
+
 -- | Persisted hint session (hints + audit checkpoint).
 data HintSessionRecord = HintSessionRecord
     { hsHints      :: ![Hint]
@@ -93,6 +104,10 @@ data Repository = Repository
       -- ^ user id, new status, deactivated_at (Nothing clears it)
     , repoLoadWorkerIdsByStatus :: WorkerStatus -> IO [WorkerId]
       -- ^ list of worker ids whose users have the given status
+    , repoListWorkerSummaries :: Maybe WorkerStatus -> IO [WorkerSummary]
+      -- ^ list slim worker summaries (name, role, status, isTemp,
+      -- weekendOnly, seniority) filtered by status; @Nothing@ returns
+      -- all active and inactive workers (excluding @worker_status='none'@)
     , repoCascadeWorkerConfig :: WorkerId -> IO ()
       -- ^ delete all worker_* configuration rows for the given worker_id
     , repoCascadeWorkerSchedule :: WorkerId -> IO ()

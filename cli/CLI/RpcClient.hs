@@ -723,6 +723,7 @@ dispatchCommand env cmd = case cmd of
     -- Worker entity (admin)
     WorkerView _ -> putStrLn "worker view is not yet supported in remote mode."
     WorkerDeactivate _ -> putStrLn "worker deactivate is not yet supported in remote mode."
+    WorkerForceDeactivate _ -> putStrLn "worker force-deactivate is not yet supported in remote mode."
     WorkerActivate _ -> putStrLn "worker activate is not yet supported in remote mode."
     WorkerDelete _ -> putStrLn "worker delete is not yet supported in remote mode."
     WorkerForceDelete _ -> putStrLn "worker force-delete is not yet supported in remote mode."

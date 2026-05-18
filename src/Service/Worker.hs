@@ -60,7 +60,9 @@ module Service.Worker
     , checkWorkerReferences
     , isWorkerUnreferenced
     , DeactivateResult(..)
+    , previewDeactivation
     , safeDeactivateWorker
+    , forceDeactivateWorker
     , activateWorker
     , safeDeleteWorker
     , forceDeleteWorker
@@ -76,6 +78,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (DayOfWeek(..))
+import Data.Time.Clock (getCurrentTime, utctDay)
 
 import Data.Time (Day)
 
@@ -682,11 +685,30 @@ data DeactivateResult = DeactivateResult
     , drCalendarRemoved :: !Int
     } deriving (Show)
 
--- | Take a worker out of active scheduling. Removes pins, drafts entries,
--- and future calendar entries. Preserves all worker_* configuration and
--- past calendar/named-schedule history.
-safeDeactivateWorker :: Repository -> WorkerId -> Day -> IO (Either String DeactivateResult)
-safeDeactivateWorker repo wid today = do
+-- | Count the pins, draft entries, and future calendar entries that
+-- would be removed if the worker were deactivated today. Does not
+-- modify any state.
+previewDeactivation :: Repository -> WorkerId -> IO DeactivateResult
+previewDeactivation repo wid = do
+    today <- utctDay <$> getCurrentTime
+    pins <- repoLoadPins repo
+    let pinN = length [() | p <- pins, pinWorker p == wid]
+    drafts <- repoListDrafts repo
+    drftN <- fmap sum $ mapM (\d -> do
+        s <- repoLoadDraftAssignments repo (diId d)
+        pure $ length [() | a <- Set.toList (unSchedule s), assignWorker a == wid]
+        ) drafts
+    calSched <- repoLoadCalendar repo today (read "2999-12-31")
+    let calN = length [() | a <- Set.toList (unSchedule calSched), assignWorker a == wid]
+    pure (DeactivateResult pinN drftN calN)
+
+-- | Unconditional deactivation. Transitions @worker_status@ from
+-- @active@ to @inactive@, removes pins, drafts entries, and future
+-- calendar entries. Preserves all worker_* configuration and past
+-- calendar/named-schedule history. Returns 'Left' if the user is not
+-- a worker or is already inactive.
+forceDeactivateWorker :: Repository -> WorkerId -> Day -> IO (Either String DeactivateResult)
+forceDeactivateWorker repo wid today = do
     let uid = workerIdToUserId wid
     mUser <- repoGetUser repo uid
     case mUser of
@@ -698,6 +720,21 @@ safeDeactivateWorker repo wid today = do
                 (pinN, drftN, calN) <- repoDeactivateClearings repo wid today
                 repoSetWorkerStatus repo uid WSInactive (Just today)
                 pure (Right (DeactivateResult pinN drftN calN))
+
+-- | Safe variant of deactivation: previews the impact, and only commits
+-- if all counts are zero. Returns @Right counts@ (all zero, committed),
+-- or @Left counts@ (nonzero, not committed). Callers should
+-- pre-validate the worker is active via 'resolveWorkerByName' (the
+-- "already inactive" / "not a worker" cases are not handled here).
+safeDeactivateWorker :: Repository -> WorkerId -> Day -> IO (Either DeactivateResult DeactivateResult)
+safeDeactivateWorker repo wid today = do
+    impact <- previewDeactivation repo wid
+    if drPinsRemoved impact == 0 && drDraftsRemoved impact == 0 && drCalendarRemoved impact == 0
+        then do
+            let uid = workerIdToUserId wid
+            repoSetWorkerStatus repo uid WSInactive (Just today)
+            pure (Right impact)
+        else pure (Left impact)
 
 -- | Reactivate an inactive worker. Configuration is unchanged; pins/drafts/
 -- calendar entries are NOT restored.

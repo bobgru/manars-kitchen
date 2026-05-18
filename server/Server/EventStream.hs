@@ -7,14 +7,12 @@ import Control.Concurrent.Chan (newChan, readChan, writeChan)
 import Control.Exception (bracket, SomeException, try)
 import Control.Monad (when, forever)
 import Data.Aeson (encode, object, (.=))
-import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.ByteString.Builder (Builder, byteString, lazyByteString)
 import Data.Time.Clock (getCurrentTime, diffUTCTime)
 import Network.HTTP.Types (status200, status401)
 import Network.Wai (Application, queryString, responseLBS, responseStream)
 
-import Auth.Types (User(..), Username(..))
 import Repo.Types (Repository(..))
 import Audit.CommandMeta (CommandMeta(..))
 import Service.PubSub (AppBus(..), CommandEvent(..), subscribe, unsubscribe, sourceString)
@@ -40,14 +38,13 @@ eventStreamApp repo bus req sendResponse = do
                             mUser <- repoGetUser repo uid
                             case mUser of
                                 Nothing -> send401 "User not found"
-                                Just user -> streamEvents bus user
+                                Just _user -> streamEvents bus
   where
     send401 msg = sendResponse $ responseLBS status401
         [("Content-Type", "text/plain")] msg
 
-    streamEvents appBus user = do
-        let Username uname = userName user
-            cmdBus = busCommands appBus
+    streamEvents appBus = do
+        let cmdBus = busCommands appBus
         -- Bus subscriber callbacks run on the publisher's thread, but WAI's
         -- write/flush are only safe from the responseStream callback thread.
         -- Route events through a Chan to decouple them.
@@ -59,7 +56,7 @@ eventStreamApp repo bus req sendResponse = do
             ] $ \write flush ->
                 bracket
                     (subscribe cmdBus ".*" $ \_ event ->
-                        when (cmIsMutation (ceMeta event) && ceUsername event == T.unpack uname) $
+                        when (cmIsMutation (ceMeta event)) $
                             writeChan chan $ byteString "data: "
                                 <> lazyByteString (encode $ object
                                     [ "command"    .= ceCommand event

@@ -255,10 +255,11 @@ classifyWorker op rest = case op of
     "view" -> case rest of
         (_name : _) -> nonMutating etWorker "view"
         _           -> nonMutating etWorker "view"
-    "deactivate"   -> mutating etWorker "deactivate"
-    "activate"     -> mutating etWorker "activate"
-    "delete"       -> mutating etWorker "delete"
-    "force-delete" -> mutating etWorker "force-delete"
+    "deactivate"       -> mutating etWorker "deactivate"
+    "force-deactivate" -> mutating etWorker "force-deactivate"
+    "activate"         -> mutating etWorker "activate"
+    "delete"           -> mutating etWorker "delete"
+    "force-delete"     -> mutating etWorker "force-delete"
     _ -> nonMutating etWorker (pack op)
 
 -- Shift

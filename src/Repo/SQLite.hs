@@ -39,7 +39,7 @@ import Domain.Types
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Repo.Schema (initSchema)
 import Repo.Serialize
-import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..))
+import Repo.Types (Repository(..), CalendarCommit(..), DraftInfo(..), AuditEntry(..), SessionId(..), HintSessionRecord(..), WorkerSummary(..))
 import Utils (shellQuote)
 
 -- | Create a Repository backed by a SQLite database at the given path.
@@ -60,6 +60,7 @@ mkSQLiteRepo path = do
         , repoRenameUser     = sqlRenameUser conn
         , repoSetWorkerStatus = sqlSetWorkerStatus conn
         , repoLoadWorkerIdsByStatus = sqlLoadWorkerIdsByStatus conn
+        , repoListWorkerSummaries = sqlListWorkerSummaries conn
         , repoCascadeWorkerConfig = sqlCascadeWorkerConfig conn
         , repoCascadeWorkerSchedule = sqlCascadeWorkerSchedule conn
         , repoDeactivateClearings = sqlDeactivateClearings conn
@@ -189,6 +190,40 @@ sqlLoadWorkerIdsByStatus conn status = do
         (Only (workerStatusToText status))
         :: IO [Only Int]
     return [WorkerId i | Only i <- rows]
+
+-- | List slim worker summaries. Excludes users with @worker_status='none'@.
+-- Filters by status when @Just s@ is provided.
+sqlListWorkerSummaries :: Connection -> Maybe WorkerStatus -> IO [WorkerSummary]
+sqlListWorkerSummaries conn mStatus = do
+    let baseQ = "SELECT u.username, u.role, u.worker_status, \
+                \COALESCE(we.is_temp, 0), \
+                \(CASE WHEN wo.worker_id IS NOT NULL THEN 1 ELSE 0 END), \
+                \COALESCE(ws.level, 1) \
+                \FROM users u \
+                \LEFT JOIN worker_employment we ON we.worker_id = u.id \
+                \LEFT JOIN worker_weekend_only wo ON wo.worker_id = u.id \
+                \LEFT JOIN worker_seniority ws ON ws.worker_id = u.id "
+    rows <- case mStatus of
+        Just s -> query conn
+            (fromString (baseQ ++ "WHERE u.worker_status = ? ORDER BY u.username"))
+            (Only (workerStatusToText s))
+            :: IO [(Text, Text, Text, Int, Int, Int)]
+        Nothing -> query_ conn
+            (fromString (baseQ ++ "WHERE u.worker_status IN ('active', 'inactive') ORDER BY u.username"))
+            :: IO [(Text, Text, Text, Int, Int, Int)]
+    pure
+        [ WorkerSummary
+            { wsName        = n
+            , wsRole        = role
+            , wsStatus      = case textToWorkerStatus ws of
+                                Just s  -> s
+                                Nothing -> WSNone
+            , wsIsTemp      = isTemp /= 0
+            , wsWeekendOnly = weekend /= 0
+            , wsSeniority   = sen
+            }
+        | (n, role, ws, isTemp, weekend, sen) <- rows
+        ]
 
 sqlCascadeWorkerConfig :: Connection -> WorkerId -> IO ()
 sqlCascadeWorkerConfig conn (WorkerId wid) = withTransaction conn $ do

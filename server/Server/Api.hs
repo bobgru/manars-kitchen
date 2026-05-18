@@ -210,11 +210,14 @@ type RawAPI =
     :<|> "api" :> "users" :> Capture "id" Int :> "force" :> DeleteNoContent
 
     -- -----------------------------------------------------------------
-    -- Worker entity (view, deactivate, activate, delete, force-delete)
+    -- Worker entity (list, view, deactivate, activate, delete, force-delete)
     -- -----------------------------------------------------------------
+    :<|> "api" :> "workers" :> QueryParam "status" Text :> Get '[JSON] [WorkerSummaryResp]
     :<|> "api" :> "workers" :> Capture "name" Text :> Get '[JSON] WorkerProfileResp
     :<|> "api" :> "workers" :> Capture "name" Text
-         :> "deactivate" :> Put '[JSON] DeactivateResultResp
+         :> "deactivate" :> PutNoContent
+    :<|> "api" :> "workers" :> Capture "name" Text
+         :> "deactivate" :> "force" :> Put '[JSON] DeactivateResultResp
     :<|> "api" :> "workers" :> Capture "name" Text :> "activate" :> PutNoContent
     :<|> "api" :> "workers" :> Capture "name" Text :> DeleteNoContent
     :<|> "api" :> "workers" :> Capture "name" Text :> "force" :> DeleteNoContent
