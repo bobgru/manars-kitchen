@@ -1,6 +1,6 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-16 · at commit `c07dd7b` on `master`
+**Last updated:** 2026-08-16 · at commit `b017dda` on `master`
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -19,18 +19,24 @@ read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (29 changes).
 
-**Verification baseline at `c07dd7b`** — all of this was green:
+**Verification baseline at `b017dda`** plus the lint and encoding fixes described
+below — all of this was green, with `LANG` unset:
 
-- `stack clean && stack build --pedantic --test` — zero warnings
+- `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
+  stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
 - 248 integration + 360 unit examples, 0 failures
 - `cd web && npm run build` — clean
+- `cd web && npm run lint` — clean, 0 problems
 - demo runs end to end, exit 0
 
-Two standing gotchas when you verify:
+**`npm run lint` is now clean — keep it that way.** The 5 errors that used to live
+in `web/src/hooks/useSSE.tsx` and `web/src/App.tsx` are fixed: the SSE provider
+moved to `web/src/components/SSEProvider.tsx` (the `react-refresh` rule forbids a
+file that exports both a component and hooks), and the two hooks use
+`useEffectEvent` instead of assigning to a ref during render.
 
-- **`npm run lint` reports 5 errors** in `web/src/hooks/useSSE.tsx` and
-  `web/src/App.tsx`. These are **pre-existing**, confirmed at baseline. Not
-  regressions. Fixing them is unclaimed work.
+One standing gotcha when you verify:
+
 - **Warnings hide in incremental builds.** `stack test` compiles specs without
   `-Werror` and caches the objects, so a later `--pedantic` build reuses them and
   reports nothing. Only `stack clean` first gives a truthful answer. This is why
@@ -211,6 +217,29 @@ Catalogued during a survey; re-check before acting, as line counts drift.
 **Build and test.** See `CLAUDE.md`. `stack` only, never `cabal`. Clean build
 before declaring done, for the reason in the baseline section above.
 
+**A host-environment trap** — hit on the bare host on 2026-08-16, absent inside
+the container, and not a code problem. Recognise it fast:
+
+- **`cannot find -lgmp` at link time.** The host has `libgmp.so.10` but no
+  `libgmp.so` symlink, which lives in `libgmp-dev`. Compilation succeeds and the
+  build dies at the very end, in the linker. Either `apt install libgmp-dev`, or
+  point stack at a symlink you own:
+  `ln -s /usr/lib/x86_64-linux-gnu/libgmp.so.10 ~/.local/lib/gmp-shim/libgmp.so`
+  and pass `--extra-lib-dirs=$HOME/.local/lib/gmp-shim`. Do **not** commit that
+  path into `stack.yaml` — it is machine-local.
+
+**Encoding is handled in code, not by the locale.** Every `main` calls
+`setUtf8Encoding` from `src/Utils/Encoding.hs` before anything else. Without it a
+POSIX/C locale makes GHC choose ASCII for the standard handles, and the first em
+dash or hspec check mark aborts the program with `commitBuffer: invalid argument
+(cannot encode character '\8212')` — which reads like an IO bug, not an encoding
+mismatch. Both test suites and the demo failed this way. **A new executable or
+test suite needs that call too**; nothing enforces it.
+
+**`.agents/`, `.memsearch/` and `skills-lock.json` stay untracked** — decided
+2026-08-16. Do not commit them and do not add them to `.gitignore`; they are meant
+to show up in `git status`. Leave them alone.
+
 **Running without permission prompts.** `./dev/claude-container.sh yolo`. The full
 analysis, assumptions and limits are in `dev/docker/README.md` — read it before
 relying on the setup, particularly §3 (the undocumented behaviour it depends on)
@@ -247,5 +276,3 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 ## Open questions
 
 1. Item 2 needs the named-schedules-vs-drafts decision before any endpoint work.
-2. `.agents/`, `.memsearch/` and `skills-lock.json` are untracked and are
-   probably `.gitignore` candidates.
