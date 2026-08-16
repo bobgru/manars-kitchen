@@ -104,6 +104,7 @@ executable manars-cli
                      , manars-kitchen
                      , containers
                      , time
+                     , directory
                      , bytestring
                      , aeson
                      , servant

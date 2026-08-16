@@ -1,11 +1,13 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main (main) where
 
 import System.IO (hFlush, stdout, hSetEcho, stdin)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import qualified Data.Text as T
-import Data.Time.Clock (getCurrentTime)
-import Data.Time.Format (formatTime, defaultTimeLocale)
+import System.Directory (removeFile)
+import Control.Monad (forM_)
+import Control.Exception (catch, SomeException)
 
 import Auth.Types (User(..), UserId(..), Username(..), Role(..))
 -- (worker IDs no longer allocated explicitly; users get worker_id == user_id)
@@ -55,9 +57,11 @@ parseDelay = go (500000, [])
 
 demoFromFile :: Int -> FilePath -> IO ()
 demoFromFile delayUs file = do
-    now <- getCurrentTime
-    let stamp = formatTime defaultTimeLocale "%Y%m%d-%H%M%S" now
-        dbPath = "demo-db/demo-" ++ stamp ++ ".db"
+    let dbPath = "demo-db/demo.db"
+    -- Start each demo from a clean slate: remove the previous demo database
+    -- and its SQLite sidecar files so they don't accumulate or carry over state.
+    forM_ [dbPath, dbPath ++ "-shm", dbPath ++ "-wal"] $ \f ->
+        removeFile f `catch` \(_ :: SomeException) -> return ()
     putStrLn $ "Demo database: " ++ dbPath
     putStrLn $ "Script: " ++ file
     putStrLn ""
