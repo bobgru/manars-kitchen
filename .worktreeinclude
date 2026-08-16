@@ -1,0 +1,21 @@
+# Gitignored paths to reflink into new worktrees (`wt step copy-ignored`).
+#
+# A path is copied only if it is BOTH gitignored AND matched here, so this acts
+# as an allowlist. Copies are per-file reflinks (copy-on-write) where the
+# filesystem supports it, so cost scales with file count rather than bytes.
+#
+# The point is cold-start cost: without .stack-work/ a fresh worktree recompiles
+# the whole local package, and without web/node_modules/ it needs a full
+# `npm install`. Both are large and neither is tracked.
+
+.stack-work/
+web/node_modules/
+
+# Pinned resolver hashes — gitignored in this repo, but a worktree that lacks
+# the lock file may resolve a different snapshot than the primary worktree.
+stack.yaml.lock
+
+# Project-local Claude Code settings (permission allowlist, skills, commands).
+# Without these an agent working in a worktree re-prompts for already-approved
+# commands.
+.claude/

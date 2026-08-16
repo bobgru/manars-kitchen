@@ -1,0 +1,24 @@
+# Worktrunk project hooks.
+#
+# Project config requires a one-time approval before it will run: worktrunk
+# prompts interactively, or you can pre-approve with `wt config approvals add`.
+# Agents cannot approve this non-interactively — if a hook is silently skipped,
+# that approval is usually why.
+
+# After a worktree is created, reflink the build caches listed in
+# .worktreeinclude from the primary worktree. Runs in the background at lowered
+# priority; use [pre-start] instead if a `-x`/`--execute` command needs the
+# files immediately on start.
+[[post-start]]
+copy = "wt step copy-ignored"
+
+# Local CI gate. CLAUDE.md requires a clean build and passing tests before work
+# is considered done, so enforce it at merge time rather than trusting each
+# agent to have checked. A pre-merge failure aborts the merge, leaving the
+# worktree intact.
+#
+# Deliberately not `stack clean && stack build`: a clean build is the right
+# check before declaring a task complete, but it is too slow to run on every
+# merge. Run the clean build yourself at the end of a batch.
+[[pre-merge]]
+test = "stack build --pedantic && stack test"
