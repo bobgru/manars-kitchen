@@ -11,7 +11,7 @@ import WorkersListPage from "./components/WorkersListPage";
 import WorkerDetailPage from "./components/WorkerDetailPage";
 import ShiftsListPage from "./components/ShiftsListPage";
 import CalendarPage from "./components/CalendarPage";
-import { SSEProvider } from "./hooks/useSSE";
+import SSEProvider from "./components/SSEProvider";
 import "./App.css";
 
 function App() {
@@ -23,7 +23,7 @@ function App() {
   );
 
   const handleLogin = useCallback(
-    (_token: string, user: string, _role: string) => {
+    (_token: string, user: string) => {
       setUsername(user);
       setAuthenticated(true);
     },
