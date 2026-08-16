@@ -162,6 +162,17 @@ _setAbsenceAllowanceC :: Text -> SetAbsenceAllowanceReq -> ClientM NoContent
 listUsersC :: ClientM [User]
 _createUserC :: CreateUserReq -> ClientM NoContent
 _deleteUserC :: String -> ClientM NoContent
+_renameUserC :: Int -> RenameUserReq -> ClientM NoContent
+_forceDeleteUserC :: Int -> ClientM NoContent
+
+-- Worker entity
+_listWorkersC :: Maybe Text -> ClientM [WorkerSummaryResp]
+_viewWorkerC :: Text -> ClientM WorkerProfileResp
+_deactivateWorkerC :: Text -> ClientM NoContent
+_forceDeactivateWorkerC :: Text -> ClientM DeactivateResultResp
+_activateWorkerC :: Text -> ClientM NoContent
+_deleteWorkerC :: Text -> ClientM NoContent
+_forceDeleteWorkerC :: Text -> ClientM NoContent
 
 -- Hint sessions
 _listHintsC :: Maybe Int -> Maybe Int -> ClientM [Hint]
@@ -274,11 +285,11 @@ _rpcCreateStationC :: CreateStationReq -> ClientM RpcOk
 _rpcDeleteStationC :: RpcStationId -> ClientM RpcOk
 _rpcSetStationHoursC :: RpcStationHours -> ClientM RpcOk
 _rpcCloseStationDayC :: SetStationClosureReq' -> ClientM RpcOk
-_rpcListStationsC  :: RpcEmpty -> ClientM [(Int, Text)]
+rpcListStationsC  :: RpcEmpty -> ClientM [(Int, Text)]
 rpcCreateShiftC    :: CreateShiftReq -> ClientM RpcOk
 rpcDeleteShiftC    :: RpcShiftName -> ClientM RpcOk
 rpcListShiftsC     :: RpcEmpty -> ClientM [ShiftDef]
-_rpcSetWorkerHoursC :: RpcWorkerHours -> ClientM RpcOk
+rpcSetWorkerHoursC :: RpcWorkerHours -> ClientM RpcOk
 _rpcSetWorkerOvertimeC :: RpcWorkerOvertime -> ClientM RpcOk
 _rpcSetWorkerPrefsC :: RpcWorkerPrefs -> ClientM RpcOk
 _rpcSetWorkerVarietyC :: RpcWorkerVariety -> ClientM RpcOk
@@ -297,39 +308,39 @@ _rpcPreferPairingC :: RpcWorkerPairing -> ClientM RpcOk
 _rpcAddPinC :: PinnedAssignment -> ClientM RpcOk
 _rpcRemovePinC :: PinnedAssignment -> ClientM RpcOk
 _rpcListPinsC :: RpcEmpty -> ClientM [PinnedAssignment]
-_rpcCreateDraftC :: CreateDraftReq -> ClientM DraftCreatedResp
-_rpcListDraftsC :: RpcEmpty -> ClientM [DraftInfo]
+rpcCreateDraftC :: CreateDraftReq -> ClientM DraftCreatedResp
+rpcListDraftsC :: RpcEmpty -> ClientM [DraftInfo]
 _rpcViewDraftC :: RpcDraftId -> ClientM DraftInfo
 _rpcGenerateDraftC :: RpcDraftGenerate -> ClientM ScheduleResult
 _rpcCommitDraftC :: RpcDraftCommit -> ClientM RpcOk
 _rpcDiscardDraftC :: RpcDraftId -> ClientM RpcOk
-_rpcListSchedulesC :: RpcEmpty -> ClientM [Text]
+rpcListSchedulesC :: RpcEmpty -> ClientM [Text]
 _rpcViewScheduleC :: RpcScheduleName -> ClientM Schedule
 _rpcDeleteScheduleC :: RpcScheduleName -> ClientM RpcOk
 _rpcViewCalendarC :: RpcDateRange -> ClientM Schedule
 _rpcCalendarHistoryC :: RpcEmpty -> ClientM [CalendarCommit]
 _rpcUnfreezeC :: UnfreezeReq -> ClientM RpcOk
-_rpcFreezeStatusC :: RpcEmpty -> ClientM FreezeStatusResp
+rpcFreezeStatusC :: RpcEmpty -> ClientM FreezeStatusResp
 rpcShowConfigC :: RpcEmpty -> ClientM [(String, Double)]
 rpcSetConfigC :: RpcConfigSet -> ClientM RpcOk
 _rpcApplyPresetC :: RpcPresetName -> ClientM RpcOk
 _rpcResetConfigC :: RpcEmpty -> ClientM RpcOk
 _rpcSetPayPeriodC :: SetPayPeriodReq -> ClientM RpcOk
-_rpcListAuditC :: RpcEmpty -> ClientM [AuditEntry]
+rpcListAuditC :: RpcEmpty -> ClientM [AuditEntry]
 _rpcCreateCheckpointC :: CreateCheckpointReq -> ClientM RpcOk
 _rpcCommitCheckpointC :: RpcCheckpointName -> ClientM RpcOk
 _rpcRollbackCheckpointC :: RpcCheckpointName -> ClientM RpcOk
-_rpcExportAllC :: RpcEmpty -> ClientM ExportResp
+rpcExportAllC :: RpcEmpty -> ClientM ExportResp
 _rpcImportDataC :: ImportReq -> ClientM ImportResp
 _rpcCreateAbsenceTypeC :: CreateAbsenceTypeReq -> ClientM RpcOk
 _rpcDeleteAbsenceTypeC :: RpcAbsenceTypeName -> ClientM RpcOk
 _rpcSetAllowanceC :: RpcSetAllowance -> ClientM RpcOk
-_rpcRequestAbsenceC :: RequestAbsenceReq -> ClientM AbsenceCreatedResp
+rpcRequestAbsenceC :: RequestAbsenceReq -> ClientM AbsenceCreatedResp
 _rpcApproveAbsenceC :: RpcAbsenceId -> ClientM RpcOk
 _rpcRejectAbsenceC :: RpcAbsenceId -> ClientM RpcOk
-_rpcListPendingAbsencesC :: RpcEmpty -> ClientM [AbsenceRequest]
-_rpcCreateUserC :: CreateUserReq -> ClientM RpcOk
-_rpcListUsersC :: RpcEmpty -> ClientM [User]
+rpcListPendingAbsencesC :: RpcEmpty -> ClientM [AbsenceRequest]
+rpcCreateUserC :: CreateUserReq -> ClientM RpcOk
+rpcListUsersC :: RpcEmpty -> ClientM [User]
 _rpcDeleteUserC :: RpcUsername -> ClientM RpcOk
 _rpcAddHintC :: AddHintReq -> ClientM [Hint]
 _rpcRevertHintC :: HintSessionRef -> ClientM [Hint]
@@ -348,11 +359,11 @@ rpcCreateSkillC
     :<|> _rpcDeleteStationC
     :<|> _rpcSetStationHoursC
     :<|> _rpcCloseStationDayC
-    :<|> _rpcListStationsC
+    :<|> rpcListStationsC
     :<|> rpcCreateShiftC
     :<|> rpcDeleteShiftC
     :<|> rpcListShiftsC
-    :<|> _rpcSetWorkerHoursC
+    :<|> rpcSetWorkerHoursC
     :<|> _rpcSetWorkerOvertimeC
     :<|> _rpcSetWorkerPrefsC
     :<|> _rpcSetWorkerVarietyC
@@ -371,39 +382,39 @@ rpcCreateSkillC
     :<|> _rpcAddPinC
     :<|> _rpcRemovePinC
     :<|> _rpcListPinsC
-    :<|> _rpcCreateDraftC
-    :<|> _rpcListDraftsC
+    :<|> rpcCreateDraftC
+    :<|> rpcListDraftsC
     :<|> _rpcViewDraftC
     :<|> _rpcGenerateDraftC
     :<|> _rpcCommitDraftC
     :<|> _rpcDiscardDraftC
-    :<|> _rpcListSchedulesC
+    :<|> rpcListSchedulesC
     :<|> _rpcViewScheduleC
     :<|> _rpcDeleteScheduleC
     :<|> _rpcViewCalendarC
     :<|> _rpcCalendarHistoryC
     :<|> _rpcUnfreezeC
-    :<|> _rpcFreezeStatusC
+    :<|> rpcFreezeStatusC
     :<|> rpcShowConfigC
     :<|> rpcSetConfigC
     :<|> _rpcApplyPresetC
     :<|> _rpcResetConfigC
     :<|> _rpcSetPayPeriodC
-    :<|> _rpcListAuditC
+    :<|> rpcListAuditC
     :<|> _rpcCreateCheckpointC
     :<|> _rpcCommitCheckpointC
     :<|> _rpcRollbackCheckpointC
-    :<|> _rpcExportAllC
+    :<|> rpcExportAllC
     :<|> _rpcImportDataC
     :<|> _rpcCreateAbsenceTypeC
     :<|> _rpcDeleteAbsenceTypeC
     :<|> _rpcSetAllowanceC
-    :<|> _rpcRequestAbsenceC
+    :<|> rpcRequestAbsenceC
     :<|> _rpcApproveAbsenceC
     :<|> _rpcRejectAbsenceC
-    :<|> _rpcListPendingAbsencesC
-    :<|> _rpcCreateUserC
-    :<|> _rpcListUsersC
+    :<|> rpcListPendingAbsencesC
+    :<|> rpcCreateUserC
+    :<|> rpcListUsersC
     :<|> _rpcDeleteUserC
     :<|> _rpcAddHintC
     :<|> _rpcRevertHintC
@@ -841,6 +852,147 @@ spec = do
             rsrSessionId resp `shouldSatisfy` (> 0)
 
     -- -----------------------------------------------------------------
+    -- RPC authorization (server-side role enforcement)
+    -- -----------------------------------------------------------------
+
+    describe "RPC role enforcement" $ do
+        it "admin is allowed through admin-only RPC endpoints" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin False
+                env <- mkPlainEnv port
+                token <- loginAs env "admin" "pass"
+                aEnv <- mkAuthEnv token port
+                Right _ <- runClientM
+                    (rpcCreateSkillC (CreateSkillReq "grill" "")) aEnv
+                Right _ <- runClientM
+                    (rpcCreateUserC (CreateUserReq "bob" "pass" Normal False)) aEnv
+                Right _ <- runClientM (rpcListUsersC RpcEmpty) aEnv
+                Right _ <- runClientM (rpcListAuditC RpcEmpty) aEnv
+                Right _ <- runClientM (rpcExportAllC RpcEmpty) aEnv
+                Right _ <- runClientM
+                    (rpcSetConfigC (RpcConfigSet "shift-pref-bonus" 5.0)) aEnv
+                Right _ <- runClientM
+                    (rpcCreateDraftC (CreateDraftReq (apr 6) (apr 12))) aEnv
+                pure ()
+
+        it "normal user is refused admin-only RPC endpoints" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal False
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                -- Entity CRUD
+                r1 <- runClientM (rpcCreateSkillC (CreateSkillReq "grill" "")) wEnv
+                r1 `shouldFailWith` 403
+                -- User management (privilege escalation vector)
+                r2 <- runClientM
+                    (rpcCreateUserC (CreateUserReq "mallory" "pass" Admin False)) wEnv
+                r2 `shouldFailWith` 403
+                r3 <- runClientM (rpcListUsersC RpcEmpty) wEnv
+                r3 `shouldFailWith` 403
+                -- Audit log
+                r4 <- runClientM (rpcListAuditC RpcEmpty) wEnv
+                r4 `shouldFailWith` 403
+                -- Draft management
+                r5 <- runClientM
+                    (rpcCreateDraftC (CreateDraftReq (apr 6) (apr 12))) wEnv
+                r5 `shouldFailWith` 403
+                -- Config writes
+                r6 <- runClientM
+                    (rpcSetConfigC (RpcConfigSet "shift-pref-bonus" 5.0)) wEnv
+                r6 `shouldFailWith` 403
+                -- Bulk data export
+                r7 <- runClientM (rpcExportAllC RpcEmpty) wEnv
+                r7 `shouldFailWith` 403
+                -- Shift CRUD
+                r8 <- runClientM (rpcCreateShiftC (CreateShiftReq "morning" 6 14)) wEnv
+                r8 `shouldFailWith` 403
+
+        it "normal user can still read open RPC endpoints" $
+            withServer $ \repo port -> do
+                _ <- register repo "worker1" "pass" Normal False
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                Right _ <- runClientM (rpcListSkillsC RpcEmpty) wEnv
+                Right _ <- runClientM (rpcListStationsC RpcEmpty) wEnv
+                Right _ <- runClientM (rpcListShiftsC RpcEmpty) wEnv
+                Right _ <- runClientM (rpcListSchedulesC RpcEmpty) wEnv
+                Right _ <- runClientM (rpcListDraftsC RpcEmpty) wEnv
+                Right _ <- runClientM (rpcShowConfigC RpcEmpty) wEnv
+                Right _ <- runClientM (rpcFreezeStatusC RpcEmpty) wEnv
+                pure ()
+
+    describe "RPC worker self-scoping" $ do
+        it "normal user may set own hours but not another worker's" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin False      -- workerId 1
+                _ <- register repo "worker1" "pass" Normal False    -- workerId 2
+                _ <- register repo "worker2" "pass" Normal False    -- workerId 3
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                Right _ <- runClientM (rpcSetWorkerHoursC (RpcWorkerHours 2 40)) wEnv
+                result <- runClientM (rpcSetWorkerHoursC (RpcWorkerHours 3 40)) wEnv
+                result `shouldFailWith` 403
+
+        it "admin may set any worker's hours" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin False
+                _ <- register repo "worker1" "pass" Normal False
+                env <- mkPlainEnv port
+                token <- loginAs env "admin" "pass"
+                aEnv <- mkAuthEnv token port
+                Right _ <- runClientM (rpcSetWorkerHoursC (RpcWorkerHours 2 35)) aEnv
+                pure ()
+
+        it "normal user absence request is self-scoped" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin False
+                _ <- register repo "worker1" "pass" Normal False
+                repoSaveAbsenceCtx repo emptyAbsenceContext
+                    { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
+                    , acYearlyAllowance = Map.fromList
+                        [ ((WorkerId 1, AbsenceTypeId 1), 10)
+                        , ((WorkerId 2, AbsenceTypeId 1), 10)
+                        ]
+                    }
+                env <- mkPlainEnv port
+                token <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv token port
+                Right _ <- runClientM (rpcRequestAbsenceC
+                    (RequestAbsenceReq 2 1 (may 1) (may 3))) wEnv
+                result <- runClientM (rpcRequestAbsenceC
+                    (RequestAbsenceReq 1 1 (may 5) (may 7))) wEnv
+                result `shouldFailWith` 403
+
+        it "normal user only sees own pending absences" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "pass" Admin False       -- workerId 1
+                _ <- register repo "worker1" "pass" Normal False    -- workerId 2
+                _ <- register repo "worker2" "pass" Normal False    -- workerId 3
+                repoSaveAbsenceCtx repo emptyAbsenceContext
+                    { acTypes = Map.singleton (AbsenceTypeId 1) (AbsenceType "Vacation" True)
+                    , acYearlyAllowance = Map.fromList
+                        [ ((WorkerId 2, AbsenceTypeId 1), 10)
+                        , ((WorkerId 3, AbsenceTypeId 1), 10)
+                        ]
+                    }
+                env <- mkPlainEnv port
+                adminToken <- loginAs env "admin" "pass"
+                aEnv <- mkAuthEnv adminToken port
+                Right _ <- runClientM (rpcRequestAbsenceC
+                    (RequestAbsenceReq 2 1 (may 1) (may 3))) aEnv
+                Right _ <- runClientM (rpcRequestAbsenceC
+                    (RequestAbsenceReq 3 1 (may 5) (may 7))) aEnv
+                Right adminPending <- runClientM (rpcListPendingAbsencesC RpcEmpty) aEnv
+                length adminPending `shouldBe` 2
+                workerToken <- loginAs env "worker1" "pass"
+                wEnv <- mkAuthEnv workerToken port
+                Right workerPending <- runClientM (rpcListPendingAbsencesC RpcEmpty) wEnv
+                length workerPending `shouldBe` 1
+
+    -- -----------------------------------------------------------------
     -- CLI remote mode integration tests
     -- -----------------------------------------------------------------
 
@@ -854,7 +1006,7 @@ spec = do
         it "station add via dispatchCommand creates server-side station" $
             withRemoteApp $ \_ env rpc -> do
                 dispatchCommand rpc (StationCreate "kitchen" 1 1)
-                Right stations <- runClientM (_rpcListStationsC RpcEmpty) env
+                Right stations <- runClientM (rpcListStationsC RpcEmpty) env
                 length stations `shouldBe` 1
 
         it "shift create/delete via dispatchCommand" $
@@ -883,7 +1035,7 @@ spec = do
             withRemoteApp $ \_ env rpc -> do
                 dispatchCommand rpc (SkillCreate "grill")
                 dispatchCommand rpc (StationCreate "kitchen" 1 1)
-                Right entries <- runClientM (_rpcListAuditC RpcEmpty) env
+                Right entries <- runClientM (rpcListAuditC RpcEmpty) env
                 length entries `shouldSatisfy` (>= 2)
                 all (\e -> aeSource e == "rpc") entries `shouldBe` True
 

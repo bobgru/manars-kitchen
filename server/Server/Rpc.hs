@@ -57,13 +57,13 @@ import Network.Wai (Middleware, requestHeaders)
 import Servant
 import Text.Read (readMaybe)
 
-import Auth.Types (UserId(..), User(..), Username(..))
+import Auth.Types (UserId(..), User(..), Username(..), Role(..), userIdToWorkerId)
 import Domain.Skill (Skill)
 import Domain.Types (WorkerId(..), StationId(..), Station(..), SkillId(..), AbsenceId(..), AbsenceTypeId(..), Schedule)
 import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment(..))
 import Domain.Shift (ShiftDef(..))
-import Domain.Absence (AbsenceType(..), AbsenceContext(..), AbsenceRequest)
+import Domain.Absence (AbsenceType(..), AbsenceContext(..), AbsenceRequest(..))
 import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
 import Domain.Scheduler (ScheduleResult)
 import Domain.Worker (OvertimeModel, PayPeriodTracking)
@@ -83,6 +83,7 @@ import qualified Service.HintRebase as SHR
 import qualified Export.JSON as Exp
 import Server.Json
 import Server.Error
+import Server.Auth (requireAdmin, requireSelfOrAdmin)
 import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishCommandWithClient)
 import CLI.Commands (shellQuote)
 import Server.Execute (ExecuteEnv(..), executeCommandText)
@@ -359,101 +360,145 @@ instance FromJSON ExecuteReq where
 -- RPC Server (handlers)
 -- -----------------------------------------------------------------
 
+-- | Server-side authorization is applied here, at the composition site,
+-- so that every endpoint's required role is visible in one place. The
+-- decisions mirror the REST twins in "Server.Handlers" (and the
+-- endpoint-authorization spec): reads are open to any authenticated
+-- user, entity/config/user administration is admin-only, and
+-- worker-scoped writes are self-or-admin.
 rpcServer :: ExecuteEnv -> Repository -> User -> Server RpcAPI
-rpcServer execEnv repo _user =
+rpcServer execEnv repo user =
     let cmdBus = busCommands (eeBus execEnv)
     in
     -- Skill CRUD
-         rpcCreateSkill cmdBus repo
-    :<|> rpcDeleteSkill cmdBus repo
-    :<|> rpcRenameSkill cmdBus repo
+         adminOnly user (rpcCreateSkill cmdBus repo)
+    :<|> adminOnly user (rpcDeleteSkill cmdBus repo)
+    :<|> adminOnly2 user (rpcRenameSkill cmdBus repo)
     :<|> rpcListSkills repo
     -- Station CRUD
-    :<|> rpcCreateStation cmdBus repo
-    :<|> rpcDeleteStation cmdBus repo
-    :<|> rpcSetStationHours cmdBus repo
-    :<|> rpcCloseStationDay cmdBus repo
+    :<|> adminOnly user (rpcCreateStation cmdBus repo)
+    :<|> adminOnly user (rpcDeleteStation cmdBus repo)
+    :<|> adminOnly user (rpcSetStationHours cmdBus repo)
+    :<|> adminOnly user (rpcCloseStationDay cmdBus repo)
     :<|> rpcListStations repo
     -- Shift CRUD
-    :<|> rpcCreateShift cmdBus repo
-    :<|> rpcDeleteShift cmdBus repo
+    :<|> adminOnly user (rpcCreateShift cmdBus repo)
+    :<|> adminOnly user (rpcDeleteShift cmdBus repo)
     :<|> rpcListShifts repo
-    -- Worker configuration
-    :<|> rpcSetWorkerHours cmdBus repo
-    :<|> rpcSetWorkerOvertime cmdBus repo
-    :<|> rpcSetWorkerPrefs cmdBus repo
-    :<|> rpcSetWorkerVariety cmdBus repo
-    :<|> rpcSetWorkerShiftPrefs cmdBus repo
-    :<|> rpcSetWorkerWeekendOnly cmdBus repo
-    :<|> rpcSetWorkerSeniority cmdBus repo
-    :<|> rpcAddCrossTraining cmdBus repo
-    :<|> rpcSetEmploymentStatus cmdBus repo
-    :<|> rpcSetOvertimeModel cmdBus repo
-    :<|> rpcSetPayTracking cmdBus repo
-    :<|> rpcSetTemp cmdBus repo
-    :<|> rpcGrantSkill cmdBus repo
-    :<|> rpcRevokeSkill cmdBus repo
-    :<|> rpcAvoidPairing cmdBus repo
-    :<|> rpcPreferPairing cmdBus repo
+    -- Worker configuration (self-or-admin, keyed on the target worker)
+    :<|> selfOrAdmin user rwhWid   (rpcSetWorkerHours cmdBus repo)
+    :<|> selfOrAdmin user rwoWid   (rpcSetWorkerOvertime cmdBus repo)
+    :<|> selfOrAdmin user rwpWid   (rpcSetWorkerPrefs cmdBus repo)
+    :<|> selfOrAdmin user rwvWid   (rpcSetWorkerVariety cmdBus repo)
+    :<|> selfOrAdmin user rwspWid  (rpcSetWorkerShiftPrefs cmdBus repo)
+    :<|> selfOrAdmin user rwwoWid  (rpcSetWorkerWeekendOnly cmdBus repo)
+    :<|> selfOrAdmin user rwsWid   (rpcSetWorkerSeniority cmdBus repo)
+    :<|> selfOrAdmin user rwctWid  (rpcAddCrossTraining cmdBus repo)
+    :<|> selfOrAdmin user rwesWid  (rpcSetEmploymentStatus cmdBus repo)
+    :<|> selfOrAdmin user rwomWid  (rpcSetOvertimeModel cmdBus repo)
+    :<|> selfOrAdmin user rwptWid  (rpcSetPayTracking cmdBus repo)
+    :<|> selfOrAdmin user rwtWid   (rpcSetTemp cmdBus repo)
+    :<|> selfOrAdmin user rwskWid  (rpcGrantSkill cmdBus repo)
+    :<|> selfOrAdmin user rwskWid  (rpcRevokeSkill cmdBus repo)
+    :<|> selfOrAdmin user rwprWid  (rpcAvoidPairing cmdBus repo)
+    :<|> selfOrAdmin user rwprWid  (rpcPreferPairing cmdBus repo)
     -- Pins
-    :<|> rpcAddPin cmdBus repo
-    :<|> rpcRemovePin cmdBus repo
+    :<|> adminOnly user (rpcAddPin cmdBus repo)
+    :<|> adminOnly user (rpcRemovePin cmdBus repo)
     :<|> rpcListPins repo
     -- Drafts
-    :<|> rpcCreateDraft repo
+    :<|> adminOnly user (rpcCreateDraft repo)
     :<|> rpcListDrafts repo
     :<|> rpcViewDraft repo
-    :<|> rpcGenerateDraft repo
-    :<|> rpcCommitDraft cmdBus repo
-    :<|> rpcDiscardDraft cmdBus repo
+    :<|> adminOnly user (rpcGenerateDraft repo)
+    :<|> adminOnly user (rpcCommitDraft cmdBus repo)
+    :<|> adminOnly user (rpcDiscardDraft cmdBus repo)
     -- Schedules
     :<|> rpcListSchedules repo
     :<|> rpcViewSchedule repo
-    :<|> rpcDeleteSchedule cmdBus repo
+    :<|> adminOnly user (rpcDeleteSchedule cmdBus repo)
     -- Calendar
     :<|> rpcViewCalendar repo
     :<|> rpcCalendarHistory repo
-    :<|> rpcUnfreeze
+    :<|> adminOnly user rpcUnfreeze
     :<|> rpcFreezeStatus
     -- Config
     :<|> rpcShowConfig repo
-    :<|> rpcSetConfig cmdBus repo
-    :<|> rpcApplyPreset cmdBus repo
-    :<|> rpcResetConfig cmdBus repo
-    :<|> rpcSetPayPeriod cmdBus repo
+    :<|> adminOnly user (rpcSetConfig cmdBus repo)
+    :<|> adminOnly user (rpcApplyPreset cmdBus repo)
+    :<|> adminOnly user (rpcResetConfig cmdBus repo)
+    :<|> adminOnly user (rpcSetPayPeriod cmdBus repo)
     -- Audit
-    :<|> rpcListAudit repo
+    :<|> adminOnly user (rpcListAudit repo)
     -- Checkpoints
-    :<|> rpcCreateCheckpoint cmdBus repo
-    :<|> rpcCommitCheckpoint cmdBus repo
-    :<|> rpcRollbackCheckpoint cmdBus repo
+    :<|> adminOnly user (rpcCreateCheckpoint cmdBus repo)
+    :<|> adminOnly user (rpcCommitCheckpoint cmdBus repo)
+    :<|> adminOnly user (rpcRollbackCheckpoint cmdBus repo)
     -- Import/Export
-    :<|> rpcExportAll repo
-    :<|> rpcImportData repo
+    :<|> adminOnly user (rpcExportAll repo)
+    :<|> adminOnly user (rpcImportData repo)
     -- Absence types
-    :<|> rpcCreateAbsenceType cmdBus repo
-    :<|> rpcDeleteAbsenceType cmdBus repo
-    :<|> rpcSetAllowance cmdBus repo
+    :<|> adminOnly user (rpcCreateAbsenceType cmdBus repo)
+    :<|> adminOnly user (rpcDeleteAbsenceType cmdBus repo)
+    :<|> adminOnly user (rpcSetAllowance cmdBus repo)
     -- Absences
-    :<|> rpcRequestAbsence repo
-    :<|> rpcApproveAbsence repo
-    :<|> rpcRejectAbsence repo
-    :<|> rpcListPendingAbsences repo
+    :<|> selfOrAdmin user rarWorkerId (rpcRequestAbsence repo)
+    :<|> adminOnly user (rpcApproveAbsence repo)
+    :<|> adminOnly user (rpcRejectAbsence repo)
+    :<|> rpcListPendingAbsences repo user
     -- Users
-    :<|> rpcCreateUser cmdBus repo
-    :<|> rpcListUsers repo
-    :<|> rpcDeleteUser cmdBus repo
-    -- Hints
-    :<|> rpcAddHint repo
-    :<|> rpcRevertHint repo
-    :<|> rpcListHints repo
-    :<|> rpcApplyHints repo
-    :<|> rpcRebaseHints repo
-    -- Sessions
-    :<|> rpcCreateSession repo
-    :<|> rpcResumeSession repo
+    :<|> adminOnly user (rpcCreateUser cmdBus repo)
+    :<|> adminOnly user (rpcListUsers repo)
+    :<|> adminOnly user (rpcDeleteUser cmdBus repo)
+    -- Hints (only the owner of the hint session, or an admin)
+    :<|> sessionOwned repo user ahrSessionId (rpcAddHint repo)
+    :<|> sessionOwned repo user hsrSessionId (rpcRevertHint repo)
+    :<|> sessionOwned repo user hsrSessionId (rpcListHints repo)
+    :<|> sessionOwned repo user hsrSessionId (rpcApplyHints repo)
+    :<|> sessionOwned repo user hsrSessionId (rpcRebaseHints repo)
+    -- Sessions (a Normal user may only open/resume their own session)
+    :<|> selfOrAdmin user rscUserId (rpcCreateSession repo)
+    :<|> selfOrAdmin user rscUserId (rpcResumeSession repo)
     -- Command execution
-    :<|> rpcExecute cmdBus execEnv repo _user
+    :<|> rpcExecute cmdBus execEnv repo user
+
+-- -----------------------------------------------------------------
+-- Authorization combinators
+-- -----------------------------------------------------------------
+
+-- | Guard a one-argument RPC handler so only admins may call it.
+adminOnly :: User -> (a -> Handler b) -> a -> Handler b
+adminOnly u h a = requireAdmin u >> h a
+
+-- | Guard a two-argument RPC handler (path capture + body) so only
+-- admins may call it.
+adminOnly2 :: User -> (a -> b -> Handler c) -> a -> b -> Handler c
+adminOnly2 u h a b = requireAdmin u >> h a b
+
+-- | Guard an RPC handler so a 'Normal' user may only act on their own
+-- worker record. The projection extracts the target worker ID from the
+-- request body; admins bypass the check.
+selfOrAdmin :: User -> (a -> Int) -> (a -> Handler b) -> a -> Handler b
+selfOrAdmin u widOf h a = requireSelfOrAdmin u (widOf a) >> h a
+
+-- | Guard an RPC handler so a 'Normal' user may only touch hint
+-- sessions they own. The projection extracts the session ID from the
+-- request body; admins bypass the check.
+sessionOwned :: Repository -> User -> (a -> Int) -> (a -> Handler b) -> a -> Handler b
+sessionOwned repo u sidOf h a = do
+    requireSessionOwner repo u (SessionId (sidOf a))
+    h a
+
+-- | Ensure the authenticated user owns the given session (or is admin).
+-- Mirrors the REST check in "Server.Handlers".
+requireSessionOwner :: Repository -> User -> SessionId -> Handler ()
+requireSessionOwner repo u sid = case userRole u of
+    Admin  -> pure ()
+    Normal -> do
+        mOwner <- liftIO $ repoGetSessionOwner repo sid
+        case mOwner of
+            Just owner | owner == userId u -> pure ()
+            _ -> throwApiError (Forbidden "Forbidden")
 
 -- -----------------------------------------------------------------
 -- Audit logging helper
@@ -902,8 +947,14 @@ rpcRejectAbsence repo req = do
         Left err -> throwApiError (InternalError (show err))
         Right () -> pure RpcOk
 
-rpcListPendingAbsences :: Repository -> RpcEmpty -> Handler [AbsenceRequest]
-rpcListPendingAbsences repo _ = liftIO $ SA.listPendingAbsences repo
+-- | Admins see every pending request; a 'Normal' user sees only their own.
+rpcListPendingAbsences :: Repository -> User -> RpcEmpty -> Handler [AbsenceRequest]
+rpcListPendingAbsences repo user _ = do
+    allPending <- liftIO $ SA.listPendingAbsences repo
+    case userRole user of
+        Admin  -> pure allPending
+        Normal -> pure $ filter
+            (\a -> arWorker a == userIdToWorkerId (userId user)) allPending
 
 -- -----------------------------------------------------------------
 -- User handlers
