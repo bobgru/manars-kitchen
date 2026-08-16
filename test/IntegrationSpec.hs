@@ -2,6 +2,8 @@ module Main (main) where
 
 import Test.Hspec
 
+import Utils.Encoding (setUtf8Encoding)
+
 import qualified HintIntegrationSpec
 import qualified HintSessionSpec
 import qualified HintE2ESpec
@@ -11,7 +13,9 @@ import qualified PubSubSpec
 import qualified ApiSpec
 
 main :: IO ()
-main = hspec $ do
+main = do
+  setUtf8Encoding
+  hspec $ do
     describe "HintIntegration"     HintIntegrationSpec.spec
     describe "HintSession"         HintSessionSpec.spec
     describe "HintE2E"             HintE2ESpec.spec

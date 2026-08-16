@@ -18,9 +18,11 @@ import CLI.App (AppState(..), mkAppState, registerAuditSubscriber, registerTermi
 import Service.PubSub (AppBus(..))
 import CLI.Commands (Command(..), parseCommand)
 import CLI.RpcClient (RpcEnv(..), mkRpcEnv, dispatchCommand)
+import Utils.Encoding (setUtf8Encoding)
 
 main :: IO ()
 main = do
+    setUtf8Encoding
     args <- getArgs
     let (demoDelay, rest) = parseDelay args
     case rest of

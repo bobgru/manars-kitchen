@@ -20,9 +20,11 @@ import Server.Auth (authHandler)
 import Server.EventStream (eventStreamApp)
 import Server.Execute (newExecuteEnv, ExecuteEnv(..))
 import Server.Handlers (fullServer)
+import Utils.Encoding (setUtf8Encoding)
 
 main :: IO ()
 main = do
+    setUtf8Encoding
     args <- getArgs
     let (dbPath, port) = parseArgs args
     putStrLn $ "Database: " ++ dbPath

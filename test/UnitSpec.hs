@@ -2,6 +2,8 @@ module Main (main) where
 
 import Test.Hspec
 
+import Utils.Encoding (setUtf8Encoding)
+
 import qualified Domain.Schedule
 import qualified Domain.Transaction
 import qualified Domain.Skill
@@ -24,7 +26,9 @@ import qualified ShellWordsSpec
 import qualified Service.HintRebase
 
 main :: IO ()
-main = hspec $ do
+main = do
+  setUtf8Encoding
+  hspec $ do
     describe "Domain.Schedule"        Domain.Schedule.spec
     describe "Domain.Transaction"     Domain.Transaction.spec
     describe "Domain.Skill"           Domain.Skill.spec
