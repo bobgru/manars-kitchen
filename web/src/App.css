@@ -499,3 +499,125 @@
   justify-content: flex-end;
   margin-top: 1rem;
 }
+
+/* Filter and action bars
+   Referenced by WorkersListPage since the worker admin UI landed, but never
+   defined until now. */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.action-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Terminal.tsx builds its line class as `terminal-${line.type}`, so a line of
+   type "output" needs a rule to match .terminal-command and friends. */
+.terminal-output {
+  color: #e0e0e0;
+}
+
+/* Calendar page
+   The calendar renders a date range as one column per day and one row per hour.
+   Slot occupancy is sparse -- most cells are empty -- so cells stay narrow and
+   assignments render as chips. */
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.calendar-toolbar label {
+  color: #aaa;
+  font-size: 0.85rem;
+}
+
+.calendar-scroll {
+  overflow-x: auto;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
+.calendar-grid {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  min-width: 100%;
+}
+
+.calendar-grid th,
+.calendar-grid td {
+  border: 1px solid #2c2c44;
+  padding: 0.2rem 0.35rem;
+  vertical-align: top;
+}
+
+.calendar-grid th {
+  background: #16213e;
+  color: #aaa;
+  font-weight: normal;
+  text-align: left;
+  position: sticky;
+  top: 0;
+}
+
+/* Hour gutter down the left edge. */
+.calendar-hour {
+  color: #888;
+  white-space: nowrap;
+  text-align: right;
+  background: #16213e;
+}
+
+.calendar-cell {
+  min-width: 7rem;
+}
+
+.calendar-cell-empty {
+  background: #1a1a2e;
+}
+
+/* A day the restaurant is closed, or an hour outside its opening hours. */
+.calendar-cell-closed {
+  background: #15151f;
+}
+
+/* One worker-at-station assignment. */
+.calendar-chip {
+  display: block;
+  background: #0f3460;
+  border-left: 2px solid #5390d9;
+  border-radius: 2px;
+  padding: 0.05rem 0.25rem;
+  margin-bottom: 0.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-chip-station {
+  color: #888;
+}
+
+/* Weekend day columns, and dates at or behind the freeze line. */
+.calendar-col-weekend {
+  background: #191926;
+}
+
+.calendar-col-frozen th {
+  color: #f0c674;
+}
+
+.calendar-legend {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  color: #888;
+  font-size: 0.8rem;
+}
