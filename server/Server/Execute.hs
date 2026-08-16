@@ -15,7 +15,7 @@ import Data.IORef (newIORef)
 import Auth.Types (User(..))
 import Repo.Types (Repository, SessionId(..))
 import Service.PubSub (AppBus(..), newAppBus)
-import CLI.App (mkAppState, handleCommand, registerAuditSubscriber)
+import CLI.App (mkAppStateWithBus, handleCommand, registerAuditSubscriber)
 import CLI.Commands (Command(..), parseCommand)
 import CLI.Resolve (emptyContext, resolveInput)
 
@@ -37,6 +37,17 @@ newExecuteEnv repo = do
 
 -- | Parse and execute a command string, returning the formatted text output.
 --   Thread-safe: concurrent calls are serialized via MVar.
+--
+--   The command runs against 'eeBus', the same bus the audit subscriber and the
+--   SSE feed are attached to, so anything the command publishes is observable.
+--   (It used to run against a throwaway bus created per invocation, which
+--   silently swallowed every event.)
+--
+--   This function does not itself publish a CommandEvent for @input@: callers
+--   own that, because they know the event's 'Service.PubSub.Source' and client
+--   id (see 'Server.Rpc.rpcExecute' and 'logRest' in "Server.Handlers"). A
+--   caller that forgets leaves the command out of the audit log, so it is lost
+--   on @replay@ and no SSE event reaches other clients.
 executeCommandText :: ExecuteEnv -> User -> String -> IO String
 executeCommandText env user input = do
     ctxRef <- newIORef emptyContext
@@ -49,7 +60,7 @@ executeCommandText env user input = do
                 Quit -> return "Use the browser logout button to end your session."
                 PasswordChange -> return "Password change is not supported in the web terminal."
                 _ -> captureStdout (eeLock env) $ do
-                    st <- mkAppState (eeRepo env) user (SessionId 0)
+                    st <- mkAppStateWithBus (eeRepo env) user (SessionId 0) (eeBus env)
                     handleCommand st cmd
 
 -- | Capture everything written to stdout during an IO action.

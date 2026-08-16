@@ -27,7 +27,7 @@ import System.Directory (removeFile, doesFileExist)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Auth.Types (Role(..), User(..))
-import Domain.Types (WorkerId(..), SkillId(..), AbsenceTypeId(..), Schedule(..), Station)
+import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..), Schedule(..), Station)
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
@@ -88,7 +88,7 @@ getConfigC       :: ClientM [(String, Double)]
 -- Skill CRUD
 createSkillC     :: CreateSkillReq -> ClientM NoContent
 deleteSkillC     :: Text -> ClientM NoContent
-_forceDeleteSkillC :: Text -> ClientM NoContent
+forceDeleteSkillC :: Text -> ClientM NoContent
 renameSkillC    :: Text -> RenameSkillReq -> ClientM NoContent
 _listImplicationsC :: ClientM (Map.Map Text [Text])
 _addImplicationC :: Text -> AddImplicationReq -> ClientM NoContent
@@ -97,7 +97,7 @@ _removeImplicationC :: Text -> Text -> ClientM NoContent
 -- Station CRUD
 createStationC      :: CreateStationReq -> ClientM NoContent
 _deleteStationC     :: Text -> ClientM NoContent
-_forceDeleteStationC :: Text -> ClientM NoContent
+forceDeleteStationC :: Text -> ClientM NoContent
 _renameStationC     :: Text -> RenameStationReq -> ClientM NoContent
 setStationHoursC    :: Text -> SetStationHoursReq -> ClientM NoContent
 _setStationClosureC :: Text -> SetStationClosureReq -> ClientM NoContent
@@ -194,14 +194,14 @@ logoutC
     :<|> listSkillsC
     :<|> createSkillC
     :<|> deleteSkillC
-    :<|> _forceDeleteSkillC
+    :<|> forceDeleteSkillC
     :<|> renameSkillC
     :<|> _listImplicationsC
     :<|> _addImplicationC
     :<|> _removeImplicationC
     :<|> createStationC
     :<|> _deleteStationC
-    :<|> _forceDeleteStationC
+    :<|> forceDeleteStationC
     :<|> _renameStationC
     :<|> setStationHoursC
     :<|> _setStationClosureC
@@ -522,6 +522,14 @@ shouldFailWith (Right val) expected =
     expectationFailure $ "Expected status " ++ show expected
                       ++ " but got success: " ++ show val
 
+-- | Fetch the audit log and return the recorded command strings.
+auditCommands :: ClientEnv -> IO [String]
+auditCommands env = do
+    result <- runClientM getAuditLogC env
+    case result of
+        Left err      -> error ("Audit log fetch failed in test: " ++ show err)
+        Right entries -> return [T.unpack c | e <- entries, Just c <- [aeCommand e]]
+
 apr :: Int -> Day
 apr d = fromGregorian 2026 4 d
 
@@ -682,11 +690,35 @@ spec = do
             Right skills <- runClientM listSkillsC env
             length skills `shouldBe` 0
 
+        -- Regression: force-delete routes through the command execute path
+        -- instead of a service call, and used to skip logging entirely — the
+        -- cascade delete never reached the audit log (so it was lost on
+        -- replay) and no SSE event fired.
+        it "force-delete skill records an audit entry" $ withTestApp $ \env -> do
+            Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "Grill skills")) env
+            -- Grant the skill so force-delete has references to cascade over.
+            Right _ <- runClientM (grantWorkerSkillC "admin" "grill") env
+            Right _ <- runClientM (forceDeleteSkillC "grill") env
+            Right skills <- runClientM listSkillsC env
+            length skills `shouldBe` 0
+            cmds <- auditCommands env
+            cmds `shouldSatisfy` any ("skill force-delete" `isInfixOf`)
+
     describe "Station CRUD" $ do
         it "create and list station" $ withTestApp $ \env -> do
             Right _ <- runClientM (createStationC (CreateStationReq "grill" 1 1)) env
             Right stations <- runClientM listStationsC env
             length stations `shouldBe` 1
+
+        it "force-delete station records an audit entry" $ withSeededApp $ \repo env -> do
+            Right _ <- runClientM (createStationC (CreateStationReq "grill" 1 1)) env
+            -- Reference the station so force-delete has to cascade.
+            SW.setStationPreferences repo (WorkerId 1) [StationId 1]
+            Right _ <- runClientM (forceDeleteStationC "grill") env
+            Right stations <- runClientM listStationsC env
+            length stations `shouldBe` 0
+            cmds <- auditCommands env
+            cmds `shouldSatisfy` any ("station force-delete" `isInfixOf`)
 
         it "set station hours" $ withTestApp $ \env -> do
             Right _ <- runClientM (createStationC (CreateStationReq "grill" 1 1)) env

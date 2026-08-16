@@ -257,8 +257,11 @@ spec = do
         testConsistency "schedule list"
         testConsistency "schedule view week1"
         testConsistency "station list"
+        testConsistency "station view grill"
         testConsistency "skill list"
+        testConsistency "skill view 1"
         testConsistency "worker info"
+        testConsistency "worker view alice"
         testConsistency "shift list"
         testConsistency "config show"
         testConsistency "pin list"
@@ -272,6 +275,26 @@ spec = do
         testConsistency "replay"
         testConsistency "help"
         testConsistency "quit"
+
+    -- Regression: entity detail views are reads. When they were missing from
+    -- the non-mutating list in 'isMutating' they hit the catch-all and were
+    -- treated as mutations, so 'worker view' / 'station view' published a
+    -- command event, wrote an audit row, touched the session and marked the
+    -- caller's what-if hint session stale.
+    describe "entity view commands are not mutations" $ do
+        it "does not treat worker view as mutating" $
+            isMutating (parseCommand "worker view alice") `shouldBe` False
+
+        it "does not treat station view as mutating" $
+            isMutating (parseCommand "station view grill") `shouldBe` False
+
+        it "does not write an audit entry for worker view" $ withTestRepo $ \(repo, bus) -> do
+            let cmdStr = "worker view alice"
+            if isMutating (parseCommand cmdStr)
+                then publishCommand bus CLI "admin" cmdStr
+                else return ()
+            entries <- repoGetAuditLog repo
+            entries `shouldBe` []
 
     -- 8.4: Every mutating command has non-Nothing cmEntityType
     describe "mutating commands have entity type" $ do

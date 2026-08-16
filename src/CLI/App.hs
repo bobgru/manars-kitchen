@@ -1,6 +1,7 @@
 module CLI.App
     ( AppState(..)
     , mkAppState
+    , mkAppStateWithBus
     , registerAuditSubscriber
     , registerTerminalEcho
     , runRepl
@@ -89,10 +90,19 @@ data AppState = AppState
     , asHintSession :: !(IORef (Maybe HintState))
     }
 
--- | Create an AppState with initialized IORefs and event bus.
+-- | Create an AppState with initialized IORefs and a private event bus.
+--   The caller is expected to attach its subscribers to @asBus@ afterwards.
+--   Callers that already own a bus with subscribers (audit log, SSE feed)
+--   must use 'mkAppStateWithBus' instead: events published onto a private
+--   bus nobody has subscribed to are silently discarded.
 mkAppState :: Repository -> User -> SessionId -> IO AppState
 mkAppState repo user sid = do
-    bus    <- newAppBus
+    bus <- newAppBus
+    mkAppStateWithBus repo user sid bus
+
+-- | Create an AppState that publishes onto a caller-supplied event bus.
+mkAppStateWithBus :: Repository -> User -> SessionId -> AppBus -> IO AppState
+mkAppStateWithBus repo user sid bus = do
     ctxRef <- newIORef emptyContext
     cpRef  <- newIORef []
     ufRef  <- newIORef Set.empty
@@ -158,6 +168,16 @@ runRepl st = do
                     runRepl st
 
 -- | Commands that modify state and should be logged.
+--
+--   NOTE: this duplicates 'Meta.cmIsMutation' from "Audit.CommandMeta", which
+--   answers the same question from the raw command string rather than from the
+--   parsed 'Command'. Nothing keeps the two in sync, and that duplication is
+--   the root cause of divergence: 'WorkerView' and 'StationView' were missing
+--   from the list below and so fell through to the @_ -> True@ catch-all, which
+--   made @worker view@ / @station view@ publish command events, write audit
+--   rows and mark hint sessions stale. 'AuditSpec' has consistency tests that
+--   compare the two implementations command by command; unifying them is a
+--   separate refactor.
 isMutating :: Command -> Bool
 isMutating cmd = case cmd of
     ScheduleList        -> False
@@ -171,7 +191,9 @@ isMutating cmd = case cmd of
     SkillView _         -> False
     SkillInfo           -> False
     StationList         -> False
+    StationView _       -> False
     WorkerInfo          -> False
+    WorkerView _        -> False
     ShiftList           -> False
     AbsenceTypeList     -> False
     AbsenceListMine     -> False
