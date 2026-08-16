@@ -411,6 +411,11 @@ handleForceDeleteSkill execEnv repo user name = do
     requireAdmin user
     _ <- resolveSkillName repo name
     _ <- liftIO $ executeCommandText execEnv user ("skill force-delete " ++ shellQuote (T.unpack name))
+    -- 'executeCommandText' does not publish the command itself, so this
+    -- handler must, exactly like its non-force sibling above. Without it the
+    -- cascade delete never reaches the audit log (lost on replay) and no SSE
+    -- event fires, so other clients keep showing the deleted skill.
+    logRest (busCommands (eeBus execEnv)) user ("skill force-delete " ++ shellQuote (T.unpack name))
     pure NoContent
 
 handleRenameSkill :: TopicBus CommandEvent -> Repository -> User -> Text -> RenameSkillReq -> Handler NoContent
@@ -481,6 +486,8 @@ handleForceDeleteStation execEnv repo user name = do
     requireAdmin user
     _ <- resolveStationName repo name
     _ <- liftIO $ executeCommandText execEnv user ("station force-delete " ++ shellQuote (T.unpack name))
+    -- See 'handleForceDeleteSkill': the execute path does not log for us.
+    logRest (busCommands (eeBus execEnv)) user ("station force-delete " ++ shellQuote (T.unpack name))
     pure NoContent
 
 handleRenameStation :: TopicBus CommandEvent -> Repository -> User -> Text -> RenameStationReq -> Handler NoContent
