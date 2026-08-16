@@ -610,7 +610,9 @@
   background: #191926;
 }
 
-.calendar-col-frozen th {
+/* Applied directly to a column's own <th>, so it must not be a descendant
+   selector -- a <th> cannot contain another <th>. */
+th.calendar-col-frozen {
   color: #f0c674;
 }
 
