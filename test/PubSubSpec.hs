@@ -19,7 +19,7 @@ spec = do
 
         describe "subscribe + publish" $ do
             it "delivers events matching a wildcard pattern" $ do
-                bus <- newTopicBus
+                bus <- newTopicBus :: IO (TopicBus String)
                 ref <- newIORef []
                 _ <- subscribe bus ".*" $ \(Topic t) e ->
                     modifyIORef ref ((t, e) :)
@@ -32,7 +32,7 @@ spec = do
                     ]
 
             it "delivers only to matching subscribers (prefix pattern)" $ do
-                bus <- newTopicBus
+                bus <- newTopicBus :: IO (TopicBus String)
                 skillRef <- newIORef []
                 stationRef <- newIORef []
                 _ <- subscribe bus "skill\\..*" $ \_t e ->
@@ -74,7 +74,7 @@ spec = do
                 readIORef ref `shouldReturn` 1
 
             it "does not affect other subscribers" $ do
-                bus <- newTopicBus
+                bus <- newTopicBus :: IO (TopicBus String)
                 ref1 <- newIORef []
                 ref2 <- newIORef []
                 sid1 <- subscribe bus ".*" $ \_t e -> modifyIORef ref1 (e :)
