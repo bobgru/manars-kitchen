@@ -10,3 +10,4 @@ dist-newstyle/
 web/node_modules/
 web/dist/
 web/*.db
+.worktrees/

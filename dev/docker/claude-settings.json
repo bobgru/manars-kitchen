@@ -1,0 +1,47 @@
+{
+  "$comment": [
+    "Claude Code settings for the container. Mounted READ-ONLY, so the agent",
+    "cannot disable its own guardrails even with permission prompts skipped.",
+    "The read-only bind mount is enforced by the kernel, which is why this does",
+    "not rely on admin/managed-settings precedence.",
+    "",
+    "Empirically verified on 2026-08-16: PreToolUse hooks still execute and",
+    "still block under --dangerously-skip-permissions. The published docs only",
+    "state that 'ask' rules survive bypass mode and are silent on hooks, so the",
+    "ask rules below are deliberate redundancy in case that behaviour changes.",
+    "The hook is the primary control because it normalizes the command first",
+    "and therefore also catches 'git -C <dir> push', which prefix-matched",
+    "permission rules do not."
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/opt/guardrails/block-dangerous-git.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(git branch -D:*)",
+      "Bash(wt step push:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.cargo/credentials*)"
+    ]
+  },
+  "includeCoAuthoredBy": true
+}
