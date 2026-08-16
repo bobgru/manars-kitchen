@@ -71,6 +71,17 @@ RUN curl -fsSL "https://github.com/commercialhaskell/stack/releases/download/v${
 
 RUN npm install -g @anthropic-ai/claude-code && claude --version
 
+# AWS CLI, for Bedrock users. Not needed to authenticate -- the launcher passes
+# already-exchanged session credentials as environment variables, which the SDK
+# reads directly -- but diagnosing an auth failure inside a container without it
+# is painful. `aws sts get-caller-identity` is the one-line answer to "are my
+# credentials live?", which is why sts is on the egress allowlist.
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip \
+    && unzip -q /tmp/awscli.zip -d /tmp \
+    && /tmp/aws/install \
+    && rm -rf /tmp/awscli.zip /tmp/aws \
+    && aws --version
+
 # Note: sudo is deliberately NOT installed. The entrypoint applies the firewall
 # while still root and then drops privileges permanently, so the agent user
 # never needs to escalate -- and cannot.

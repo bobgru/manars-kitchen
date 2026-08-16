@@ -58,21 +58,81 @@ A non-executable hook fails open: the tool call proceeds."
 
     [ -d "$STACK_ROOT" ] || die "$STACK_ROOT not found; nothing to mount."
 
-    if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    # Three supported auth paths, checked in the order they are preferred.
+    # Bedrock is detected first because on a Bedrock host the other two are
+    # absent by design and their error messages would be misleading.
+    if [ "${CLAUDE_CODE_USE_BEDROCK:-0}" = "1" ] || [ -n "${AWS_PROFILE:-}" ]; then
+        AUTH_MODE=bedrock
+        export_bedrock_credentials
+    elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        AUTH_MODE=oauth
+    elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        AUTH_MODE=apikey
+    else
         die "no credentials in the environment.
 
-Interactive /login does not work in a headless container -- the OAuth callback
-cannot reach the browser. Instead, on the host run:
+Pick whichever matches how you authenticate:
 
-    claude setup-token
+  Bedrock (AWS SSO)
+      export CLAUDE_CODE_USE_BEDROCK=1
+      export AWS_PROFILE=dev AWS_REGION=us-east-1
+      aws sso login --profile dev        # on the HOST; needs a browser
+    This script then exports short-lived session credentials into the
+    container. Note that 'claude setup-token' does NOT apply to Bedrock.
 
-then export the value it prints and re-run this script:
+  Anthropic subscription
+      claude setup-token                # on the HOST; needs a browser
+      export CLAUDE_CODE_OAUTH_TOKEN=...
+    Interactive /login cannot complete inside a headless container: the OAuth
+    callback has no browser to return to.
 
-    export CLAUDE_CODE_OAUTH_TOKEN=...
-
-Alternatively export ANTHROPIC_API_KEY to bill via the API instead of your
-subscription."
+  API key
+      export ANTHROPIC_API_KEY=..."
     fi
+}
+
+# Turn the host's AWS SSO session into short-lived session credentials and pass
+# those in, rather than mounting ~/.aws.
+#
+# Why: the SSO cache in ~/.aws holds a refresh token that can mint new
+# credentials for the session's full lifetime. Exchanging it on the host and
+# passing only the result means the container receives a credential that expires
+# on its own and cannot be renewed from inside. It also keeps the SSO and OIDC
+# endpoints off the egress allowlist entirely.
+#
+# Trade-off: when these expire the session stops working and you must restart the
+# container. Role credentials here last ~9 hours, so that is rarely a problem in
+# practice; run `aws sso login` on the host first if the session itself lapsed.
+export_bedrock_credentials() {
+    command -v aws >/dev/null 2>&1 || die "aws CLI not found on the host, but Bedrock auth was selected.
+Either install it, or mount ~/.aws into the container instead (see
+dev/docker/README.md)."
+
+    local profile="${AWS_PROFILE:-default}"
+    local creds
+    if ! creds="$(aws configure export-credentials --profile "$profile" --format process 2>/dev/null)"; then
+        die "could not export credentials for AWS profile '${profile}'.
+
+The SSO session has most likely expired. On the HOST run:
+
+    aws sso login --profile ${profile}
+
+then re-run this script. Refresh has to happen on the host because it needs a
+browser, which a headless container does not have."
+    fi
+
+    AWS_ACCESS_KEY_ID="$(printf '%s' "$creds"  | jq -r '.AccessKeyId')"
+    AWS_SECRET_ACCESS_KEY="$(printf '%s' "$creds" | jq -r '.SecretAccessKey')"
+    AWS_SESSION_TOKEN="$(printf '%s' "$creds"  | jq -r '.SessionToken')"
+    AWS_CREDS_EXPIRY="$(printf '%s' "$creds"   | jq -r '.Expiration // "unknown"')"
+
+    [ -n "$AWS_ACCESS_KEY_ID" ] && [ "$AWS_ACCESS_KEY_ID" != "null" ] \
+        || die "credential export for profile '${profile}' returned nothing usable."
+
+    echo "auth: Bedrock via profile '${profile}' in ${AWS_REGION:-us-east-1}" >&2
+    echo "      credentials expire at ${AWS_CREDS_EXPIRY}" >&2
+    echo "      (refresh with 'aws sso login --profile ${profile}' on the host," >&2
+    echo "       then restart the container -- it cannot renew them itself)" >&2
 
     docker image inspect "$IMAGE" >/dev/null 2>&1 || {
         echo "image $IMAGE not found; building it first" >&2
@@ -125,14 +185,36 @@ run() {
     local -a tty=(-i)
     [ -t 0 ] && [ -t 1 ] && tty=(-i -t)
 
+    # Credentials are passed as environment variables, never baked into the
+    # image. The firewall script also reads CLAUDE_CODE_USE_BEDROCK/AWS_REGION to
+    # decide which inference endpoint to allow and health-check.
+    local -a auth=()
+    case "${AUTH_MODE:-}" in
+        bedrock)
+            auth=(
+                -e "CLAUDE_CODE_USE_BEDROCK=1"
+                -e "AWS_REGION=${AWS_REGION:-us-east-1}"
+                -e "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}"
+                -e "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}"
+                -e "AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}"
+            )
+            # AWS_PROFILE is deliberately NOT forwarded: with explicit
+            # credentials in the environment, a profile name would send the SDK
+            # looking for a ~/.aws that is not mounted.
+            [ -n "${ANTHROPIC_MODEL:-}" ] && auth+=(-e "ANTHROPIC_MODEL=${ANTHROPIC_MODEL}")
+            ;;
+        oauth)  auth=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}") ;;
+        apikey) auth=(-e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}") ;;
+    esac
+
     docker run --rm "${tty[@]}" \
         --hostname manars-claude \
         "${caps[@]}" \
         "${mounts[@]}" \
+        "${auth[@]}" \
         -e "CONTAINER_USER=$CONTAINER_USER" \
         -e "SKIP_FIREWALL=${SKIP_FIREWALL:-0}" \
-        -e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}" \
-        -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}" \
+        -e "ALLOWED_DOMAINS_EXTRA=${ALLOWED_DOMAINS_EXTRA:-}" \
         -w "$REPO_DIR" \
         "$IMAGE" "$@"
 }

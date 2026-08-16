@@ -49,7 +49,7 @@ argument weakens — noted per item.
 | A5 | **Single-user Linux workstation, uid/gid 1000.** The container user is built to match. | The mounted build cache is unusable (see A6) and file ownership breaks. Rebuild the image with `--build-arg USER_UID=...`. |
 | A6 | **A large host build cache exists and is worth reusing.** Here: `~/.stack`, 116 GB. | Drop the mount and accept a long cold start. This is the single biggest performance decision. |
 | A7 | **Worktrunk (`wt`) is used for parallel agents**, and its worktree path template is under our control. Default template places worktrees in a *sibling* directory of the repo. | Worktrees land outside the bind mount and are invisible to the container. See §5.3. |
-| A8 | **Credentials are supplied by environment variable.** Interactive `/login` cannot complete in a headless container — the OAuth callback cannot reach a browser. | No authentication. Use `claude setup-token` on the host (§7). |
+| A8 | **Credentials are supplied by environment variable**, obtained on the host. Interactive `/login` cannot complete in a headless container — the OAuth callback cannot reach a browser, and neither can an AWS SSO login. | No authentication. See §7 for the three paths; note `claude setup-token` is **not** the answer for Bedrock. |
 | A9 | **Mounted paths are reconstructible.** Repo is in git; the build cache can be rebuilt. | You are trusting a YOLO agent with unrecoverable data. Don't. |
 
 ---
@@ -186,10 +186,34 @@ If either check fails the container refuses to start. Note the reachability test
 judges the *connection*, not the HTTP status — a bare `GET` of an API root
 legitimately returns 4xx.
 
-**Residual holes, stated plainly:** DNS is permitted and is a low-bandwidth
-covert channel. CDN addresses rotate, so a long-running container may need a
-restart to refresh the ipset. `storage.googleapis.com` resolves to 15 addresses
-and is shared infrastructure — it is a broad allowance.
+**Bedrock users:** the allowlist is different. Traffic goes to
+`bedrock-runtime.<region>.amazonaws.com`, not `api.anthropic.com`, and `sts` is
+allowed so `aws sts get-caller-identity` works for diagnosis. The script switches
+automatically on `CLAUDE_CODE_USE_BEDROCK`, and health-checks whichever endpoint
+is actually in use — a health check against the wrong endpoint would pass while
+the agent could not reach a model at all. Because credentials arrive
+pre-exchanged (§7), the SSO and OIDC endpoints are *not* needed; if you switch to
+mounting `~/.aws` and doing the token exchange in-container, you must add
+`oidc.<region>.amazonaws.com` and `portal.sso.<region>.amazonaws.com`.
+
+**Residual holes, stated plainly:**
+
+- **An ipset cannot separate hostnames that share an address.** VERIFIED:
+  `api.anthropic.com`, `claude.com` and `code.claude.com` all resolved to
+  `160.79.104.10`. So allowing the docs domains also allows the API endpoint,
+  and in Bedrock mode `api.anthropic.com` remains reachable despite being
+  unnecessary. Anthropic endpoints are a benign case, but the general point is
+  the limit of layer-3 filtering: any allowlisted domain grants every other
+  domain sharing its CDN address. True hostname control needs an SNI-filtering
+  proxy, which this setup does not have.
+- **DNS is permitted** and is a low-bandwidth covert channel. Closing it needs a
+  fixed-IP allowlist and no resolution.
+- **Addresses rotate.** These endpoints sit behind pools that return a rotating
+  subset per query; the script resolves each domain several times to widen
+  coverage, but a long-running container can still outlive its entries and need a
+  restart. AWS regional endpoints are the most prone to this.
+- **`storage.googleapis.com` resolves to ~15 addresses** of shared Google
+  infrastructure — a broad allowance. Drop it if you install no plugins.
 
 ---
 
@@ -297,19 +321,66 @@ adversary.
 
 ## 7. Setup
 
-```bash
-# once, on the host — needs a browser; headless /login cannot complete
-claude setup-token
-export CLAUDE_CODE_OAUTH_TOKEN=...        # or ANTHROPIC_API_KEY
+The launcher auto-detects which of three auth paths you use and refuses to start
+if none is available.
 
-./dev/claude-container.sh build           # build the image
+### Bedrock via AWS SSO (what this project uses)
+
+```bash
+# on the HOST -- needs a browser, so it cannot be done inside the container
+aws sso login --profile dev
+
+# usually already exported from your shell profile
+export CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=dev AWS_REGION=us-east-1
+
+./dev/claude-container.sh yolo
+```
+
+`claude setup-token` **does not apply to Bedrock** — it mints an Anthropic
+subscription OAuth token, which a Bedrock deployment never uses.
+
+The launcher runs `aws configure export-credentials` on the host and passes the
+resulting short-lived session credentials in as environment variables. It prints
+the expiry when it starts.
+
+**Why exchange on the host rather than mount `~/.aws`:** the SSO cache holds a
+refresh token that can mint fresh credentials for the whole session lifetime.
+Exchanging on the host and passing only the result means the container holds a
+credential that expires by itself and cannot be renewed from inside — and it
+keeps the SSO/OIDC endpoints off the allowlist. The cost is that when it expires
+the session stops; re-run `aws sso login` on the host and restart the container.
+Observed lifetime here is ~9 hours, so this is rarely disruptive.
+
+`AWS_PROFILE` is deliberately *not* forwarded into the container: with explicit
+credentials in the environment, a profile name would send the SDK looking for a
+`~/.aws` that is not mounted.
+
+The image includes the AWS CLI purely for diagnosis —
+`aws sts get-caller-identity` answers "are my credentials live?" in one line.
+
+### Anthropic subscription, or an API key
+
+```bash
+claude setup-token                        # on the HOST; needs a browser
+export CLAUDE_CODE_OAUTH_TOKEN=...        # or: export ANTHROPIC_API_KEY=...
+./dev/claude-container.sh yolo
+```
+
+Interactive `/login` cannot complete in a headless container: the OAuth callback
+has nowhere to return to.
+
+### Common commands
+
+```bash
+./dev/claude-container.sh build           # (re)build the image
 ./dev/claude-container.sh yolo            # straight into YOLO mode
 ./dev/claude-container.sh shell           # plain shell, no agent
-SKIP_FIREWALL=1 ./dev/claude-container.sh shell   # debugging only
+SKIP_FIREWALL=1 ./dev/claude-container.sh shell         # debugging only
+ALLOWED_DOMAINS_EXTRA=github.com ./dev/claude-container.sh yolo   # widen egress
 ```
 
 `preflight` refuses to start if the guardrail hook is missing or
-non-executable (A1, A2), or if no credentials are present.
+non-executable (A1, A2), or if no credentials are available.
 
 ### Adapting to another repo
 

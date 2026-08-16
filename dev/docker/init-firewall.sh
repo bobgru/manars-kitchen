@@ -21,8 +21,6 @@ set -euo pipefail
 # Domains Claude Code needs. Sourced from Anthropic's published network
 # requirements; trim further if you do not use plugins or docs lookups.
 ALLOWED_DOMAINS=(
-    # Inference, auth, control plane. The only strictly required entry.
-    api.anthropic.com
     # Claude Code updates and plugin marketplace downloads.
     downloads.claude.ai
     # Plugin marketplace catalog and artifacts.
@@ -34,6 +32,43 @@ ALLOWED_DOMAINS=(
     registry.npmjs.org
 )
 
+# Inference endpoint. Which one depends on how Claude Code authenticates, and
+# getting this wrong means the agent cannot talk to a model at all.
+#
+#   Bedrock  -- traffic goes to a regional AWS endpoint; api.anthropic.com is
+#               not used. Note it is not thereby *blocked*: api.anthropic.com,
+#               claude.com and code.claude.com share a CDN address
+#               (160.79.104.10 as of 2026-08), and an ipset works at layer 3, so
+#               allowing the docs domains necessarily allows the API endpoint
+#               too. Hostname-level separation would need an SNI-filtering
+#               proxy. See dev/docker/README.md 4.4.
+#   Direct   -- api.anthropic.com.
+#
+# The launcher passes CLAUDE_CODE_USE_BEDROCK and AWS_REGION through.
+if [ "${CLAUDE_CODE_USE_BEDROCK:-0}" = "1" ]; then
+    region="${AWS_REGION:-us-east-1}"
+    ALLOWED_DOMAINS+=(
+        "bedrock-runtime.${region}.amazonaws.com"
+        # Identity validation, and useful for diagnosing auth failures from
+        # inside the container.
+        "sts.${region}.amazonaws.com"
+    )
+    # Credentials arrive as already-exchanged short-lived session tokens, so the
+    # SSO/OIDC endpoints are NOT needed here. If you switch to mounting ~/.aws
+    # and letting the container do the token exchange itself, you must also add
+    # oidc.<region>.amazonaws.com and portal.sso.<region>.amazonaws.com.
+    HEALTHCHECK_HOST="bedrock-runtime.${region}.amazonaws.com"
+else
+    ALLOWED_DOMAINS+=(api.anthropic.com)
+    HEALTHCHECK_HOST="api.anthropic.com"
+fi
+
+# Allow callers to extend the list without editing this file.
+if [ -n "${ALLOWED_DOMAINS_EXTRA:-}" ]; then
+    # shellcheck disable=SC2206
+    ALLOWED_DOMAINS+=(${ALLOWED_DOMAINS_EXTRA//,/ })
+fi
+
 log() { printf '[firewall] %s\n' "$*"; }
 
 # A second run inside the same container should be a no-op rather than an error.
@@ -42,19 +77,32 @@ ipset destroy claude-allow 2>/dev/null || true
 
 ipset create claude-allow hash:ip family inet
 
-# Resolve each domain and add every A record. These are CDN-fronted and their
-# addresses rotate, so the set is rebuilt on every container start; a
-# long-running container may eventually need a refresh.
+# Resolve each domain and add every A record. These sit behind load balancers
+# that hand out a rotating subset of a larger pool, so resolve several times to
+# widen coverage -- AWS regional endpoints in particular return a different
+# handful per query. The set is rebuilt on every container start; a long-running
+# container may still outlive its entries and need a restart.
+RESOLVE_ROUNDS="${RESOLVE_ROUNDS:-3}"
+
 for domain in "${ALLOWED_DOMAINS[@]}"; do
-    mapfile -t addrs < <(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9.]+$' || true)
-    if [ "${#addrs[@]}" -eq 0 ]; then
+    declare -A seen=()
+    for _ in $(seq "$RESOLVE_ROUNDS"); do
+        while read -r ip; do
+            [ -n "$ip" ] || continue
+            seen["$ip"]=1
+        done < <(dig +short A "$domain" 2>/dev/null | grep -E '^[0-9.]+$' || true)
+    done
+
+    if [ "${#seen[@]}" -eq 0 ]; then
         log "WARNING: could not resolve ${domain}; traffic to it will be dropped"
+        unset seen
         continue
     fi
-    for ip in "${addrs[@]}"; do
+    for ip in "${!seen[@]}"; do
         ipset add claude-allow "$ip" -exist
     done
-    log "allowed ${domain} (${#addrs[@]} address(es))"
+    log "allowed ${domain} (${#seen[@]} address(es))"
+    unset seen
 done
 
 # Loopback is unrestricted: the project's own server and test suites talk to
@@ -85,11 +133,11 @@ log "egress restricted to ${#ALLOWED_DOMAINS[@]} domain(s)"
 # status: a bare GET of the API root legitimately returns 4xx. So drop -f and
 # test curl's exit code, where 0 means a response was received and 7/28/35 mean
 # the connection was refused or timed out.
-if curl -sS --max-time 8 -o /dev/null https://api.anthropic.com/ 2>/dev/null; then
-    log "verified: api.anthropic.com is reachable"
+if curl -sS --max-time 8 -o /dev/null "https://${HEALTHCHECK_HOST}/" 2>/dev/null; then
+    log "verified: ${HEALTHCHECK_HOST} is reachable (inference endpoint)"
 else
-    log "ERROR: api.anthropic.com is NOT reachable; Claude Code will not work."
-    log "       If this host resolves to a rotating CDN address, restart the"
+    log "ERROR: ${HEALTHCHECK_HOST} is NOT reachable; Claude Code will not work."
+    log "       If this host resolves to a rotating address pool, restart the"
     log "       container to rebuild the address set."
     exit 1
 fi
