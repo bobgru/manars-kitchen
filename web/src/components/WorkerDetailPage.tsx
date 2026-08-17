@@ -9,52 +9,7 @@ import {
   type WorkerProfile,
   type DeactivationImpact,
 } from "../api/workers";
-import { useEntityEvents, type SSEEvent } from "../hooks/useSSE";
-
-/**
- * Tokenize a command string respecting "double" and 'single' quotes.
- * Mirrors the server's shellWords lenient behavior. Returns [] if input
- * is empty or unparseable.
- */
-function shellWords(input: string): string[] {
-  const tokens: string[] = [];
-  let i = 0;
-  while (i < input.length) {
-    while (i < input.length && /\s/.test(input[i])) i++;
-    if (i >= input.length) break;
-    let token = "";
-    if (input[i] === '"' || input[i] === "'") {
-      const quote = input[i];
-      i++;
-      while (i < input.length && input[i] !== quote) {
-        if (input[i] === "\\" && i + 1 < input.length) {
-          token += input[i + 1];
-          i += 2;
-        } else {
-          token += input[i];
-          i++;
-        }
-      }
-      if (i < input.length) i++; // skip closing quote
-    } else {
-      while (i < input.length && !/\s/.test(input[i])) {
-        token += input[i];
-        i++;
-      }
-    }
-    tokens.push(token);
-  }
-  return tokens;
-}
-
-/** If command is `user rename <old> <new>`, return [old, new]; else null. */
-function parseUserRename(command: string): [string, string] | null {
-  const parts = shellWords(command);
-  if (parts.length >= 4 && parts[0] === "user" && parts[1] === "rename") {
-    return [parts[2], parts[3]];
-  }
-  return null;
-}
+import { useEntityEvents, renamedTo, type SSEEvent } from "../hooks/useSSE";
 
 export default function WorkerDetailPage() {
   const { name: urlName } = useParams<{ name: string }>();
@@ -101,9 +56,9 @@ export default function WorkerDetailPage() {
 
   const handleUserEvent = useCallback(
     (event: SSEEvent) => {
-      const renamed = parseUserRename(event.command);
-      if (renamed && renamed[0] === decodedName) {
-        navigate(`/workers/${encodeURIComponent(renamed[1])}`, { replace: true });
+      const newName = renamedTo(event, decodedName);
+      if (newName) {
+        navigate(`/workers/${encodeURIComponent(newName)}`, { replace: true });
         return;
       }
       loadData();

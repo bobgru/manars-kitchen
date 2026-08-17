@@ -44,7 +44,8 @@ import Server.Json
 import Server.Error
 import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
-import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishEnrichedCommand)
+import Audit.CommandMeta (withRenameNames)
 import Server.Execute (ExecuteEnv(..), executeCommandText)
 import Utils (shellQuote)
 
@@ -52,6 +53,17 @@ import Utils (shellQuote)
 logRest :: TopicBus CommandEvent -> User -> String -> Handler ()
 logRest cmdBus user cmd = let Username uname = userName user
                           in liftIO $ publishCommand cmdBus GUI (T.unpack uname) cmd
+
+-- | Publish a rename event, attaching the before/after names.
+--
+--   Subscribers cannot recover the old name from the command string: the
+--   grammars disagree about whether the reference is an ID or a name, and the
+--   old name is gone from the database by the time the event fires.
+logRestRename :: TopicBus CommandEvent -> User -> String -> Text -> Text -> Handler ()
+logRestRename cmdBus user cmd old new =
+    let Username uname = userName user
+    in liftIO $ publishEnrichedCommand cmdBus GUI (T.unpack uname) cmd cmd Nothing
+                    (withRenameNames old new)
 
 -- | Resolve a skill name to a SkillId; throws 404 if not found.
 resolveSkillName :: Repository -> Text -> Handler SkillId
@@ -423,7 +435,13 @@ handleRenameSkill cmdBus repo user name req = do
     requireAdmin user
     sid <- resolveSkillName repo name
     liftIO $ SW.renameSkill repo sid (rsrName req)
-    logRest cmdBus user ("skill rename " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack (rsrName req)))
+    -- Log the ID form, matching 'Server.Rpc.rpcRenameSkill' and the CLI.  The
+    -- name form this used to log does not parse ('CLI.Commands' requires a
+    -- numeric reference for 'skill rename'), so it could never replay.
+    let SkillId i = sid
+    logRestRename cmdBus user
+        ("skill rename " ++ show i ++ " " ++ shellQuote (T.unpack (rsrName req)))
+        name (rsrName req)
     pure NoContent
 
 handleListImplications :: Repository -> Handler (Map.Map Text [Text])
@@ -495,7 +513,9 @@ handleRenameStation cmdBus repo user name req = do
     requireAdmin user
     sid <- resolveStationName repo name
     liftIO $ SW.renameStation repo sid (rstrName req)
-    logRest cmdBus user ("station rename " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack (rstrName req)))
+    logRestRename cmdBus user
+        ("station rename " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack (rstrName req)))
+        name (rstrName req)
     pure NoContent
 
 handleSetStationHours :: TopicBus CommandEvent -> Repository -> User -> Text -> SetStationHoursReq -> Handler NoContent
@@ -897,9 +917,10 @@ handleRenameUser cmdBus repo user uid req = do
             r <- liftIO $ SU.renameUser repo old (rurNewName req)
             case r of
                 Right () -> do
-                    logRest cmdBus user
+                    logRestRename cmdBus user
                         ("user rename " ++ shellQuote (T.unpack old) ++ " "
                          ++ shellQuote (T.unpack (rurNewName req)))
+                        old (rurNewName req)
                     pure NoContent
                 Left err -> throwApiError (Conflict err)
 

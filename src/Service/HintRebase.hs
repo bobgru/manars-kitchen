@@ -17,6 +17,7 @@ import Repo.Types (AuditEntry(..))
 import Audit.CommandMeta
     ( CommandMeta(..)
     , classify
+    , defaultMeta
     , etWorker, etStation, etSkill, etDraft , etPin
     )
 
@@ -47,7 +48,7 @@ classifyChange :: Int -> AuditEntry -> [Hint] -> ChangeCategory
 classifyChange draftId entry hints =
     let meta = case aeCommand entry of
             Just cmd -> classify (T.unpack cmd)
-            Nothing  -> CommandMeta Nothing Nothing Nothing Nothing Nothing Nothing False Nothing
+            Nothing  -> defaultMeta
     in classifyMeta draftId meta hints
 
 -- | Core classification logic on structured metadata.

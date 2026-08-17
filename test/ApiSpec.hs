@@ -1380,3 +1380,92 @@ spec = do
                     Just chunk -> do
                         chunk `shouldSatisfy` ("data:" `isInfixOf`)
                         chunk `shouldSatisfy` ("skill rename" `isInfixOf`)
+                        -- Structured names, so no client has to parse the
+                        -- command string to follow a rename.
+                        chunk `shouldSatisfy` ("\"oldName\":\"grill\"" `isInfixOf`)
+                        chunk `shouldSatisfy` ("\"newName\":\"broiler\"" `isInfixOf`)
+
+        -- The web terminal reaches renames through /rpc/execute, and the skill
+        -- grammar takes an ID, so the command string names no old skill.  The
+        -- publisher has to read it before the rename lands.
+        it "streams rename names for an id-form command from the web terminal" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "password" Admin False
+                _ <- SW.addSkill repo "grill" ""
+                (SkillId sid, _) : _ <- repoListSkills repo
+                pEnv <- mkPlainEnv port
+                token <- loginAs pEnv "admin" "password"
+                aEnv <- mkAuthEnv token port
+
+                resultVar <- newEmptyMVar
+                mgr <- newManager defaultManagerSettings
+                sseReq <- parseRequest $ "http://localhost:" ++ show port
+                    ++ "/api/events?token=" ++ token
+                _ <- forkIO $ do
+                    resp <- responseOpen sseReq mgr
+                    let readUntilData acc = do
+                            chunk <- brRead (responseBody resp)
+                            let s = BS8.unpack chunk
+                                total = acc ++ s
+                            if "data:" `isInfixOf` total || null s
+                                then putMVar resultVar total
+                                else readUntilData total
+                    readUntilData ""
+                    responseClose resp
+
+                threadDelay 500000
+
+                Right _ <- runClientM
+                    (rpcExecuteC (ExecuteReq
+                        ("skill rename " ++ show sid ++ " broiler") Nothing))
+                    aEnv
+
+                threadDelay 1000000
+                mResult <- tryTakeMVar resultVar
+                case mResult of
+                    Nothing -> expectationFailure "No SSE event received"
+                    Just chunk -> do
+                        chunk `shouldSatisfy` ("skill rename" `isInfixOf`)
+                        chunk `shouldSatisfy` ("\"oldName\":\"grill\"" `isInfixOf`)
+                        chunk `shouldSatisfy` ("\"newName\":\"broiler\"" `isInfixOf`)
+
+        it "drops admin-only events for a normal user" $
+            withServer $ \repo port -> do
+                _ <- register repo "admin" "password" Admin False
+                _ <- register repo "worker1" "password" Normal True
+                pEnv <- mkPlainEnv port
+                adminToken <- loginAs pEnv "admin" "password"
+                workerToken <- loginAs pEnv "worker1" "password"
+                aEnv <- mkAuthEnv adminToken port
+
+                -- Subscribe as the normal user.
+                resultVar <- newEmptyMVar
+                mgr <- newManager defaultManagerSettings
+                sseReq <- parseRequest $ "http://localhost:" ++ show port
+                    ++ "/api/events?token=" ++ workerToken
+                _ <- forkIO $ do
+                    resp <- responseOpen sseReq mgr
+                    let readUntilData acc = do
+                            chunk <- brRead (responseBody resp)
+                            let s = BS8.unpack chunk
+                                total = acc ++ s
+                            if "data:" `isInfixOf` total || null s
+                                then putMVar resultVar total
+                                else readUntilData total
+                    readUntilData ""
+                    responseClose resp
+
+                threadDelay 500000
+
+                -- Worker reads are requireAdmin, so the first mutation must not
+                -- reach this subscriber; skill reads are open, so the second must.
+                Right _ <- runClientM (setWorkerHoursC "admin" (SetWorkerHoursReq 40)) aEnv
+                Right _ <- runClientM (createSkillC (CreateSkillReq "grill" "")) aEnv
+
+                threadDelay 1000000
+                mResult <- tryTakeMVar resultVar
+                case mResult of
+                    Nothing -> expectationFailure "No SSE event received"
+                    Just chunk -> do
+                        chunk `shouldSatisfy` ("skill create" `isInfixOf`)
+                        chunk `shouldNotSatisfy` ("worker set-hours" `isInfixOf`)

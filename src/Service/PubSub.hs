@@ -14,8 +14,7 @@ module Service.PubSub
     , publish
     , buildTopic
     , publishCommand
-    , publishCommandWithClient
-    , publishResolvedCommand
+    , publishEnrichedCommand
     , sourceString
     ) where
 
@@ -112,24 +111,26 @@ buildTopic meta = Topic $ intercalate' "." $ catMaybes
 -- | Build and publish a CommandEvent from a raw command string.
 publishCommand :: TopicBus CommandEvent -> Source -> String -> String -> IO ()
 publishCommand bus source username cmdStr =
-    publishCommandWithClient bus source username cmdStr Nothing
+    publishEnrichedCommand bus source username cmdStr cmdStr Nothing id
 
--- | Build and publish a CommandEvent with an optional client identifier.
-publishCommandWithClient :: TopicBus CommandEvent -> Source -> String -> String -> Maybe String -> IO ()
-publishCommandWithClient bus source username cmdStr clientId = do
-    let meta  = classify cmdStr
+-- | Publish with separate original and resolved command strings, adding
+-- metadata the command string cannot express.  This is the general form:
+-- 'publishCommand' is a partial application of it, and it is the one place a
+-- CommandEvent is assembled.
+--
+-- The original is stored in ceCommand (for display/replay); the resolved string
+-- (with numeric IDs) is classified to produce accurate metadata.
+--
+-- Classification can only recover what the command carries, and the grammars
+-- are not uniform: @skill rename 3 pastry@ names no old skill, and by the time
+-- the event fires the old name is gone from the database.  Publishers that know
+-- such a fact pass it in as @enrich@ (see 'Audit.CommandMeta.withRenameNames').
+publishEnrichedCommand :: TopicBus CommandEvent -> Source -> String -> String -> String
+                       -> Maybe String -> (CommandMeta -> CommandMeta) -> IO ()
+publishEnrichedCommand bus source username originalCmd resolvedCmd clientId enrich = do
+    let meta  = enrich (classify resolvedCmd)
         topic = buildTopic meta
-        event = CommandEvent cmdStr meta source username clientId
-    publish bus topic event
-
--- | Publish with separate original and resolved command strings.
--- The original is stored in ceCommand (for display/replay); the resolved
--- string (with numeric IDs) is classified to produce accurate metadata.
-publishResolvedCommand :: TopicBus CommandEvent -> Source -> String -> String -> String -> IO ()
-publishResolvedCommand bus source username originalCmd resolvedCmd = do
-    let meta  = classify resolvedCmd
-        topic = buildTopic meta
-        event = CommandEvent originalCmd meta source username Nothing
+        event = CommandEvent originalCmd meta source username clientId
     publish bus topic event
 
 -- | Convert Source to the string used in the audit_log source column.

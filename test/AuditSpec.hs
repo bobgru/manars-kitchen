@@ -57,6 +57,44 @@ spec = do
                 cmEntityId (classify "skill implication 1 2") `shouldBe` Just 1
                 cmTargetId (classify "skill implication 1 2") `shouldBe` Just 2
 
+        -- The reference in a rename is an ID in some grammars and a name in
+        -- others, so classification has to cope with both forms.
+        describe "rename commands" $ do
+            it "reads an ID reference as the entity ID" $ do
+                let m = classify "skill rename 3 pastry"
+                cmEntityType m `shouldBe` Just "skill"
+                cmOperation m `shouldBe` Just "rename"
+                cmEntityId m `shouldBe` Just 3
+                cmOldName m `shouldBe` Nothing
+                cmNewName m `shouldBe` Just "pastry"
+                cmIsMutation m `shouldBe` True
+
+            it "reads a name reference as the old name" $ do
+                let m = classify "user rename alice alicia"
+                cmEntityType m `shouldBe` Just "user"
+                cmOperation m `shouldBe` Just "rename"
+                cmEntityId m `shouldBe` Nothing
+                cmOldName m `shouldBe` Just "alice"
+                cmNewName m `shouldBe` Just "alicia"
+                cmIsMutation m `shouldBe` True
+
+            it "handles a quoted station rename" $ do
+                let m = classify "station rename \"cold prep\" \"cold station\""
+                cmOldName m `shouldBe` Just "cold prep"
+                cmNewName m `shouldBe` Just "cold station"
+
+            it "leaves both names unset when the arguments are missing" $ do
+                let m = classify "skill rename"
+                cmOperation m `shouldBe` Just "rename"
+                cmOldName m `shouldBe` Nothing
+                cmNewName m `shouldBe` Nothing
+
+            it "attaches names a command string cannot carry" $ do
+                let m = withRenameNames "grill" "broiler" (classify "skill rename 3 broiler")
+                cmEntityId m `shouldBe` Just 3
+                cmOldName m `shouldBe` Just "grill"
+                cmNewName m `shouldBe` Just "broiler"
+
         describe "worker commands" $ do
             it "classifies worker grant-skill as two-entity mutating" $ do
                 let m = classify "worker grant-skill 3 5"

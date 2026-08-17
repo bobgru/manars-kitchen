@@ -58,7 +58,7 @@ import Servant
 import Text.Read (readMaybe)
 
 import Auth.Types (UserId(..), User(..), Username(..), Role(..), userIdToWorkerId)
-import Domain.Skill (Skill)
+import Domain.Skill (Skill(..))
 import Domain.Types (WorkerId(..), StationId(..), Station(..), SkillId(..), AbsenceId(..), AbsenceTypeId(..), Schedule)
 import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment(..))
@@ -84,8 +84,10 @@ import qualified Export.JSON as Exp
 import Server.Json
 import Server.Error
 import Server.Auth (requireAdmin, requireSelfOrAdmin)
-import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishCommandWithClient)
-import CLI.Commands (shellQuote)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishEnrichedCommand)
+import Audit.CommandMeta (withRenameNames)
+import CLI.Commands (shellQuote, parseCommand)
+import CLI.App (renameEnrichment)
 import Server.Execute (ExecuteEnv(..), executeCommandText)
 
 -- -----------------------------------------------------------------
@@ -531,9 +533,14 @@ rpcDeleteSkill cmdBus repo req = do
 
 rpcRenameSkill :: TopicBus CommandEvent -> Repository -> Int -> RenameSkillReq -> Handler RpcOk
 rpcRenameSkill cmdBus repo sid req = do
+    -- Read the old name first: it is gone once the rename lands, and the
+    -- published command carries only the ID.
+    skills <- liftIO $ SW.listSkills repo
+    let oldName = maybe (T.pack (show sid)) skillName (lookup (SkillId sid) skills)
     liftIO $ repoRenameSkill repo (SkillId sid) (rsrName req)
     let cmd = "skill rename " ++ show sid ++ " " ++ shellQuote (T.unpack (rsrName req))
-    liftIO $ publishCommand cmdBus RPC "rpc" cmd
+    liftIO $ publishEnrichedCommand cmdBus RPC "rpc" cmd cmd Nothing
+        (withRenameNames oldName (rsrName req))
     pure RpcOk
 
 rpcListSkills :: Repository -> RpcEmpty -> Handler [(SkillId, Skill)]
@@ -1080,11 +1087,18 @@ rpcResumeSession repo req = do
 -- -----------------------------------------------------------------
 
 rpcExecute :: TopicBus CommandEvent -> ExecuteEnv -> Repository -> User -> ExecuteReq -> Handler String
-rpcExecute cmdBus execEnv _repo user req = do
+rpcExecute cmdBus execEnv repo user req = do
     let cmdStr = erCommand req
         Username uname = userName user
+    -- Read a rename's old name before the command runs; afterwards it is gone.
+    -- Parsing the raw string is deliberate: 'executeCommandText' owns the
+    -- resolution context, and resolving here a second time would advance its dot
+    -- substitution.  A name-form rename that fails to parse needs no enrichment
+    -- anyway — 'classify' recovers both names from the command string itself.
+    enrich <- liftIO $ renameEnrichment repo (parseCommand cmdStr)
     output <- liftIO $ executeCommandText execEnv user cmdStr
-    liftIO $ publishCommandWithClient cmdBus RPC (T.unpack uname) cmdStr (erClientId req)
+    liftIO $ publishEnrichedCommand cmdBus RPC (T.unpack uname) cmdStr cmdStr
+                 (erClientId req) enrich
     return output
 
 -- -----------------------------------------------------------------

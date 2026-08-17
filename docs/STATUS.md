@@ -1,6 +1,6 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-16 · at commit `b017dda` on `master`
+**Last updated:** 2026-08-17 · at commit `2dd34fe` on `master`
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -19,12 +19,26 @@ read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (29 changes).
 
-**Verification baseline at `b017dda`** plus the lint and encoding fixes described
-below — all of this was green, with `LANG` unset:
+**The SSE feed is role-filtered and carries structured rename fields.**
+`eventVisibleTo` in `server/Server/EventStream.hs` is the one rule: `Admin` sees
+every mutation, `Normal` is denied the entity types whose REST reads are
+`requireAdmin` or per-worker filtered (`user`, `worker`, `absence`,
+`import-export`, `checkpoint`, `what-if`) and fails closed on an unclassified
+command. Filtering is by role only — **do not reintroduce `ceUsername`
+filtering**, removed deliberately on 2026-05-17 because it broke cross-tab and
+CLI-to-browser sync; per-tab echo suppression is the frontend's job via
+`clientId`. The payload's `oldName`/`newName` exist because a client cannot parse
+a rename command: the reference is an ID in some grammars and a name in others.
+`cmOldName`/`cmNewName` are event-transport only — not persisted in `audit_log`,
+not reproduced by `render`. Publishers that know a name the command string cannot
+carry attach it with `Audit.CommandMeta.withRenameNames`.
+
+**Verification baseline at `2dd34fe`** plus the structured-rename and SSE
+role-filtering work described above — all of this was green, with `LANG` unset:
 
 - `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
   stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
-- 248 integration + 360 unit examples, 0 failures
+- 259 integration + 360 unit examples, 0 failures
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
 - demo runs end to end, exit 0
@@ -47,59 +61,7 @@ One standing gotcha when you verify:
 
 ## Next steps
 
-### 1. Structured rename events + SSE role filtering
-
-Both touch `server/Server/EventStream.hs`; do them together.
-
-**The non-obvious part — a client-side parser cannot work.** The rename command
-string is not consistently formatted across code paths:
-
-- REST logs names: `handleRenameSkill` in `server/Server/Handlers.hs` emits
-  `skill rename <oldName> <newName>`.
-- RPC and the CLI log an id: `rpcRenameSkill` in `server/Server/Rpc.hs` emits
-  `skill rename <id> <newName>`.
-
-`web/src/components/WorkerDetailPage.tsx` navigates on rename by parsing
-`event.command` with a local TypeScript `shellWords` helper. It therefore fails
-silently whenever the rename came from the CLI — the common case. Do **not**
-copy that pattern into the other detail pages.
-
-Order of work:
-
-1. Add structured `oldName`/`newName` to the SSE payload. `EventStream.hs` builds
-   the JSON object; the metadata comes from `CommandMeta` in
-   `src/Audit/CommandMeta.hs`.
-2. Normalise the two render sites so REST and RPC agree. This is one instance of
-   a broader duplication: command strings are hand-concatenated at ~60 sites in
-   `Handlers.hs` and ~46 in `Rpc.hs`, which a `render :: Command -> Text` would
-   collapse.
-3. Then add navigate-on-rename to `SkillDetailPage.tsx` and
-   `StationDetailPage.tsx`, reading the new fields. Retire the TypeScript
-   `shellWords` copy — it duplicates `src/Utils.hs` in another language.
-   SSE `entityType` is `"skill"` / `"station"`; the worker page subscribes to
-   both `worker` and `user` because user-level mutations affect worker rows.
-
-**SSE has no filtering at all.** `EventStream.hs` discards the authenticated user
-(`Just _user ->`), subscribes to `".*"`, and guards only on `cmIsMutation`. Every
-authenticated user therefore receives every mutation event from every other user.
-
-Harmless today because only admins use the React UI, and REST reads are still
-authorization-checked — the recipient just refetches. It becomes a leak the moment
-a `Normal`-role user can log into the web UI: the feed exposes the existence,
-timing and entity names of admin-only mutations.
-
-Fix: pass the resolved `User` into the subscribe callback and drop events the
-subscriber may not see, mapping `cmEntityType` to a required role. Do **not**
-reintroduce filtering on `ceUsername` — that was removed deliberately on
-2026-05-17 because it broke legitimate cross-tab and CLI-to-browser sync.
-Per-tab echo suppression is the frontend's job, via `clientId` in `Terminal.tsx`.
-
-Note `openspec/specs/event-stream-endpoint/spec.md` is **stale** and contradicts
-the code: it still requires same-user filtering. Reconcile it as part of this
-change. It drifted because `openspec/changes/archive/2026-04-17-sse-gui-refresh/`
-was archived with a proposal only — no spec delta, no tasks.
-
-### 2. `/schedules` page — blocked on a product decision
+### 1. `/schedules` page — blocked on a product decision
 
 The sidebar has linked `/schedules` since the dashboard shell landed. It is the
 one route deliberately left unrouted, because it needs REST that does not exist:
@@ -118,7 +80,7 @@ recent and complete — over the skills/stations pages where they differ. The th
 existing list/detail pairs are inconsistent in ~10 ways (error rendering, toasts,
 404 handling, `deleteConfirm` state key naming); prefer the worker page's choices.
 
-### 3. Shift delete orphans worker preferences
+### 2. Shift delete orphans worker preferences
 
 `worker_shift_prefs.shift_name` is a plain string with no foreign key or cascade,
 and `sqlDeleteShift` in `src/Repo/SQLite.hs` is a bare
@@ -130,7 +92,7 @@ The Shifts page's confirm modal currently *warns the user* about this; the schem
 gap is unfixed. Consider the safe-delete / force-delete pattern already
 established for skills, stations and workers.
 
-### 4. `/api/workers` and `/api/stations` expose no ids
+### 3. `/api/workers` and `/api/stations` expose no ids
 
 `Assignment` serialises worker and station as bare integers, but neither list
 endpoint returns an id: `handleListWorkers` maps it away, and
@@ -140,7 +102,7 @@ Consequence: `web/src/api/calendar.ts` resolves names via `GET /api/export` — 
 entire export dump — purely to build an id→name map. Adding `id` to those
 responses, or names to `Assignment`, lets the calendar page drop that dependency.
 
-### 5. Make the integration-test DB path unique per run
+### 4. Make the integration-test DB path unique per run
 
 **Agreed with the user.** Every spec hardcodes a fixed absolute path in `/tmp`:
 `/tmp/manars-kitchen-test-api.db` plus siblings suffixed `-audit`, `-draft`,
@@ -160,12 +122,12 @@ the `-wal` and `-shm` sidecars too, not just the `.db`.**
 If you hit broad unrelated test failures, suspect this before suspecting a
 regression.
 
-### 6. Smaller backlog
+### 5. Smaller backlog
 
 - **Station safe-delete ignores schedule assignments.** `safeDeleteStation`
   checks worker station preferences and station required skills only. Assignment
   checking was deferred because "active schedule" needs defining. Revisit
-  alongside item 2.
+  alongside item 1.
 - **The `demo` command is wrong for the web terminal.** It wipes the database and
   replays the audit log, which is useless on a fresh DB. The `--demo` CLI flag
   reading `demo/restaurant-setup.txt` is what actually populates sample data. A
@@ -192,8 +154,10 @@ Catalogued during a survey; re-check before acting, as line counts drift.
 - **Command knowledge is duplicated across eight sites**, including
   `parseCommand`, `handleCommand`, `isMutating`, `classify`/`render`,
   `commandEntityMap`, and the hand-concatenated command strings in `Handlers.hs`
-  and `Rpc.hs`. A `render :: Command -> Text` is the highest-leverage fix and
-  also resolves item 1's format divergence.
+  and `Rpc.hs` (~60 sites and ~46 sites respectively). A
+  `render :: Command -> Text` is the highest-leverage fix. The rename sites are
+  now consistent, but only because each was fixed by hand — nothing prevents the
+  next hand-written command string from diverging the same way.
 - `isMutating` in `src/CLI/App.hs` still duplicates `cmIsMutation` in
   `src/Audit/CommandMeta.hs`. They already diverged once, silently classifying
   `worker view` and `station view` as mutations (fixed in `9538944`). The only
@@ -269,10 +233,10 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
   (routes, CSS, cross-cutting types), *then* fan agents out onto leaf files, each
   with an explicit list of files it owns and files it must not touch. Four agents
   worked concurrently this way with zero merge conflicts. Note that worktrees
-  isolate source but **not** `/tmp` — see item 5.
+  isolate source but **not** `/tmp` — see item 4.
 
 ---
 
 ## Open questions
 
-1. Item 2 needs the named-schedules-vs-drafts decision before any endpoint work.
+1. Item 1 needs the named-schedules-vs-drafts decision before any endpoint work.

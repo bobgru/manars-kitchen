@@ -5,7 +5,7 @@ import {
   renameStation,
   type StationInfo,
 } from "../api/stations";
-import { useEntityEvents } from "../hooks/useSSE";
+import { useEntityEvents, renamedTo, type SSEEvent } from "../hooks/useSSE";
 
 export default function StationDetailPage() {
   const { name: urlName } = useParams<{ name: string }>();
@@ -39,7 +39,20 @@ export default function StationDetailPage() {
     loadData();
   }, [loadData]);
 
-  useEntityEvents("station", loadData);
+  const handleStationEvent = useCallback(
+    (event: SSEEvent) => {
+      // Follow a rename of the station on display, wherever it came from.
+      const newName = renamedTo(event, decodedName);
+      if (newName) {
+        navigate(`/stations/${encodeURIComponent(newName)}`, { replace: true });
+        return;
+      }
+      loadData();
+    },
+    [decodedName, navigate, loadData]
+  );
+
+  useEntityEvents("station", handleStationEvent);
 
   if (loading) return <div className="page loading">Loading...</div>;
   if (error) return <div className="page msg-error">{error}</div>;

@@ -160,6 +160,7 @@ test-suite manars-kitchen-integration-test
                      , AuditSpec
                      , SessionSpec
                      , PubSubSpec
+                     , EventStreamSpec
                      , ApiSpec
                      , ShellWordsSpec
                      , CLI.RpcClient

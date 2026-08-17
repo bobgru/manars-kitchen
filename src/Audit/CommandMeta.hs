@@ -4,6 +4,7 @@ module Audit.CommandMeta
     , classify
     , render
     , defaultMeta
+    , withRenameNames
     -- Entity type constants
     , etWorker, etStation, etSkill, etShift, etAbsence
     , etUser, etConfig, etSchedule, etDraft, etCalendar
@@ -17,6 +18,10 @@ import Data.Text    (Text, pack, unpack)
 import CLI.Commands (shellWords)
 
 -- | Structured metadata for a logged command.
+--
+--   'cmOldName' and 'cmNewName' are event-transport only: they carry a rename's
+--   before/after names to subscribers, and are deliberately not persisted in
+--   @audit_log@ (which has no columns for them) nor reproduced by 'render'.
 data CommandMeta = CommandMeta
     { cmEntityType  :: !(Maybe Text)    -- ^ e.g. "worker", "station"
     , cmOperation   :: !(Maybe Text)    -- ^ e.g. "grant-skill", "add"
@@ -26,6 +31,8 @@ data CommandMeta = CommandMeta
     , cmDateTo      :: !(Maybe Text)    -- ^ YYYY-MM-DD
     , cmIsMutation  :: !Bool
     , cmParams      :: !(Maybe Text)    -- ^ JSON blob for variadic args
+    , cmOldName     :: !(Maybe Text)    -- ^ name before a rename
+    , cmNewName     :: !(Maybe Text)    -- ^ name after a rename
     } deriving (Show, Eq)
 
 -- | Default metadata: unknown command, not a mutation.
@@ -39,6 +46,19 @@ defaultMeta = CommandMeta
     , cmDateTo     = Nothing
     , cmIsMutation = False
     , cmParams     = Nothing
+    , cmOldName    = Nothing
+    , cmNewName    = Nothing
+    }
+
+-- | Attach a rename's before/after names.
+--
+--   Publishers use this when the command string cannot supply them — the
+--   @skill rename \<id\> \<newName\>@ grammar carries no old name, and by the
+--   time the event fires the old name is gone from the database.
+withRenameNames :: Text -> Text -> CommandMeta -> CommandMeta
+withRenameNames old new meta = meta
+    { cmOldName = Just old
+    , cmNewName = Just new
     }
 
 -- Entity type constants
@@ -161,9 +181,7 @@ classifyStation op rest = case op of
     "force-delete" -> case rest of
         (sid : _) -> (mutating etStation "force-delete") { cmEntityId = readMaybe sid }
         _         -> mutating etStation "force-delete"
-    "rename" -> case rest of
-        (sid : _) -> (mutating etStation "rename") { cmEntityId = readMaybe sid }
-        _         -> mutating etStation "rename"
+    "rename" -> renameMeta etStation rest
     "view" -> case rest of
         (sid : _) -> (nonMutating etStation "view") { cmEntityId = readMaybe sid }
         _         -> nonMutating etStation "view"
@@ -195,9 +213,7 @@ classifySkill op rest = case op of
     "create" -> case rest of
         (sid : _) -> (mutating etSkill "create") { cmEntityId = readMaybe sid }
         _         -> mutating etSkill "create"
-    "rename" -> case rest of
-        (sid : _) -> (mutating etSkill "rename") { cmEntityId = readMaybe sid }
-        _         -> mutating etSkill "rename"
+    "rename" -> renameMeta etSkill rest
     "delete" -> case rest of
         (sid : _) -> (mutating etSkill "delete") { cmEntityId = readMaybe sid }
         _         -> mutating etSkill "delete"
@@ -314,7 +330,7 @@ classifyVacation op _rest = case op of
 classifyUser :: String -> [String] -> CommandMeta
 classifyUser op rest = case op of
     "create" -> mutating etUser "create"
-    "rename" -> mutating etUser "rename"
+    "rename" -> renameMeta etUser rest
     "delete" -> case rest of
         (uid : _) -> (mutating etUser "delete") { cmEntityId = readMaybe uid }
         _         -> mutating etUser "delete"
@@ -538,6 +554,24 @@ nonMutating et op = defaultMeta
     , cmOperation  = Just op
     , cmIsMutation = False
     }
+
+-- | Metadata for a @\<entity\> rename \<ref\> \<newName\>@ command.
+--
+--   The reference is an ID in some grammars (@skill rename@) and a name in
+--   others (@user rename@), and 'CLI.Resolve' rewrites names to IDs before the
+--   command is classified, so accept either form.  A name-form reference is the
+--   old name; an ID-form one leaves 'cmOldName' for the publisher to fill in via
+--   'withRenameNames'.
+renameMeta :: Text -> [String] -> CommandMeta
+renameMeta et rest = case rest of
+    (ref : new : _) -> withRef ref (base { cmNewName = Just (pack new) })
+    [ref]           -> withRef ref base
+    []              -> base
+  where
+    base = mutating et "rename"
+    withRef ref meta = case readMaybe ref of
+        Just i  -> meta { cmEntityId = Just i }
+        Nothing -> meta { cmOldName = Just (pack ref) }
 
 -- | Extract one entity ID from the first argument.
 oneId :: Text -> Text -> [String] -> CommandMeta

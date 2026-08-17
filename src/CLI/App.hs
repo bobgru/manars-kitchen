@@ -8,6 +8,7 @@ module CLI.App
     , runDemo
     , handleCommand
     , isMutating
+    , renameEnrichment
     ) where
 
 import Control.Monad (forM_)
@@ -61,7 +62,7 @@ import Service.PubSub
     ( TopicBus, SubscriptionId, AppBus(..), newAppBus, newTopicBus
     , subscribe, unsubscribe
     , ProgressEvent(..), Source(..), CommandEvent(..)
-    , publishResolvedCommand, sourceString
+    , publishEnrichedCommand, sourceString
     )
 import CLI.Commands (Command(..), parseCommand)
 import CLI.Display
@@ -150,7 +151,9 @@ runRepl st = do
                 Right resolvedLine -> do
                     let cmd = parseCommand resolvedLine
                     when (isMutating cmd) $ do
-                        publishResolvedCommand (busCommands (asBus st)) CLI (T.unpack uname) line resolvedLine
+                        enrich <- renameEnrichment (asRepo st) cmd
+                        publishEnrichedCommand (busCommands (asBus st)) CLI (T.unpack uname)
+                            line resolvedLine Nothing enrich
                         repoTouchSession (asRepo st) (asSessionId st)
                     handleCommand st cmd
                     -- Mark hint session as stale if a mutating command ran
@@ -166,6 +169,37 @@ runRepl st = do
                                 writeIORef (asHintSession st) (Just hs')
                                 putStrLn "Hint session is stale due to data change. Run 'what-if rebase' to reconcile, or continue adding hints (rebase will run automatically)."
                     runRepl st
+
+-- | The before/after names of a rename, for commands whose string cannot carry
+--   them.
+--
+--   Must be computed before the command runs — afterwards the old name is gone
+--   from the repository.  'CLI.Resolve' has already rewritten a name reference
+--   to an ID by this point, so for skills and stations the old name has to be
+--   read back out.  Every other command needs no enrichment.
+--
+--   Shared with the web terminal ('Server.Rpc.rpcExecute'), which reaches the
+--   same commands by the same route and so needs the same names.
+renameEnrichment :: Repository -> Command -> IO (Meta.CommandMeta -> Meta.CommandMeta)
+renameEnrichment repo cmd = case cmd of
+    SkillRename sid newName -> do
+        skills <- repoListSkills repo
+        pure (enrichWith (skillName <$> lookup sid skills) newName)
+    StationRename oldArg newName -> do
+        result <- resolveStationArg repo oldArg
+        case result of
+            Left _    -> pure id
+            Right sid -> do
+                stations <- repoListStations repo
+                pure (enrichWith (stationName <$> lookup sid stations) newName)
+    UserRename oldName newName ->
+        pure (enrichWith (Just (T.pack oldName)) newName)
+    _ -> pure id
+  where
+    -- No old name means the entity is already gone; leave the metadata alone
+    -- rather than inventing a name a subscriber might match against.
+    enrichWith Nothing    _       = id
+    enrichWith (Just old) newName = Meta.withRenameNames old (T.pack newName)
 
 -- | Commands that modify state and should be logged.
 --
@@ -2183,7 +2217,7 @@ auditEntryToTriple ae =
 
 -- | Convert an AuditEntry to a CommandMeta for rendering.
 auditEntryToMeta :: AuditEntry -> Meta.CommandMeta
-auditEntryToMeta ae = Meta.CommandMeta
+auditEntryToMeta ae = Meta.defaultMeta
     { Meta.cmEntityType = aeEntityType ae
     , Meta.cmOperation  = aeOperation ae
     , Meta.cmEntityId   = aeEntityId ae

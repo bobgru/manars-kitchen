@@ -20,31 +20,55 @@ The endpoint SHALL accept the session token as a `token` query parameter. The to
 - **WHEN** a client connects with an expired or invalid session token
 - **THEN** the server responds with status 401
 
-### Requirement: Stream GUI command events
-The SSE endpoint SHALL subscribe to the `busCommands` channel and forward events where `ceSource == GUI` to the connected client. Each event SHALL be formatted as an SSE `data:` line containing a JSON object with `command`, `source`, and `username` fields.
+### Requirement: Stream mutation events
+The SSE endpoint SHALL subscribe to the `busCommands` channel and forward every event whose metadata reports `cmIsMutation`, whatever its `ceSource`. Non-mutating events SHALL be dropped. Each event SHALL be formatted as an SSE `data:` line containing a JSON object with `command`, `source`, `username`, `entityType`, `operation`, `entityId`, `oldName`, `newName` and `clientId` fields.
+
+Events are deliberately NOT filtered by `ceSource` or by `ceUsername`: a CLI or RPC mutation has to reach a connected browser, and a second tab of the same user has to see the first tab's changes. Suppressing a client's echo of its own command is the frontend's job, via `clientId`.
 
 #### Scenario: GUI event is streamed
-- **WHEN** a REST handler publishes a `CommandEvent` with `ceSource == GUI`
+- **WHEN** a REST handler publishes a mutating `CommandEvent` with `ceSource == GUI`
 - **AND** an SSE client is connected
-- **THEN** the client receives an SSE event with `data: {"command":"...","source":"gui","username":"..."}`
+- **THEN** the client receives an SSE event whose JSON carries the command string and `"source":"gui"`
 
-#### Scenario: RPC event is not streamed
-- **WHEN** an RPC handler publishes a `CommandEvent` with `ceSource == RPC`
+#### Scenario: CLI event is streamed
+- **WHEN** the CLI publishes a mutating `CommandEvent` with `ceSource == CLI`
+- **AND** an SSE client is connected
+- **THEN** the client receives the event
+
+#### Scenario: Non-mutating event is not streamed
+- **WHEN** a `CommandEvent` is published whose metadata reports `cmIsMutation == False`
 - **AND** an SSE client is connected
 - **THEN** the client does NOT receive an event
 
-### Requirement: Same-user filtering
-The SSE endpoint SHALL only forward GUI events whose `ceUsername` matches the username of the connected client. Events from other users SHALL be silently dropped. Since the application enforces one active session per user, this achieves same-session isolation.
+### Requirement: Structured rename fields
+Rename events SHALL carry the entity's name before and after the rename as `oldName` and `newName`. A client SHALL NOT need to parse `command` to recover them: the reference in a rename command is an ID in some grammars (`skill rename 3 pastry`) and a name in others (`user rename alice alicia`), and the old name is gone from the database by the time the event fires. Where the command string cannot supply a name, the publisher SHALL attach it via `Audit.CommandMeta.withRenameNames`.
 
-#### Scenario: Event from same user is forwarded
-- **WHEN** a GUI event is published with `ceUsername == "admin"`
-- **AND** an SSE client is connected as user `"admin"`
+#### Scenario: Rename from any source carries both names
+- **WHEN** a skill named `grill` is renamed to `broiler` via REST, RPC or the CLI
+- **AND** an SSE client is connected
+- **THEN** the event's JSON contains `"oldName":"grill"` and `"newName":"broiler"`
+
+#### Scenario: Non-rename event leaves the fields null
+- **WHEN** a mutating event that is not a rename is forwarded
+- **THEN** `oldName` and `newName` are `null`
+
+### Requirement: Role-based filtering
+The SSE endpoint SHALL resolve the connected client's `User` and drop events the client's role would not be allowed to read over REST, mapping `cmEntityType` to a required role. A `Normal` user SHALL NOT receive events for entity types whose REST reads are `requireAdmin` or per-worker filtered: `user`, `worker`, `absence`, `import-export`, `checkpoint` and `what-if`. An event with no `cmEntityType` SHALL be dropped for a `Normal` user.
+
+#### Scenario: Admin receives every mutation event
+- **WHEN** any mutating event is published
+- **AND** an SSE client is connected as an `Admin`
 - **THEN** the client receives the event
 
-#### Scenario: Event from different user is dropped
-- **WHEN** a GUI event is published with `ceUsername == "other"`
-- **AND** an SSE client is connected as user `"admin"`
+#### Scenario: Admin-only event is dropped for a normal user
+- **WHEN** a `worker set-hours` event is published
+- **AND** an SSE client is connected as a `Normal` user
 - **THEN** the client does NOT receive the event
+
+#### Scenario: Openly readable event reaches a normal user
+- **WHEN** a `skill create` event is published
+- **AND** an SSE client is connected as a `Normal` user
+- **THEN** the client receives the event
 
 ### Requirement: Keepalive comments
 The SSE endpoint SHALL send a `:keepalive` comment every 30 seconds to prevent proxy and browser timeouts.

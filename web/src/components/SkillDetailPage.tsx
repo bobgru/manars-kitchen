@@ -8,7 +8,7 @@ import {
   removeImplication,
   type SkillInfo,
 } from "../api/skills";
-import { useEntityEvents } from "../hooks/useSSE";
+import { useEntityEvents, renamedTo, type SSEEvent } from "../hooks/useSSE";
 
 /** Compute transitive closure for a single skill. */
 function effectiveSkills(
@@ -72,7 +72,20 @@ export default function SkillDetailPage() {
     loadData();
   }, [loadData]);
 
-  useEntityEvents("skill", loadData);
+  const handleSkillEvent = useCallback(
+    (event: SSEEvent) => {
+      // Follow a rename of the skill on display, wherever it came from.
+      const newName = renamedTo(event, decodedName);
+      if (newName) {
+        navigate(`/skills/${encodeURIComponent(newName)}`, { replace: true });
+        return;
+      }
+      loadData();
+    },
+    [decodedName, navigate, loadData]
+  );
+
+  useEntityEvents("skill", handleSkillEvent);
 
   if (loading) return <div className="page loading">Loading...</div>;
   if (error) return <div className="page msg-error">{error}</div>;
