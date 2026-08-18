@@ -105,7 +105,7 @@ RUN install -d -o "$USER_UID" -g "$USER_GID" "/home/${USERNAME}/.config/worktrun
 # mounts a named volume over it so it survives rebuilds, and mounts
 # settings.json over that read-only so the agent cannot disable its own hooks.
 RUN install -d -o "$USER_UID" -g "$USER_GID" "/home/${USERNAME}/.claude" \
-    && install -d -o root -g root /opt/guardrails
+    && install -d -o root -g root /opt/guardrails /opt/statusline
 
 ENV HOME=/home/${USERNAME} \
     CLAUDE_CONFIG_DIR=/home/${USERNAME}/.claude \

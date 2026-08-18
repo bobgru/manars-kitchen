@@ -215,6 +215,25 @@ mounting `~/.aws` and doing the token exchange in-container, you must add
 - **`storage.googleapis.com` resolves to ~15 addresses** of shared Google
   infrastructure — a broad allowance. Drop it if you install no plugins.
 
+### 4.5 Host status line, reused read-only
+
+The container's `~/.claude` is a fresh named volume, so the host's status line is
+not there. Rather than duplicate the script into the image, the launcher
+bind-mounts the host's `~/.claude/statusline.sh` at
+`/opt/statusline/statusline.sh` read-only and `claude-settings.json` points
+`statusLine.command` at that path — the same pattern as the guardrail hook, and
+for the same reason: a path outside `~/.claude` cannot be shadowed by the state
+volume, and read-only means the agent cannot edit what runs on every render.
+
+Every dependency the script has is already in the image: `bash`, `jq`, `awk`
+(mawk), `sed`, `stty`, `git`. Its terminal-width probe walks `/proc` for an
+ancestor's controlling tty, which works inside the container. VERIFIED by piping
+a synthetic status JSON into the mounted script — three-zone layout with the
+width honored.
+
+The mount is **optional**: it is cosmetic, so a missing or non-executable script
+warns in preflight instead of aborting, and the status line simply renders empty.
+
 ---
 
 ## 5. Non-obvious findings worth knowing
@@ -448,5 +467,6 @@ its arguments. That is a real improvement and is not implemented.
 | `dev/docker/Dockerfile` | Image; pinned toolchain, matching non-root user |
 | `dev/docker/entrypoint.sh` | Applies firewall as root, drops privileges |
 | `dev/docker/init-firewall.sh` | Egress allowlist with fail-closed self-tests |
-| `dev/docker/claude-settings.json` | Hook wiring + redundant `ask`/`deny` rules; mounted read-only |
+| `dev/docker/claude-settings.json` | Hook wiring + redundant `ask`/`deny` rules + status line; mounted read-only |
 | `~/.claude/hooks/block-dangerous-git.sh` | The guardrail itself (host-side; mounted in read-only) |
+| `~/.claude/statusline.sh` | The status line (host-side; mounted in read-only, §4.5) |

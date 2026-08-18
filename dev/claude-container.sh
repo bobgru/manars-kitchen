@@ -33,6 +33,7 @@ CONTAINER_GID="$(id -g)"
 CONTAINER_HOME="$HOME"
 
 HOOK_SRC="$HOME/.claude/hooks/block-dangerous-git.sh"
+STATUSLINE_SRC="$HOME/.claude/statusline.sh"
 SETTINGS_SRC="$REPO_DIR/dev/docker/claude-settings.json"
 STACK_ROOT="$HOME/.stack"
 WT_BIN="$(command -v wt || true)"
@@ -57,6 +58,11 @@ has no protection against destructive git commands."
 A non-executable hook fails open: the tool call proceeds."
 
     [ -d "$STACK_ROOT" ] || die "$STACK_ROOT not found; nothing to mount."
+
+    # Cosmetic, so a warning rather than a hard failure. claude-settings.json
+    # names the mount path unconditionally; without the file the status line
+    # renders empty.
+    [ -x "$STATUSLINE_SRC" ] || echo "warning: $STATUSLINE_SRC missing or not executable; the status line will be blank" >&2
 
     # Three supported auth paths, checked in the order they are preferred.
     # Bedrock is detected first because on a Bedrock host the other two are
@@ -165,6 +171,10 @@ run() {
         # hook cannot be unhooked.
         -v "$SETTINGS_SRC:$CONTAINER_HOME/.claude/settings.json:ro"
     )
+
+    # The host's status line, read-only and likewise outside ~/.claude. Its
+    # inputs are all on stdin or under $HOME, both of which the container has.
+    [ -x "$STATUSLINE_SRC" ] && mounts+=(-v "$STATUSLINE_SRC:/opt/statusline/statusline.sh:ro")
 
     # Commit authorship inside the container.
     [ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:$CONTAINER_HOME/.gitconfig:ro")

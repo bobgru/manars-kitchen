@@ -11,7 +11,12 @@
     "ask rules below are deliberate redundancy in case that behaviour changes.",
     "The hook is the primary control because it normalizes the command first",
     "and therefore also catches 'git -C <dir> push', which prefix-matched",
-    "permission rules do not."
+    "permission rules do not.",
+    "",
+    "statusLine points at the host's ~/.claude/statusline.sh, bind-mounted",
+    "read-only at /opt/statusline/statusline.sh (outside ~/.claude so the state",
+    "volume cannot shadow it). Its dependencies -- bash, jq, awk, sed, stty, git",
+    "-- are all present in the image."
   ],
   "hooks": {
     "PreToolUse": [
@@ -42,6 +47,12 @@
       "Read(~/.aws/**)",
       "Read(~/.cargo/credentials*)"
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "/opt/statusline/statusline.sh",
+    "padding": 0,
+    "refreshInterval": 5
   },
   "includeCoAuthoredBy": true
 }
