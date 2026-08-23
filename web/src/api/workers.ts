@@ -4,6 +4,8 @@ export type WorkerStatus = "active" | "inactive" | "none";
 export type StatusFilter = "active" | "inactive" | "all";
 
 export interface WorkerSummary {
+  /** Storage id, matching the numeric `worker` field of an Assignment. Not an address. */
+  id: number;
   name: string;
   role: string;
   status: WorkerStatus;

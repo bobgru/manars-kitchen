@@ -238,10 +238,10 @@ handleListSkills repo = do
     skills <- liftIO $ SW.listSkills repo
     pure [sk | (_, sk) <- skills]
 
-handleListStations :: Repository -> Handler [Station]
+handleListStations :: Repository -> Handler [StationResp]
 handleListStations repo = do
     stations <- liftIO $ SW.listStations repo
-    pure [st | (_, st) <- stations]
+    pure [stationResp sid st | (sid, st) <- stations]
 
 handleListShifts :: Repository -> Handler [ShiftDef]
 handleListShifts repo = liftIO $ repoLoadShifts repo
@@ -962,7 +962,8 @@ handleListWorkers repo user mStatus = do
 
 toSummaryResp :: WorkerSummary -> WorkerSummaryResp
 toSummaryResp s = WorkerSummaryResp
-    { wsrName        = wsName s
+    { wsrId          = let WorkerId i = wsId s in i
+    , wsrName        = wsName s
     , wsrRole        = wsRole s
     , wsrStatus      = workerStatusToText (wsStatus s)
     , wsrIsTemp      = wsIsTemp s

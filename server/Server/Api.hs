@@ -20,7 +20,7 @@ import Servant.API
 import Servant.Server.Experimental.Auth (AuthServerData)
 
 import Auth.Types (User)
-import Domain.Types (Schedule, Station)
+import Domain.Types (Schedule)
 import Domain.Skill (Skill)
 import Domain.Shift (ShiftDef)
 import Domain.Scheduler (ScheduleResult)
@@ -45,7 +45,7 @@ type RawAPI =
          "api" :> "logout" :> PostNoContent
 
     -- Stations (read)
-    :<|> "api" :> "stations" :> Get '[JSON] [Station]
+    :<|> "api" :> "stations" :> Get '[JSON] [StationResp]
     -- Shifts (read)
     :<|> "api" :> "shifts" :> Get '[JSON] [ShiftDef]
     -- Schedules

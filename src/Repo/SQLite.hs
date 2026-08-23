@@ -195,7 +195,7 @@ sqlLoadWorkerIdsByStatus conn status = do
 -- Filters by status when @Just s@ is provided.
 sqlListWorkerSummaries :: Connection -> Maybe WorkerStatus -> IO [WorkerSummary]
 sqlListWorkerSummaries conn mStatus = do
-    let baseQ = "SELECT u.username, u.role, u.worker_status, \
+    let baseQ = "SELECT u.id, u.username, u.role, u.worker_status, \
                 \COALESCE(we.is_temp, 0), \
                 \(CASE WHEN wo.worker_id IS NOT NULL THEN 1 ELSE 0 END), \
                 \COALESCE(ws.level, 1) \
@@ -207,13 +207,14 @@ sqlListWorkerSummaries conn mStatus = do
         Just s -> query conn
             (fromString (baseQ ++ "WHERE u.worker_status = ? ORDER BY u.username"))
             (Only (workerStatusToText s))
-            :: IO [(Text, Text, Text, Int, Int, Int)]
+            :: IO [(Int, Text, Text, Text, Int, Int, Int)]
         Nothing -> query_ conn
             (fromString (baseQ ++ "WHERE u.worker_status IN ('active', 'inactive') ORDER BY u.username"))
-            :: IO [(Text, Text, Text, Int, Int, Int)]
+            :: IO [(Int, Text, Text, Text, Int, Int, Int)]
     pure
         [ WorkerSummary
-            { wsName        = n
+            { wsId          = WorkerId wid
+            , wsName        = n
             , wsRole        = role
             , wsStatus      = case textToWorkerStatus ws of
                                 Just s  -> s
@@ -222,7 +223,7 @@ sqlListWorkerSummaries conn mStatus = do
             , wsWeekendOnly = weekend /= 0
             , wsSeniority   = sen
             }
-        | (n, role, ws, isTemp, weekend, sen) <- rows
+        | (wid, n, role, ws, isTemp, weekend, sen) <- rows
         ]
 
 sqlCascadeWorkerConfig :: Connection -> WorkerId -> IO ()

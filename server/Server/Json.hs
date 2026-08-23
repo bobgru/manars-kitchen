@@ -14,6 +14,8 @@ module Server.Json
     , CreateSkillReq(..)
     , RenameSkillReq(..)
     , AddImplicationReq(..)
+    , StationResp(..)
+    , stationResp
     , CreateStationReq(..)
     , RenameStationReq(..)
     , SetStationHoursReq(..)
@@ -183,6 +185,41 @@ instance ToJSON Station where
 instance FromJSON Station where
     parseJSON = withObject "Station" $ \v ->
         Station <$> v .: "name" <*> v .: "minStaff" <*> v .: "maxStaff"
+
+-- | A station as returned by @GET \/api\/stations@: the domain 'Station' plus its
+--   storage id.
+--
+--   The id is not part of 'Station' because the scheduler compares stations by
+--   value, and it is not an address — every station endpoint is name-keyed. It
+--   exists so a client can resolve the numeric @station@ field of an
+--   'Assignment' to a name.
+data StationResp = StationResp
+    { stnId       :: !Int
+    , stnName     :: !Text
+    , stnMinStaff :: !Int
+    , stnMaxStaff :: !Int
+    } deriving (Show, Eq)
+
+instance ToJSON StationResp where
+    toJSON s = object
+        [ "id"       .= stnId s
+        , "name"     .= stnName s
+        , "minStaff" .= stnMinStaff s
+        , "maxStaff" .= stnMaxStaff s
+        ]
+
+instance FromJSON StationResp where
+    parseJSON = withObject "StationResp" $ \v ->
+        StationResp <$> v .: "id" <*> v .: "name" <*> v .: "minStaff" <*> v .: "maxStaff"
+
+-- | Pair a station with its id for the list endpoint.
+stationResp :: StationId -> Station -> StationResp
+stationResp (StationId i) st = StationResp
+    { stnId       = i
+    , stnName     = stationName st
+    , stnMinStaff = stationMinStaff st
+    , stnMaxStaff = stationMaxStaff st
+    }
 
 -- | ShiftDef serialized as {name, start, end}
 instance ToJSON ShiftDef where
@@ -1069,8 +1106,13 @@ instance FromJSON WorkerProfileResp where
             <*> v .:  "preferPairing"
 
 -- | Slim summary row for the workers list page.
+--
+--   @wsrId@ is the worker's storage identifier. It is here so the client can
+--   resolve the numeric @worker@ field of an 'Assignment' to a name; it is not
+--   an address — every worker endpoint is name-keyed.
 data WorkerSummaryResp = WorkerSummaryResp
-    { wsrName        :: !Text
+    { wsrId          :: !Int
+    , wsrName        :: !Text
     , wsrRole        :: !Text
     , wsrStatus      :: !Text
     , wsrIsTemp      :: !Bool
@@ -1080,7 +1122,8 @@ data WorkerSummaryResp = WorkerSummaryResp
 
 instance ToJSON WorkerSummaryResp where
     toJSON r = object
-        [ "name"        .= wsrName r
+        [ "id"          .= wsrId r
+        , "name"        .= wsrName r
         , "role"        .= wsrRole r
         , "status"      .= wsrStatus r
         , "isTemp"      .= wsrIsTemp r
@@ -1091,7 +1134,8 @@ instance ToJSON WorkerSummaryResp where
 instance FromJSON WorkerSummaryResp where
     parseJSON = withObject "WorkerSummaryResp" $ \v ->
         WorkerSummaryResp
-            <$> v .: "name"
+            <$> v .: "id"
+            <*> v .: "name"
             <*> v .: "role"
             <*> v .: "status"
             <*> v .: "isTemp"

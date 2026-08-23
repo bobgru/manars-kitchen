@@ -1,4 +1,6 @@
 import { apiFetch } from "./client";
+import { fetchStations } from "./stations";
+import { fetchWorkers } from "./workers";
 
 /** A one-hour slot: `date` is YYYY-MM-DD, `start` is HH:MM, `duration` is seconds. */
 export interface Slot {
@@ -25,10 +27,8 @@ export interface CalendarCommit {
 /**
  * Id-to-name lookups for rendering assignments.
  *
- * The calendar endpoints identify workers and stations by id, but neither
- * `/api/workers` nor `/api/stations` includes ids in its payload, so they
- * cannot resolve them. `/api/export` is the only read endpoint that exposes
- * both id-to-name mappings, so it is used here as the name source.
+ * The calendar endpoints identify workers and stations by id; the two list
+ * endpoints report those same ids alongside the names.
  */
 export interface NameMaps {
   workers: Map<number, string>;
@@ -37,11 +37,6 @@ export interface NameMaps {
 
 interface FreezeStatusResp {
   freezeLine: string;
-}
-
-interface ExportResp {
-  workers?: { id: number; username: string }[];
-  stations?: { id: number; name: string }[];
 }
 
 export async function fetchCalendar(from: string, to: string): Promise<Assignment[]> {
@@ -73,11 +68,11 @@ export async function fetchFreezeLine(): Promise<string> {
 }
 
 export async function fetchNameMaps(): Promise<NameMaps> {
-  const resp = await apiFetch("/api/export");
-  if (!resp.ok) throw new Error(`Failed to fetch names: ${resp.status}`);
-  const body: ExportResp = await resp.json();
+  // "all", not "active": a past assignment can name a worker who has since
+  // been deactivated, and it still has to render with a name.
+  const [stations, workers] = await Promise.all([fetchStations(), fetchWorkers("all")]);
   return {
-    workers: new Map((body.workers ?? []).map((w) => [w.id, w.username])),
-    stations: new Map((body.stations ?? []).map((s) => [s.id, s.name])),
+    workers: new Map(workers.map((w) => [w.id, w.name])),
+    stations: new Map(stations.map((s) => [s.id, s.name])),
   };
 }

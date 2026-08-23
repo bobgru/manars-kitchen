@@ -27,7 +27,7 @@ import System.Directory (removeFile, doesFileExist)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Auth.Types (Role(..), User(..))
-import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..), Schedule(..), Station)
+import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..), Schedule(..))
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
@@ -65,7 +65,7 @@ logoutC          :: ClientM NoContent
 
 -- Original endpoints
 listSkillsC      :: ClientM [Skill]
-listStationsC    :: ClientM [Station]
+listStationsC    :: ClientM [StationResp]
 listShiftsC      :: ClientM [ShiftDef]
 listSchedulesC   :: ClientM [Text]
 getScheduleC     :: String -> ClientM Schedule
@@ -166,7 +166,7 @@ _renameUserC :: Int -> RenameUserReq -> ClientM NoContent
 _forceDeleteUserC :: Int -> ClientM NoContent
 
 -- Worker entity
-_listWorkersC :: Maybe Text -> ClientM [WorkerSummaryResp]
+listWorkersC :: Maybe Text -> ClientM [WorkerSummaryResp]
 _viewWorkerC :: Text -> ClientM WorkerProfileResp
 _deactivateWorkerC :: Text -> ClientM NoContent
 _forceDeactivateWorkerC :: Text -> ClientM DeactivateResultResp
@@ -258,7 +258,7 @@ logoutC
     :<|> _renameUserC
     :<|> _forceDeleteUserC
     -- Worker entity
-    :<|> _listWorkersC
+    :<|> listWorkersC
     :<|> _viewWorkerC
     :<|> _deactivateWorkerC
     :<|> _forceDeactivateWorkerC
@@ -736,6 +736,13 @@ spec = do
             Right _ <- runClientM (setStationHoursC "grill" (SetStationHoursReq 9 17)) env
             pure ()  -- no error means success
 
+        -- The id is what an Assignment's numeric `station` field refers to, so a
+        -- client can resolve assignments without fetching /api/export.
+        it "list station reports the storage id" $ withSeededApp $ \repo env -> do
+            StationId sid <- SW.addStation repo "grill" 1 2
+            Right stations <- runClientM listStationsC env
+            stations `shouldBe` [StationResp sid "grill" 1 2]
+
     describe "Shift CRUD" $ do
         it "create and list shift" $ withTestApp $ \env -> do
             Right _ <- runClientM (createShiftC (CreateShiftReq "morning" 6 14)) env
@@ -758,6 +765,11 @@ spec = do
             Right _ <- runClientM (grantWorkerSkillC "admin" "grill") env
             Right _ <- runClientM (revokeWorkerSkillC "admin" "grill") env
             pure ()
+
+        -- The id is what an Assignment's numeric `worker` field refers to.
+        it "list workers reports the worker id" $ withTestApp $ \env -> do
+            Right ws <- runClientM (listWorkersC (Just "all")) env
+            [(wsrId w, wsrName w) | w <- ws] `shouldBe` [(1, "admin")]
 
     describe "Config writes" $ do
         it "set config value" $ withTestApp $ \env -> do

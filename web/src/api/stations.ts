@@ -1,6 +1,8 @@
 import { apiFetch } from "./client";
 
 export interface StationInfo {
+  /** Storage id, matching the numeric `station` field of an Assignment. Not an address. */
+  id: number;
   name: string;
   minStaff: number;
   maxStaff: number;

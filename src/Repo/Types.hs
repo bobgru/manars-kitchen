@@ -69,7 +69,10 @@ data AuditEntry = AuditEntry
 
 -- | Slim summary row for the workers list endpoint.
 data WorkerSummary = WorkerSummary
-    { wsName        :: !Text
+    { wsId          :: !WorkerId
+      -- ^ equal to the owning @users.id@; carried so a client can resolve the
+      -- numeric @worker@ field of an 'Domain.Types.Assignment' to a name
+    , wsName        :: !Text
     , wsRole        :: !Text   -- ^ "admin" | "normal"
     , wsStatus      :: !WorkerStatus
     , wsIsTemp      :: !Bool
