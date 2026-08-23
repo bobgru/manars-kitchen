@@ -486,20 +486,7 @@ handleCommand st cmd = case cmd of
                                 , Scheduler.schPeriodBounds = periodBounds
                                 , Scheduler.schCalendarHours = Map.empty
                                 }
-                        progressBus <- newTopicBus
-                        subId <- subscribe progressBus ".*" $ \_topic evt -> case evt of
-                            OptimizeProgress progress ->
-                                let phaseStr = case opPhase progress of
-                                        PhaseHard -> "hard"
-                                        PhaseSoft -> "soft"
-                                    elapsed = showFFloat1 (opElapsedSecs progress)
-                                in putStrLn ("[opt] phase=" ++ phaseStr
-                                            ++ " iter=" ++ show (opIteration progress)
-                                            ++ " unfilled=" ++ show (opBestUnfilled progress)
-                                            ++ " score=" ++ showFFloat1 (opBestScore progress)
-                                            ++ " elapsed=" ++ elapsed ++ "s")
-                        result <- Opt.optimizeSchedule ctx seed progressBus
-                        unsubscribe progressBus subId
+                        result <- withProgressPrinting (Opt.optimizeSchedule ctx seed)
                         let sched  = Scheduler.srSchedule result
                             unfilled = Scheduler.srUnfilled result
                             truly = length [u | u <- unfilled, Scheduler.unfilledKind u == Scheduler.TrulyUnfilled]
@@ -655,7 +642,7 @@ handleCommand st cmd = case cmd of
             Right did -> do
                 users <- repoListUsers (asRepo st)
                 let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                result <- Draft.generateDraft (asRepo st) did workers
+                result <- withProgressPrinting (Draft.generateDraft (asRepo st) did workers)
                 case result of
                     Left err -> putStrLn ("Error: " ++ err)
                     Right sr -> do
@@ -2385,6 +2372,30 @@ resolveDraftId repo Nothing = do
                     | d <- drafts ]
             return (Left ("Multiple active drafts. Specify a draft-id:\n" ++ listing))
 resolveDraftId _ (Just didStr) = return (Right (read didStr))
+
+-- -----------------------------------------------------------------
+-- Optimizer progress printing
+-- -----------------------------------------------------------------
+
+-- | Run an action with a progress bus that prints optimizer progress to
+-- stdout, unsubscribing when the action returns. The optimizer throttles its
+-- own reports, so a fast run legitimately prints nothing.
+withProgressPrinting :: (TopicBus ProgressEvent -> IO a) -> IO a
+withProgressPrinting action = do
+    bus <- newTopicBus
+    subId <- subscribe bus ".*" $ \_topic evt -> case evt of
+        OptimizeProgress progress ->
+            let phaseStr = case opPhase progress of
+                    PhaseHard -> "hard"
+                    PhaseSoft -> "soft"
+            in putStrLn ("[opt] phase=" ++ phaseStr
+                        ++ " iter=" ++ show (opIteration progress)
+                        ++ " unfilled=" ++ show (opBestUnfilled progress)
+                        ++ " score=" ++ showFFloat1 (opBestScore progress)
+                        ++ " elapsed=" ++ showFFloat1 (opElapsedSecs progress) ++ "s")
+    result <- action bus
+    unsubscribe bus subId
+    return result
 
 -- -----------------------------------------------------------------
 -- Draft creation with freeze-line check

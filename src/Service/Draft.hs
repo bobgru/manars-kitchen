@@ -23,8 +23,10 @@ import Domain.Types
     )
 import Domain.Scheduler
     ( SchedulerContext(..), ScheduleResult(..)
-    , buildScheduleFrom, filterExemptCalendarHours
+    , filterExemptCalendarHours
     )
+import Service.Optimize (optimizeSchedule)
+import Service.PubSub (TopicBus, ProgressEvent)
 import Domain.Worker (WorkerContext(..))
 import Domain.Shift (defaultShifts)
 import Domain.Skill (stationClosedSlots)
@@ -97,9 +99,14 @@ computeCalendarHours repo wctx periodStart periodEnd = do
     return (filterExemptCalendarHours wctx raw)
 
 -- | Run the scheduler within a draft: load draft assignments as seed,
--- build slot list for date range, run buildScheduleFrom, save result.
-generateDraft :: Repository -> Int -> Set.Set WorkerId -> IO (Either String ScheduleResult)
-generateDraft repo draftId workers = do
+-- build slot list for date range, optimize, save result.
+--
+-- Optimization is gated on @opt-enabled@; when it is 0 (the default)
+-- 'optimizeSchedule' is a single greedy build. Progress is published to the
+-- supplied bus, which may have no subscribers.
+generateDraft :: Repository -> Int -> Set.Set WorkerId -> TopicBus ProgressEvent
+              -> IO (Either String ScheduleResult)
+generateDraft repo draftId workers progressBus = do
     mDraft <- repoGetDraft repo draftId
     case mDraft of
         Nothing -> return (Left "Draft not found.")
@@ -133,7 +140,7 @@ generateDraft repo draftId workers = do
                     , schPeriodBounds = periodBounds
                     , schCalendarHours = calHrs
                     }
-                result = buildScheduleFrom seed ctx
+            result <- optimizeSchedule ctx seed progressBus
             repoSaveDraftAssignments repo draftId (srSchedule result)
             return (Right result)
 

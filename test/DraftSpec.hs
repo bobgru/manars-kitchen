@@ -15,8 +15,14 @@ import Domain.Types
     )
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo(..))
+import Domain.SchedulerConfig (SchedulerConfig(..))
 import qualified Service.Draft as Draft
 import qualified Service.Calendar as Cal
+import qualified Service.Worker as SW
+import Service.PubSub
+    ( TopicBus, ProgressEvent(..), newTopicBus, subscribe )
+
+import Data.IORef (newIORef, modifyIORef', readIORef)
 
 import System.Directory (removeFile, doesFileExist)
 import TestSeed (seedTestUsers)
@@ -31,6 +37,31 @@ withTestRepo action = do
     seedTestUsers repo 9
     action repo
     removeFile path
+
+-- | The worker ids seeded by 'withTestRepo'.
+allTestWorkers :: Set.Set WorkerId
+allTestWorkers = Set.fromList (map WorkerId [1..9])
+
+-- | A progress bus that counts the 'OptimizeProgress' events published to it.
+collectingProgressBus :: IO (TopicBus ProgressEvent, IO Int)
+collectingProgressBus = do
+    bus <- newTopicBus
+    counter <- newIORef (0 :: Int)
+    _ <- subscribe bus ".*" $ \_topic evt -> case evt of
+        OptimizeProgress _ -> modifyIORef' counter (+ 1)
+    return (bus, readIORef counter)
+
+-- | Turn the optimizer on with a short time limit and reporting off, so the
+-- test neither runs for the default 30 seconds nor depends on wall-clock
+-- timing to decide whether progress was emitted.
+setOptEnabled :: Repository -> Double -> IO ()
+setOptEnabled repo enabled = do
+    cfg <- repoLoadSchedulerConfig repo
+    repoSaveSchedulerConfig repo cfg
+        { cfgOptEnabled = enabled
+        , cfgOptTimeLimitSecs = 1.0
+        , cfgOptProgressIntervalSecs = 0.0
+        }
 
 -- Helper to create an assignment
 mkAssignment :: Int -> Int -> Day -> Int -> Assignment
@@ -149,13 +180,65 @@ spec = do
                 Left err -> expectationFailure err
                 Right did -> do
                     -- Generate with no workers (should produce empty schedule)
-                    genResult <- Draft.generateDraft repo did Set.empty
+                    bus <- newTopicBus
+                    genResult <- Draft.generateDraft repo did Set.empty bus
                     case genResult of
                         Left err -> expectationFailure err
                         Right _  -> do
                             sched <- repoLoadDraftAssignments repo did
                             -- With no workers, schedule should be empty
                             sched `shouldBe` Schedule Set.empty
+
+        -- opt-enabled defaults to 0, so optimizeSchedule short-circuits to a
+        -- single greedy build and never reaches its reporting loop.
+        it "publishes no progress when optimization is disabled" $ withTestRepo $ \repo -> do
+            _ <- SW.addStation repo "grill" 1 1
+            (bus, readEventCount) <- collectingProgressBus
+            result <- Draft.createDraft repo (apr 6) (apr 12)
+            case result of
+                Left err -> expectationFailure err
+                Right did -> do
+                    genResult <- Draft.generateDraft repo did allTestWorkers bus
+                    case genResult of
+                        Left err -> expectationFailure err
+                        Right _  -> do
+                            count <- readEventCount
+                            count `shouldBe` 0
+
+        -- With the optimizer on, generate must still fill the draft and return
+        -- at the configured limit rather than the 30s default. Apr 6-10 2026 is
+        -- Mon-Fri: see the pending test below for why the range stops at Friday.
+        -- The event count is not asserted -- reporting is wall-clock throttled,
+        -- so a fast run legitimately emits nothing either way.
+        it "still fills the draft when optimization is enabled" $ withTestRepo $ \repo -> do
+            _ <- SW.addStation repo "grill" 1 1
+            setOptEnabled repo 1.0
+            bus <- newTopicBus
+            result <- Draft.createDraft repo (apr 6) (apr 10)
+            case result of
+                Left err -> expectationFailure err
+                Right did -> do
+                    genResult <- Draft.generateDraft repo did allTestWorkers bus
+                    case genResult of
+                        Left err -> expectationFailure err
+                        Right _  -> do
+                            sched <- repoLoadDraftAssignments repo did
+                            Set.null (unSchedule sched) `shouldBe` False
+
+        -- Known defect, pre-dating this change. With opt-enabled > 0, a range
+        -- containing a Saturday never returns and allocates ~1GB/s until the
+        -- OOM killer takes the process. Measured on this fixture:
+        --   Apr 6-10 (Mon-Fri)   ok, 1.1s      Apr 6-12 (Mon-Sun)  killed
+        --   Apr 13-17 (Mon-Fri)  ok, 1.1s      Apr 11 alone (Sat)  killed
+        -- With opt-time-limit-secs at 0.0001 -- which returns before the
+        -- iterated-greedy loop runs at all -- a full week finishes in 0.12s, so
+        -- the divergence is inside iteratedGreedyStep's perturbed rebuild, on
+        -- the weekend-constraint path. The time limit cannot interrupt it
+        -- because it is only checked between iterations. Latent until now only
+        -- because opt-enabled defaults to 0 and `schedule create` was the sole
+        -- caller.
+        it "optimizes a range containing a weekend" $
+            pendingWith "iteratedGreedyStep diverges on ranges containing a Saturday"
 
     describe "Draft commit" $ do
         it "writes to calendar and creates history entry" $ withTestRepo $ \repo -> do

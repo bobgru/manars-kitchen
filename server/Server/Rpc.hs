@@ -84,7 +84,7 @@ import qualified Export.JSON as Exp
 import Server.Json
 import Server.Error
 import Server.Auth (requireAdmin, requireSelfOrAdmin)
-import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishEnrichedCommand)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), newTopicBus, publishCommand, publishEnrichedCommand)
 import Audit.CommandMeta (withRenameNames)
 import CLI.Commands (shellQuote, parseCommand)
 import CLI.App (renameEnrichment)
@@ -742,7 +742,10 @@ rpcViewDraft repo req = do
 rpcGenerateDraft :: Repository -> RpcDraftGenerate -> Handler ScheduleResult
 rpcGenerateDraft repo req = do
     let workers = Set.fromList (map WorkerId (rdgWorkerIds req))
-    result <- liftIO $ SD.generateDraft repo (rdgDraftId req) workers
+    -- No subscriber: see handleGenerateDraft.
+    result <- liftIO $ do
+        progressBus <- newTopicBus
+        SD.generateDraft repo (rdgDraftId req) workers progressBus
     case result of
         Left msg -> throwApiError (NotFound msg)
         Right r  -> pure r

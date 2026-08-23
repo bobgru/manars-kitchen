@@ -44,7 +44,7 @@ import Server.Json
 import Server.Error
 import Server.Auth (handleLogin, handleLogout, requireAdmin, requireSelfOrAdmin)
 import Server.Rpc (RpcAPI, rpcServer)
-import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), publishCommand, publishEnrichedCommand)
+import Service.PubSub (TopicBus, CommandEvent, Source(..), AppBus(..), newTopicBus, publishCommand, publishEnrichedCommand)
 import Audit.CommandMeta (withRenameNames)
 import Server.Execute (ExecuteEnv(..), executeCommandText)
 import Utils (shellQuote)
@@ -293,7 +293,11 @@ handleGenerateDraft :: Repository -> User -> Int -> GenerateDraftReq -> Handler 
 handleGenerateDraft repo user did req = do
     requireAdmin user
     let workers = Set.fromList (map WorkerId (gdrWorkerIds req))
-    result <- liftIO $ SD.generateDraft repo did workers
+    -- No subscriber: this is a synchronous request/response, so there is
+    -- nowhere to put interim optimizer progress.
+    result <- liftIO $ do
+        progressBus <- newTopicBus
+        SD.generateDraft repo did workers progressBus
     case result of
         Left msg -> throwApiError (NotFound msg)
         Right r  -> pure r

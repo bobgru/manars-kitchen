@@ -1,6 +1,6 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-23 · at commit `6d39617` on `master`
+**Last updated:** 2026-08-23 · at commit `a9c4d28` on `docs/draft-page-decisions`
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -38,12 +38,13 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at `2dd34fe`** plus the structured-rename and SSE
+**Verification baseline at the optimizer move** plus the structured-rename and SSE
 role-filtering work described above — all of this was green, with `LANG` unset:
 
 - `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
   stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
-- 259 integration + 360 unit examples, 0 failures
+- 261 integration + 363 unit examples, 0 failures, 1 pending (the weekend
+  divergence in item 4)
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
 - demo runs end to end, exit 0
@@ -110,11 +111,23 @@ event.
 
 #### Steps, in order
 
-Each is independently shippable.
+Each is independently shippable. Two are done:
 
-1. **Expose ids on `/api/workers` and `/api/stations`** — item 3 below, a prerequisite
-   for any assignment grid.
-2. **Remove the named-schedule surface.** The largest step. `src/Service/Schedule.hs`;
+- ~~**Expose ids on `/api/workers` and `/api/stations`**~~ — shipped as `a9c4d28`.
+  `GET /api/stations` returns a new `StationResp` with `id`; `GET /api/workers` returns
+  `id` on each summary; `web/src/api/calendar.ts` no longer fetches `/api/export` to
+  build its id→name maps.
+- ~~**Move the optimizer into `draft generate`**~~ — not in the original list, and a
+  prerequisite for the step below. `schedule create` was the *only* caller of
+  `Service.Optimize.optimizeSchedule` and the only publisher of a `ProgressEvent`, so
+  removing the named-schedule surface would have orphaned `Service.Optimize`,
+  `Domain.Optimizer` and every requirement in the `progress-events` capability.
+  `generateDraft` now takes a `TopicBus ProgressEvent` and calls `optimizeSchedule`;
+  the CLI's `[opt]` printer moved into a `withProgressPrinting` helper in
+  `src/CLI/App.hs`. No behaviour change at the default `opt-enabled` of `0`. **This
+  surfaced a pre-existing defect — see item 4.**
+
+1. **Remove the named-schedule surface.** The largest step. `src/Service/Schedule.hs`;
    the four `repoSaveSchedule` / `repoLoadSchedule` / `repoListSchedules` /
    `repoDeleteSchedule` fields; the `CREATE TABLE` statements for `schedules` and
    `assignments` (`Repo/Schema.hs:138-149`) — **statements only, no `DROP TABLE`**;
@@ -128,25 +141,26 @@ Each is independently shippable.
    (`Export/JSON.hs:263-268, 408`) with `export.json` and `demo-export.json`
    regenerated; `wrSchedule` in worker safe-delete (`Service/Worker.hs:653-659`); and
    ~13 specs, of which `assign-name-args` and `compact-schedule-display` are archived
-   outright.
-3. **Push the draft lifecycle rules into the service layer** — freeze check into
+   outright. The optimizer is **no longer** a dependency here — it moved to
+   `draft generate` first, precisely so this step is pure removal.
+2. **Push the draft lifecycle rules into the service layer** — freeze check into
    `createDraft` (returning a structured refusal naming the frozen range, surfaced as
    409 via `throwConflictWithBody`), what-if-session cleanup and auto-refreeze into
    `commitDraft`, `logRest` on create and generate, `workerIds` optional. Also **split
    `validateDraftAgainstCalendar`** into `computeDraftViolations` (no writes) and
    `pruneDraftViolations` (writes); behaviour is unchanged for existing callers, but
-   the split is what lets step 5 expose a read that does not mutate.
-4. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
+   the split is what lets step 4 expose a read that does not mutate.
+3. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
    deltas removing the `Non-overlapping date ranges` requirement from `draft-session`
    and the matching scenarios from `draft-shortcuts` — plus the commit 409 and
    `commit/force`, and extend the staleness report to say *the calendar for these
    dates was replaced by draft #N*.
-5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
+4. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
    GET must not mutate** — it reports violations without deleting them or bumping
    `last_validated_at`. Pruning gets an explicit `POST /api/drafts/:id/revalidate`.
-6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
+5. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
    discard. No assignment grid.
-7. **Draft detail page** — the assignment grid, violations alongside assignments.
+6. **Draft detail page** — the assignment grid, violations alongside assignments.
 
 For both page steps, follow `WorkersListPage.tsx` — the most recent and complete — over
 the skills/stations pages where they differ. The three existing list/detail pairs are
@@ -166,17 +180,7 @@ The Shifts page's confirm modal currently *warns the user* about this; the schem
 gap is unfixed. Consider the safe-delete / force-delete pattern already
 established for skills, stations and workers.
 
-### 3. `/api/workers` and `/api/stations` expose no ids
-
-`Assignment` serialises worker and station as bare integers, but neither list
-endpoint returns an id: `handleListWorkers` maps it away, and
-`handleListStations` explicitly discards it (`pure [st | (_, st) <- stations]`).
-
-Consequence: `web/src/api/calendar.ts` resolves names via `GET /api/export` — the
-entire export dump — purely to build an id→name map. Adding `id` to those
-responses, or names to `Assignment`, lets the calendar page drop that dependency.
-
-### 4. Make the integration-test DB path unique per run
+### 3. Make the integration-test DB path unique per run
 
 **Agreed with the user, and still open.** Do not be misled by commit `455e48b`, whose
 message reads "Fix integration test coupling by path" — that commit actually carried the
@@ -200,6 +204,44 @@ the `-wal` and `-shm` sidecars too, not just the `.db`.**
 
 If you hit broad unrelated test failures, suspect this before suspecting a
 regression.
+
+### 4. The optimizer diverges on any date range containing a Saturday
+
+**Found 2026-08-23 while moving the optimizer into `draft generate`.** Pre-existing,
+and unreachable at the default `opt-enabled` of `0` — which is the only reason nobody
+has hit it. Once optimization is switched on, a date range containing a Saturday never
+returns: the process allocates about 1 GB/s until the OOM killer ends it.
+
+Measured against a one-station, nine-worker fixture (the pending test in
+`test/DraftSpec.hs` records the same table):
+
+| range | result |
+|---|---|
+| Apr 6–10 2026 (Mon–Fri) | returns at the 1s limit |
+| Apr 13–17 2026 (Mon–Fri) | returns at the 1s limit |
+| Apr 6–12 2026 (Mon–Sun) | OOM-killed after ~17s / 17 GB |
+| Apr 11 2026 alone (Sat) | OOM-killed |
+
+It is the presence of a Saturday, not the size of the range. Two facts narrow it
+sharply:
+
+- With `opt-time-limit-secs` at `0.0001` — which makes `hardPhase` return on its first
+  clock check, before any `iteratedGreedyStep` call — a full week finishes in 0.12s.
+- `bestOfStrategies` runs all five greedy strategies at magnitude 0 over that same week
+  without trouble, and plain `draft generate` (`opt-enabled 0`) always has.
+
+So the divergence is inside `iteratedGreedyStep`'s perturbed rebuild —
+`buildScheduleFromPerturbed` with a non-zero magnitude — on the weekend-constraint
+path, and the time limit cannot interrupt it because `hardPhase` only checks the clock
+*between* iterations. Note also that `hardPhase` picks a random one of the five
+strategies per iteration, so the first thing to establish is which strategy diverges;
+`WorkerFirst`'s `assignWorkerToAllBlocks` recursion is the obvious suspect but it is
+guarded by `isShiftCandidate`, which does require one assignable slot, so that guard
+appears sound and the cause is probably elsewhere.
+
+Whoever picks this up: a clock check *inside* the rebuild, or an iteration cap, would
+turn an OOM into a slow response — worth having regardless of the root cause, because a
+`POST /api/drafts/:id/generate` that OOMs takes the server down with it.
 
 ### 5. Smaller backlog
 
@@ -258,7 +300,7 @@ The specific concerns:
 5. **The look-back window is narrow.** Validation examines the seven days *before* the
    draft's start (`DraftValidation.hs:105-107`), so calendar assignments inside the
    draft's own range are never compared against it. That is why "the calendar for my
-   dates was just replaced" reports nothing today, and why item 1 step 4 has to add
+   dates was just replaced" reports nothing today, and why item 1 step 3 has to add
    that message separately.
 
 ---
@@ -352,7 +394,7 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
   (routes, CSS, cross-cutting types), *then* fan agents out onto leaf files, each
   with an explicit list of files it owns and files it must not touch. Four agents
   worked concurrently this way with zero merge conflicts. Note that worktrees
-  isolate source but **not** `/tmp` — see item 4.
+  isolate source but **not** `/tmp` — see item 3.
 
 ---
 
