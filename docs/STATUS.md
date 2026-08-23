@@ -1,6 +1,6 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-17 · at commit `2dd34fe` on `master`
+**Last updated:** 2026-08-23 · at commit `6d39617` on `master`
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -18,6 +18,11 @@ The admin web UI has pages for skills, stations, workers, shifts, and a
 read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (29 changes).
+
+**`CONTEXT.md` at the repo root is the glossary of record**, and `docs/adr/` holds the
+decisions that a reader would otherwise wonder about. Read both before touching
+scheduling code — several terms in this codebase do not mean what they appear to mean,
+and ADR 0002 exists because two of them are outright swapped.
 
 **The SSE feed is role-filtered and carries structured rename fields.**
 `eventVisibleTo` in `server/Server/EventStream.hs` is the one rule: `Admin` sees
@@ -61,24 +66,93 @@ One standing gotcha when you verify:
 
 ## Next steps
 
-### 1. `/schedules` page — blocked on a product decision
+### 1. `/drafts` page — decided 2026-08-23, ready to implement
 
-The sidebar has linked `/schedules` since the dashboard shell landed. It is the
-one route deliberately left unrouted, because it needs REST that does not exist:
-no `POST /api/schedules`, no assign/unassign. `Service.Schedule.createSchedule`
-has no REST surface at all.
+**No longer blocked.** The page targets **drafts and the calendar**; the
+named-schedule path is removed. See ADR 0001, 0002 and 0003 for the reasoning.
 
-**Decide first whether this page should target named schedules or drafts.**
-`createSchedule` is the legacy path — it hardcodes empty closed-slots,
-previous-weekend workers and calendar hours. `Service.Draft` is the richer one
-(seeds from the calendar, respects pay-period bounds, station closures, exempt
-hours). Building endpoints for the legacy path may be the wrong move.
+Four premises in the earlier version of this item were wrong, and are worth stating
+so nobody re-derives them:
 
-Frontend groundwork is already in place: routes in `web/src/App.tsx`, class
-vocabulary in `web/src/App.css`. Follow `WorkersListPage.tsx` — it is the most
-recent and complete — over the skills/stations pages where they differ. The three
-existing list/detail pairs are inconsistent in ~10 ways (error rendering, toasts,
-404 handling, `deleteConfirm` state key naming); prefer the worker page's choices.
+- **The draft REST surface already exists and works** — list, create, get, generate,
+  commit, discard (`server/Server/Api.hs:55-63`, handlers `Handlers.hs:274-311`).
+  There was never a need for `POST /api/schedules`.
+- **The one missing read is a draft's assignments.** `GET /api/drafts/:id` returns
+  metadata only. Nothing exposes `repoLoadDraftAssignments`, so a browser can see a
+  draft only by re-running `generate`, which mutates it.
+- **There is no `/schedules` route at all.** `web/src/App.tsx` has none and
+  `path="*"` redirects to `/`, so the sidebar link silently bounces to the dashboard.
+  The claim that "routes are already in place" was false. Only the sidebar link
+  (`Sidebar.tsx:9`) and the CSS vocabulary in `App.css` exist.
+- **The REST draft endpoints skip rules the CLI enforces**, because those rules live
+  in `src/CLI/App.hs` rather than the service layer: the freeze-line check on create
+  (`App.hs:2393`), validation before viewing (`App.hs:558`), what-if-session cleanup
+  and auto-refreeze on commit (`App.hs:683-700`). A browser admin can currently commit
+  over frozen dates while the CLI refuses.
+
+Also true and relevant: `POST /api/calendar/unfreeze` is a **no-op stub**
+(`Handlers.hs:722`) and unfreeze state exists only as a CLI `IORef`; and
+`handleCreateDraft` / `handleGenerateDraft` never call `logRest`, so the two operations
+that change the most emit no audit entry, no terminal-pane command string and no SSE
+event.
+
+#### Decisions
+
+| Decision | Answer |
+|---|---|
+| Force / unfreeze over REST | Not built. Creating a draft over frozen dates returns 409. Unfreeze stays CLI-only. |
+| Route and label | "Drafts" → `/drafts`. No redirect from `/schedules` — nothing ever served it. |
+| Overlapping drafts | Allowed freely. A draft is an experiment sandbox; creating one must never be refused. |
+| Overlapping commits | 409 naming the overlapping drafts; `POST /api/drafts/:id/commit/force` proceeds. |
+| Cross-draft conflict detection | Out of scope. Competing experiments are meant to disagree. |
+| Candidate workers for generate | `workerIds` becomes optional, defaulting server-side to active workers. |
+| Manual per-slot editing | Out of scope, and when it comes it goes through what-ifs — never a draft-level assign endpoint, which would bypass rebase and validation. |
+
+#### Steps, in order
+
+Each is independently shippable.
+
+1. **Expose ids on `/api/workers` and `/api/stations`** — item 3 below, a prerequisite
+   for any assignment grid.
+2. **Remove the named-schedule surface.** The largest step. `src/Service/Schedule.hs`;
+   the four `repoSaveSchedule` / `repoLoadSchedule` / `repoListSchedules` /
+   `repoDeleteSchedule` fields; the `CREATE TABLE` statements for `schedules` and
+   `assignments` (`Repo/Schema.hs:138-149`) — **statements only, no `DROP TABLE`**;
+   the `schedule *` commands, `assign`, `unassign`, `export <name> <file>`
+   (`export <file>` is a different command and stays); `calendar commit <name> ...`
+   (`App.hs:911`), which sourced its assignments from a named schedule; the three
+   `/api/schedules` endpoints and their RPC twins; the matching `commandEntityMap` /
+   `classify` / `isMutating` arms. Four non-obvious dependencies must be handled, not
+   deleted around: the demo's first section (`demo/restaurant-setup.txt:247-257`) must
+   be rewritten onto drafts; the export/import JSON `schedules` key
+   (`Export/JSON.hs:263-268, 408`) with `export.json` and `demo-export.json`
+   regenerated; `wrSchedule` in worker safe-delete (`Service/Worker.hs:653-659`); and
+   ~13 specs, of which `assign-name-args` and `compact-schedule-display` are archived
+   outright.
+3. **Push the draft lifecycle rules into the service layer** — freeze check into
+   `createDraft` (returning a structured refusal naming the frozen range, surfaced as
+   409 via `throwConflictWithBody`), what-if-session cleanup and auto-refreeze into
+   `commitDraft`, `logRest` on create and generate, `workerIds` optional. Also **split
+   `validateDraftAgainstCalendar`** into `computeDraftViolations` (no writes) and
+   `pruneDraftViolations` (writes); behaviour is unchanged for existing callers, but
+   the split is what lets step 5 expose a read that does not mutate.
+4. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
+   deltas removing the `Non-overlapping date ranges` requirement from `draft-session`
+   and the matching scenarios from `draft-shortcuts` — plus the commit 409 and
+   `commit/force`, and extend the staleness report to say *the calendar for these
+   dates was replaced by draft #N*.
+5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
+   GET must not mutate** — it reports violations without deleting them or bumping
+   `last_validated_at`. Pruning gets an explicit `POST /api/drafts/:id/revalidate`.
+6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
+   discard. No assignment grid.
+7. **Draft detail page** — the assignment grid, violations alongside assignments.
+
+For both page steps, follow `WorkersListPage.tsx` — the most recent and complete — over
+the skills/stations pages where they differ. The three existing list/detail pairs are
+inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
+key naming); prefer the worker page's choices. **Exercise them against a live server**,
+not just `tsc` — see the last bullet of item 5.
 
 ### 2. Shift delete orphans worker preferences
 
@@ -104,7 +178,12 @@ responses, or names to `Assignment`, lets the calendar page drop that dependency
 
 ### 4. Make the integration-test DB path unique per run
 
-**Agreed with the user.** Every spec hardcodes a fixed absolute path in `/tmp`:
+**Agreed with the user, and still open.** Do not be misled by commit `455e48b`, whose
+message reads "Fix integration test coupling by path" — that commit actually carried the
+SSE role-filtering and structured-rename work. All eight paths below are still
+hardcoded.
+
+Every spec hardcodes a fixed absolute path in `/tmp`:
 `/tmp/manars-kitchen-test-api.db` plus siblings suffixed `-audit`, `-draft`,
 `-session`, `-hint-e2e`, `-calendar`, `-draft-validation`, `-hint-session`.
 
@@ -141,6 +220,46 @@ regression.
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
   trusting them.**
+
+---
+
+## Deferred: revisit the admin draft workflow
+
+**Agreed 2026-08-23.** Assume the current behaviour is correct while item 1 is carried
+out, then take this up. Written down so the question is not lost.
+
+**There is no function that rebases a draft onto a moved baseline calendar.** Two
+things occupy that space and neither does the job:
+
+- `Service.HintRebase` rebases a **what-if session** against the **audit log** —
+  `classifyChange :: Int -> AuditEntry -> [Hint] -> ChangeCategory`, returning
+  `UpToDate | AutoRebase n | HasConflicts [...] | SessionInvalid`. It never examines
+  the draft's assignments. This is what `what-if rebase` and `POST /api/hints/rebase`
+  do, and what the `hint-rebase` spec describes.
+- `validateDraftAgainstCalendar` **prunes**. When the calendar has moved, it deletes
+  every assignment that no longer validates —
+  `repoSaveDraftAssignments repo draftId cleanedSched` — and leaves the holes for the
+  admin to refill by re-running `draft generate`
+  (`src/Service/DraftValidation.hs:141-152`).
+
+The specific concerns:
+
+1. **Pruning is not rebasing.** A moved calendar should arguably produce a *proposed*
+   updated draft the admin can accept or reject, not silent deletion.
+2. **Reading mutates.** Pruning fires as a side effect of `draft open`
+   (`App.hs:558`), so viewing a draft changes it. Item 1's steps 3 and 5 contain that
+   damage — they stop the browser inheriting it — but do not fix it.
+3. **Violations are not durable.** They are returned once and never persisted, so the
+   record of what was removed and why exists only in whatever output happened to see
+   it.
+4. **Overlapping drafts raise the stakes.** Once drafts may overlap, committing one
+   prunes its siblings the next time they are opened — the right trigger, the wrong
+   response, per (1).
+5. **The look-back window is narrow.** Validation examines the seven days *before* the
+   draft's start (`DraftValidation.hs:105-107`), so calendar assignments inside the
+   draft's own range are never compared against it. That is why "the calendar for my
+   dates was just replaced" reports nothing today, and why item 1 step 4 has to add
+   that message separately.
 
 ---
 
@@ -239,4 +358,6 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 
 ## Open questions
 
-1. Item 1 needs the named-schedules-vs-drafts decision before any endpoint work.
+None blocking. The named-schedules-vs-drafts question that used to sit here was settled
+on 2026-08-23 in favour of drafts — see item 1 and ADR 0001. The one deliberately
+deferred question is the draft workflow, above; it does not block item 1.
