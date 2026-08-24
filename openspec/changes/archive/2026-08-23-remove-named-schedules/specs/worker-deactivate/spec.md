@@ -1,0 +1,8 @@
+## MODIFIED Requirements
+
+### Requirement: Deactivate a worker, preserving configuration
+The system SHALL provide `worker deactivate <name>` that resolves `<name>` to a `WorkerId` and previews the deactivation impact: the counts of `pinned_assignments`, `draft_assignments`, and `calendar_assignments WHERE slot_date >= today()` rows that reference the worker. If all three counts are zero, the system SHALL commit the deactivation: transition `worker_status` from `active` to `inactive`, set `deactivated_at` to today, and report success. If any count is nonzero, the system SHALL NOT modify state and SHALL report the impact counts to the user, instructing them to use `worker force-deactivate <name>` to commit.
+
+When `worker force-deactivate <name>` is invoked, the system SHALL transition `worker_status` from `active` to `inactive`, set `deactivated_at` to today, remove the worker from `pinned_assignments`, from `draft_assignments` for any draft, and from `calendar_assignments WHERE slot_date >= today()`. The system SHALL preserve all rows in `worker_*` configuration tables (skills, employment, hours, prefs, variety, shift prefs, weekend-only, seniority, cross-training, pairing). The system SHALL preserve past `calendar_assignments` (slot_date < today()). The CLI message SHALL report the counts of pins, draft entries, and future calendar slots removed.
+
+`PUT /api/workers/:name/deactivate` SHALL implement the safe variant: respond `204 No Content` on zero-impact commit, or `409 Conflict` with body `{pinsRemoved, draftsRemoved, calendarRemoved}` and no state change when impact is nonzero. `PUT /api/workers/:name/deactivate/force` SHALL implement the force variant.

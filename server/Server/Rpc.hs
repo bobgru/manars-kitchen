@@ -32,7 +32,6 @@ module Server.Rpc
     , RpcDraftId(..)
     , RpcDraftGenerate(..)
     , RpcDraftCommit(..)
-    , RpcScheduleName(..)
     , RpcDateRange(..)
     , RpcConfigSet(..)
     , RpcPresetName(..)
@@ -72,7 +71,6 @@ import Repo.Types
     , SessionId(..), HintSessionRecord(..)
     )
 import qualified Service.Worker as SW
-import qualified Service.Schedule as SS
 import qualified Service.Draft as SD
 import qualified Service.Calendar as SC
 import qualified Service.Absence as SA
@@ -140,10 +138,6 @@ type RpcAPI =
     :<|> "rpc" :> "draft" :> "generate" :> ReqBody '[JSON] RpcDraftGenerate :> Post '[JSON] ScheduleResult
     :<|> "rpc" :> "draft" :> "commit" :> ReqBody '[JSON] RpcDraftCommit :> Post '[JSON] RpcOk
     :<|> "rpc" :> "draft" :> "discard" :> ReqBody '[JSON] RpcDraftId :> Post '[JSON] RpcOk
-    -- Schedule operations
-    :<|> "rpc" :> "schedule" :> "list" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [T.Text]
-    :<|> "rpc" :> "schedule" :> "view" :> ReqBody '[JSON] RpcScheduleName :> Post '[JSON] Schedule
-    :<|> "rpc" :> "schedule" :> "delete" :> ReqBody '[JSON] RpcScheduleName :> Post '[JSON] RpcOk
     -- Calendar operations
     :<|> "rpc" :> "calendar" :> "view" :> ReqBody '[JSON] RpcDateRange :> Post '[JSON] Schedule
     :<|> "rpc" :> "calendar" :> "history" :> ReqBody '[JSON] RpcEmpty :> Post '[JSON] [CalendarCommit]
@@ -303,9 +297,6 @@ data RpcDraftCommit = RpcDraftCommit { rdcDraftId :: !Int, rdcNote :: !T.Text } 
 instance ToJSON RpcDraftCommit where toJSON r = object ["draftId" .= rdcDraftId r, "note" .= rdcNote r]
 instance FromJSON RpcDraftCommit where parseJSON = withObject "RpcDraftCommit" $ \v -> RpcDraftCommit <$> v .: "draftId" <*> v .: "note"
 
-newtype RpcScheduleName = RpcScheduleName { rsnmName :: String } deriving (Show)
-instance ToJSON RpcScheduleName where toJSON r = object ["name" .= rsnmName r]
-instance FromJSON RpcScheduleName where parseJSON = withObject "RpcScheduleName" $ \v -> RpcScheduleName <$> v .: "name"
 
 data RpcDateRange = RpcDateRange { rdrFrom :: !Day, rdrTo :: !Day } deriving (Show)
 instance ToJSON RpcDateRange where toJSON r = object ["from" .= rdrFrom r, "to" .= rdrTo r]
@@ -415,10 +406,6 @@ rpcServer execEnv repo user =
     :<|> adminOnly user (rpcGenerateDraft repo)
     :<|> adminOnly user (rpcCommitDraft cmdBus repo)
     :<|> adminOnly user (rpcDiscardDraft cmdBus repo)
-    -- Schedules
-    :<|> rpcListSchedules repo
-    :<|> rpcViewSchedule repo
-    :<|> adminOnly user (rpcDeleteSchedule cmdBus repo)
     -- Calendar
     :<|> rpcViewCalendar repo
     :<|> rpcCalendarHistory repo
@@ -769,26 +756,6 @@ rpcDiscardDraft cmdBus repo req = do
             pure RpcOk
 
 -- -----------------------------------------------------------------
--- Schedule handlers
--- -----------------------------------------------------------------
-
-rpcListSchedules :: Repository -> RpcEmpty -> Handler [T.Text]
-rpcListSchedules repo _ = liftIO $ SS.listSchedules repo
-
-rpcViewSchedule :: Repository -> RpcScheduleName -> Handler Schedule
-rpcViewSchedule repo req = do
-    mSched <- liftIO $ SS.getSchedule repo (T.pack (rsnmName req))
-    case mSched of
-        Nothing -> throwApiError (NotFound ("Schedule not found: " ++ rsnmName req))
-        Just s  -> pure s
-
-rpcDeleteSchedule :: TopicBus CommandEvent -> Repository -> RpcScheduleName -> Handler RpcOk
-rpcDeleteSchedule cmdBus repo req = do
-    liftIO $ SS.deleteSchedule repo (T.pack (rsnmName req))
-    logRpcBus cmdBus ("schedule delete " ++ shellQuote (rsnmName req))
-    pure RpcOk
-
--- -----------------------------------------------------------------
 -- Calendar handlers
 -- -----------------------------------------------------------------
 
@@ -880,7 +847,7 @@ rpcRollbackCheckpoint cmdBus repo req = do
 -- -----------------------------------------------------------------
 
 rpcExportAll :: Repository -> RpcEmpty -> Handler ExportResp
-rpcExportAll repo _ = ExportResp <$> liftIO (Exp.gatherExport repo Nothing)
+rpcExportAll repo _ = ExportResp <$> liftIO (Exp.gatherExport repo)
 
 rpcImportData :: Repository -> ImportReq -> Handler ImportResp
 rpcImportData repo req = ImportResp <$> liftIO (Exp.applyImport repo (irData req))

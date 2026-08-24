@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Help command shows group summary by default
 The system SHALL display a list of command groups with one-line descriptions when the user types `help` with no arguments. Each group name SHALL be displayed with its description. The output SHALL NOT include individual command details.
@@ -32,18 +32,3 @@ Every command in the system SHALL belong to exactly one help group. The set of g
 #### Scenario: What-if group exists
 - **WHEN** user types `help`
 - **THEN** output includes `what-if` in the command group list with description "What-if hint exploration within drafts"
-
-#### Scenario: What-if group details
-- **WHEN** user types `help what-if`
-- **THEN** system displays all what-if subcommands: close-station, pin, add-worker, waive-overtime, grant-skill, override-prefs, revert, revert-all, list, apply -- each with syntax and description
-
-### Requirement: Admin-only commands marked in group help
-When displaying group help, commands that require admin privileges SHALL be visually distinguished from commands available to all users. Non-admin users SHALL only see commands they can use, consistent with the current role-based filtering.
-
-#### Scenario: Non-admin user requests group help
-- **WHEN** a non-admin user types `help worker`
-- **THEN** system displays only the worker commands available to non-admin users
-
-#### Scenario: Admin user requests group help
-- **WHEN** an admin user types `help worker`
-- **THEN** system displays all worker commands including admin-only ones

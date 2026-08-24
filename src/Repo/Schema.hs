@@ -134,21 +134,13 @@ statements =
       \  end_hour INTEGER NOT NULL\
       \)"
 
-      -- Schedules
-    , "CREATE TABLE IF NOT EXISTS schedules (\
-      \  name TEXT PRIMARY KEY,\
-      \  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
-      \)"
-
-    , "CREATE TABLE IF NOT EXISTS assignments (\
-      \  schedule_name TEXT NOT NULL,\
-      \  worker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,\
-      \  station_id INTEGER NOT NULL,\
-      \  slot_date TEXT NOT NULL,\
-      \  slot_start TEXT NOT NULL,\
-      \  slot_duration_seconds INTEGER NOT NULL,\
-      \  PRIMARY KEY (schedule_name, worker_id, station_id, slot_date, slot_start)\
-      \)"
+      -- Named schedules used to live here, as a @schedules@ table and an
+      -- @assignments@ table hanging off it. Drafts replaced them (ADR 0001) and
+      -- the statements were removed on 2026-08-23. Deliberately no @DROP TABLE@:
+      -- a database created by an older build keeps both tables and every row in
+      -- them, readable with @sqlite3@ even though nothing here reads them. A
+      -- database created by this build never grows them, which is why no
+      -- statement anywhere may name them — see 'sqlWipeAll'.
 
       -- Scheduler config (key-value store for scoring weights / rule thresholds)
     , "CREATE TABLE IF NOT EXISTS scheduler_config (\

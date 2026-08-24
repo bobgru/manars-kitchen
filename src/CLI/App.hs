@@ -27,7 +27,6 @@ import Data.Time
 import Data.Time.Clock (getCurrentTime, utctDay)
 
 import Domain.Types
-import qualified Domain.Shift
 import Domain.Shift (ShiftDef(..))
 import Domain.Skill (Skill(..), SkillContext(..), stationClosedSlots)
 import qualified Domain.Scheduler as Scheduler
@@ -38,7 +37,7 @@ import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodT
                          payPeriodBounds, defaultPayPeriodConfig)
 import Domain.Hint (Hint(..), Session(..), newSession, addHint, revertHint, revertTo, sessionStep)
 import Domain.SchedulerConfig (presetNames, configToMap)
-import Domain.Pin (expandPins, PinnedAssignment(..), PinSpec(..))
+import Domain.Pin (PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
     ( AbsenceType(..), AbsenceContext(..)
     )
@@ -51,7 +50,6 @@ import qualified Service.User as SU
 import qualified Service.Worker as SW
 import qualified Service.Absence as SA
 import qualified Service.Config as SC
-import qualified Service.Optimize as Opt
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
 import Service.DraftValidation (DraftViolation(..), validateDraftAgainstCalendar)
@@ -214,13 +212,6 @@ renameEnrichment repo cmd = case cmd of
 --   separate refactor.
 isMutating :: Command -> Bool
 isMutating cmd = case cmd of
-    ScheduleList        -> False
-    ScheduleView _      -> False
-    ScheduleViewCompact _ -> False
-    ScheduleViewByWorker _  -> False
-    ScheduleViewByStation _ -> False
-    ScheduleHours _     -> False
-    ScheduleDiagnose _  -> False
     SkillList           -> False
     SkillView _         -> False
     SkillInfo           -> False
@@ -277,225 +268,12 @@ isMutating cmd = case cmd of
     WhatIfRebase           -> False
     -- WhatIfApply is mutating (persists changes)
     CmdExport _           -> False
-    CmdExportSchedule _ _ -> False
     CmdAuditLog           -> False
     CmdReplay _           -> False
     _                     -> True
 
 handleCommand :: AppState -> Command -> IO ()
 handleCommand st cmd = case cmd of
-    -- Schedule
-    ScheduleList -> do
-        names <- repoListSchedules (asRepo st)
-        if null names
-            then putStrLn "  (no schedules)"
-            else mapM_ (\n -> putStrLn ("  " ++ T.unpack n)) names
-
-    ScheduleView name -> do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just s  -> do
-                users <- repoListUsers (asRepo st)
-                stations <- SW.listStations (asRepo st)
-                skillCtx <- repoLoadSkillCtx (asRepo st)
-                let workerNames = Map.fromList
-                        [ (userIdToWorkerId (userId u), T.unpack uname)
-                        | u <- users, let Username uname = userName u ]
-                    stationNames = Map.fromList
-                        [ (StationId sid, T.unpack (stationName station))
-                        | (StationId sid, station) <- stations ]
-                putStr (displayScheduleTable workerNames stationNames
-                           Calendar.defaultHours (scStationHours skillCtx) s)
-
-    ScheduleViewCompact name -> do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just s  -> do
-                users <- repoListUsers (asRepo st)
-                stations <- SW.listStations (asRepo st)
-                skillCtx <- repoLoadSkillCtx (asRepo st)
-                let workerNames = Map.fromList
-                        [ (userIdToWorkerId (userId u), T.unpack uname)
-                        | u <- users, let Username uname = userName u ]
-                    stationNames = Map.fromList
-                        [ (StationId sid, T.unpack (stationName station))
-                        | (StationId sid, station) <- stations ]
-                putStr (displayScheduleCompact workerNames stationNames
-                           Calendar.defaultHours (scStationHours skillCtx) s)
-
-    ScheduleViewByWorker name -> do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just s  -> putStr (displayScheduleByWorker s)
-
-    ScheduleViewByStation name -> do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just s  -> putStr (displayScheduleByStation s)
-
-    ScheduleDelete name -> requireAdmin st $ do
-        repoDeleteSchedule (asRepo st) (T.pack name)
-        putStrLn ("Deleted schedule: " ++ name)
-
-    ScheduleHours name -> do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just sched -> do
-                users <- repoListUsers (asRepo st)
-                workerCtx <- repoLoadWorkerCtx (asRepo st)
-                let workerNames = Map.fromList
-                        [ (userIdToWorkerId (userId u), T.unpack uname)
-                        | u <- users, let Username uname = userName u ]
-                putStr (displayWorkerHours workerNames
-                           (wcMaxPeriodHours workerCtx)
-                           sched)
-
-    ScheduleDiagnose name -> do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just sched -> do
-                users <- repoListUsers (asRepo st)
-                stations <- SW.listStations (asRepo st)
-                skills <- SW.listSkills (asRepo st)
-                skillCtx   <- repoLoadSkillCtx (asRepo st)
-                workerCtx  <- repoLoadWorkerCtx (asRepo st)
-                absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-                shifts     <- repoLoadShifts (asRepo st)
-                cfg        <- repoLoadSchedulerConfig (asRepo st)
-                let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                    -- Reconstruct the slots from the schedule's assignments
-                    slots = Set.toList $ Set.map assignSlot (unSchedule sched)
-                    closed = stationClosedSlots skillCtx slots
-                    slotDates = map slotDate slots
-                    periodBounds = case slotDates of
-                        [] -> (toEnum 0, toEnum 0)
-                        ds -> (minimum ds, addDays 1 (maximum ds))
-                    ctx = Scheduler.SchedulerContext
-                        { Scheduler.schSkillCtx    = skillCtx
-                        , Scheduler.schWorkerCtx   = workerCtx
-                        , Scheduler.schAbsenceCtx  = absenceCtx
-                        , Scheduler.schSlots       = slots
-                        , Scheduler.schWorkers     = workers
-                        , Scheduler.schClosedSlots = closed
-                        , Scheduler.schShifts      = shifts
-                        , Scheduler.schPrevWeekendWorkers = Set.empty
-                        , Scheduler.schConfig      = cfg
-                        , Scheduler.schPeriodBounds = periodBounds
-                        , Scheduler.schCalendarHours = Map.empty
-                        }
-                    result = Scheduler.buildScheduleFrom sched ctx
-                    diags = Diagnosis.diagnose result ctx
-                    workerNames = Map.fromList
-                        [ (userIdToWorkerId (userId u), T.unpack uname)
-                        | u <- users, let Username uname = userName u ]
-                    stationNames = Map.fromList
-                        [ (StationId sid, T.unpack (stationName station))
-                        | (StationId sid, station) <- stations ]
-                    skillNames = Map.fromList
-                        [ (sid, T.unpack (skillName sk))
-                        | (sid, sk) <- skills ]
-                putStr (displayDiagnosis workerNames stationNames skillNames result diags)
-
-    ScheduleClear name -> requireAdmin st $ do
-        ms <- repoLoadSchedule (asRepo st) (T.pack name)
-        case ms of
-            Nothing -> putStrLn "Schedule not found."
-            Just _  -> do
-                repoSaveSchedule (asRepo st) (T.pack name) (Schedule Set.empty)
-                putStrLn ("Cleared schedule: " ++ name)
-
-    CmdAssign sched wid sid dateStr hr -> requireAdmin st $ do
-        case parseDay dateStr of
-            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-            Just day -> do
-                ms <- repoLoadSchedule (asRepo st) (T.pack sched)
-                case ms of
-                    Nothing -> putStrLn "Schedule not found."
-                    Just (Schedule as) -> do
-                        let slot = Slot day (TimeOfDay hr 0 0) 3600
-                            a = Assignment (WorkerId wid) (StationId sid) slot
-                            sched' = Schedule (Set.insert a as)
-                        repoSaveSchedule (asRepo st) (T.pack sched) sched'
-                        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
-                        putStrLn ("Assigned " ++ wname
-                                 ++ " to Station " ++ show sid
-                                 ++ " at " ++ dateStr ++ " " ++ show hr ++ ":00")
-
-    CmdUnassign sched wid sid dateStr hr -> requireAdmin st $ do
-        case parseDay dateStr of
-            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-            Just day -> do
-                ms <- repoLoadSchedule (asRepo st) (T.pack sched)
-                case ms of
-                    Nothing -> putStrLn "Schedule not found."
-                    Just (Schedule as) -> do
-                        let slot = Slot day (TimeOfDay hr 0 0) 3600
-                            a = Assignment (WorkerId wid) (StationId sid) slot
-                            sched' = Schedule (Set.delete a as)
-                        repoSaveSchedule (asRepo st) (T.pack sched) sched'
-                        wname <- lookupWorkerName (asRepo st) (WorkerId wid)
-                        putStrLn ("Unassigned " ++ wname
-                                 ++ " from Station " ++ show sid
-                                 ++ " at " ++ dateStr ++ " " ++ show hr ++ ":00")
-
-    ScheduleCreate name dateStr -> requireAdmin st $ do
-        case parseDay dateStr of
-            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-            Just day -> do
-                let slots = Calendar.generateWeekSlots Calendar.defaultHours day Set.empty
-                if null slots
-                    then putStrLn "No slots generated."
-                    else do
-                        users <- repoListUsers (asRepo st)
-                        let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                        putStrLn ("Generating schedule '" ++ name ++ "' for week of "
-                                 ++ dateStr
-                                 ++ " (" ++ show (length slots) ++ " slots, "
-                                 ++ show (Set.size workers) ++ " workers)")
-                        skillCtx   <- repoLoadSkillCtx (asRepo st)
-                        workerCtx  <- repoLoadWorkerCtx (asRepo st)
-                        absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-                        shifts     <- repoLoadShifts (asRepo st)
-                        cfg        <- repoLoadSchedulerConfig (asRepo st)
-                        pins       <- repoLoadPins (asRepo st)
-                        let activeShifts = case shifts of
-                                [] -> Domain.Shift.defaultShifts
-                                ss -> ss
-                            seed = expandPins activeShifts slots pins
-                            closed = stationClosedSlots skillCtx slots
-                            slotDates = map slotDate slots
-                            periodBounds = case slotDates of
-                                [] -> (toEnum 0, toEnum 0)
-                                ds -> (minimum ds, addDays 1 (maximum ds))
-                            ctx = Scheduler.SchedulerContext
-                                { Scheduler.schSkillCtx    = skillCtx
-                                , Scheduler.schWorkerCtx   = workerCtx
-                                , Scheduler.schAbsenceCtx  = absenceCtx
-                                , Scheduler.schSlots       = slots
-                                , Scheduler.schWorkers     = workers
-                                , Scheduler.schClosedSlots = closed
-                                , Scheduler.schShifts      = shifts
-                                , Scheduler.schPrevWeekendWorkers = Set.empty
-                                , Scheduler.schConfig      = cfg
-                                , Scheduler.schPeriodBounds = periodBounds
-                                , Scheduler.schCalendarHours = Map.empty
-                                }
-                        result <- withProgressPrinting (Opt.optimizeSchedule ctx seed)
-                        let sched  = Scheduler.srSchedule result
-                            unfilled = Scheduler.srUnfilled result
-                            truly = length [u | u <- unfilled, Scheduler.unfilledKind u == Scheduler.TrulyUnfilled]
-                            under = length unfilled - truly
-                        repoSaveSchedule (asRepo st) (T.pack name) sched
-                        putStrLn ("Saved. " ++ show (Set.size (unSchedule sched)) ++ " assignments, "
-                                 ++ show truly ++ " unfilled, "
-                                 ++ show under ++ " understaffed positions.")
-
     -- Draft
     DraftCreate startStr endStr force -> requireAdmin st $
         case (parseDay startStr, parseDay endStr) of
@@ -893,21 +671,6 @@ handleCommand st cmd = case cmd of
                                 [ (sid, T.unpack (skillName sk))
                                 | (sid, sk) <- skills ]
                         putStr (displayDiagnosis workerNames stationNames skillNames result diags)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-
-    CalendarDoCommit name startStr endStr mNote -> requireAdmin st $
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                ms <- repoLoadSchedule (asRepo st) (T.pack name)
-                case ms of
-                    Nothing -> putStrLn ("Schedule not found: " ++ name)
-                    Just sched -> do
-                        let note = T.pack (maybe "" id mNote)
-                        Cal.commitToCalendar (asRepo st) s e note sched
-                        let n = Set.size (unSchedule sched)
-                        putStrLn ("Committed " ++ show n ++ " assignments from '"
-                                 ++ name ++ "' to calendar for "
-                                 ++ startStr ++ " to " ++ endStr ++ ".")
             _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
 
     CalendarHistory -> do
@@ -1776,24 +1539,15 @@ handleCommand st cmd = case cmd of
 
     -- Import / Export
     CmdExport file -> requireAdmin st $ do
-        dat <- Export.gatherExport (asRepo st) Nothing
+        dat <- Export.gatherExport (asRepo st)
         BL.writeFile file (Export.encodeExport dat)
         let nSk = length (Export.expSkills dat)
             nSt = length (Export.expStations dat)
             nWk = length (Export.expWorkers dat)
-            nSch = Map.size (Export.expSchedules dat)
         putStrLn ("Exported to " ++ file ++ ": "
                  ++ show nSk ++ " skills, "
                  ++ show nSt ++ " stations, "
-                 ++ show nWk ++ " workers, "
-                 ++ show nSch ++ " schedule(s)")
-
-    CmdExportSchedule name file -> requireAdmin st $ do
-        dat <- Export.gatherExport (asRepo st) (Just (T.pack name))
-        BL.writeFile file (Export.encodeExport dat)
-        let nAssign = sum $ map length $ Map.elems (Export.expSchedules dat)
-        putStrLn ("Exported schedule '" ++ name ++ "' to " ++ file
-                 ++ " (" ++ show nAssign ++ " assignments)")
+                 ++ show nWk ++ " workers")
 
     CmdImport file -> requireAdmin st $ do
         bs <- BL.readFile file
@@ -2234,7 +1988,7 @@ runDemo repo delayUs cmdLines = do
                 opts = ReplayOpts delayUs (delayUs > 0)
             replayCommands opts st entries
             -- Auto-export demo data
-            dat <- Export.gatherExport repo Nothing
+            dat <- Export.gatherExport repo
             let exportPath = "demo-export.json"
             BL.writeFile exportPath (Export.encodeExport dat)
             let nSk = length (Export.expSkills dat)
@@ -2454,26 +2208,11 @@ helpRegistry =
     , ("calendar", False, "calendar view-compact <start> <end>",    "View calendar (compact, 100-col)")
     , ("calendar", False, "calendar hours <start> <end>",           "Worker hours summary")
     , ("calendar", False, "calendar diagnose <start> <end>",        "Diagnose unfilled positions")
-    , ("calendar", True,  "calendar commit <name> <start> <end> [note]", "Commit named schedule to calendar")
     , ("calendar", False, "calendar history",                       "List calendar commits")
     , ("calendar", False, "calendar history <id>",                  "View historical snapshot")
     , ("calendar", True,  "calendar unfreeze <date>",              "Temporarily unfreeze a date")
     , ("calendar", True,  "calendar unfreeze <start> <end>",       "Temporarily unfreeze a date range")
     , ("calendar", False, "calendar freeze-status",                "Show freeze line and unfreezes")
-    -- Schedule (user)
-    , ("schedule", False, "schedule list",                   "List saved schedules")
-    , ("schedule", False, "schedule view <name>",            "View a schedule (table)")
-    , ("schedule", False, "schedule view-by-worker <name>",  "View schedule grouped by worker")
-    , ("schedule", False, "schedule view-by-station <name>", "View schedule grouped by station")
-    , ("schedule", False, "schedule hours <name>",           "Worker hours summary")
-    , ("schedule", False, "schedule view-compact <name>",     "View schedule (compact, 100-col)")
-    , ("schedule", False, "schedule diagnose <name>",        "Diagnose unfilled positions")
-    -- Schedule (admin)
-    , ("schedule", True,  "schedule create <name> <date>",   "Create schedule (week of date)")
-    , ("schedule", True,  "schedule delete <name>",          "Delete a schedule")
-    , ("schedule", True,  "schedule clear <name>",           "Clear all assignments")
-    , ("schedule", True,  "assign <sched> <wid> <sid> <date> <hour>", "Assign worker to station/slot")
-    , ("schedule", True,  "unassign <sched> <wid> <sid> <date> <hour>", "Remove assignment")
     -- Skill
     , ("skill",    True,  "skill create <id> <name>",        "Create a skill")
     , ("skill",    True,  "skill rename <id> <name>",        "Rename a skill")
@@ -2554,7 +2293,6 @@ helpRegistry =
     , ("what-if",  True,  "what-if rebase",                                "Reconcile hints with data changes")
     -- Export
     , ("export",   True,  "export <file>",                   "Export all data to JSON")
-    , ("export",   True,  "export <schedule> <file>",        "Export one schedule to JSON")
     , ("export",   True,  "import <file>",                   "Import data from JSON")
     -- Audit
     , ("audit",    True,  "audit",                           "Show audit trail")
@@ -2594,8 +2332,7 @@ helpRegistry =
 helpGroups :: [(String, String)]
 helpGroups =
     [ ("draft",    "Draft scheduling sessions (staging area)")
-    , ("calendar", "Calendar viewing, committing, and history")
-    , ("schedule", "Schedule creation, viewing, and management")
+    , ("calendar", "Calendar viewing, history, and freeze control")
     , ("worker",   "Worker skills, hours, preferences, and pairings")
     , ("skill",    "Skill definitions and implications")
     , ("station",  "Station setup, hours, and requirements")

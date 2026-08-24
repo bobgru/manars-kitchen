@@ -11,22 +11,8 @@ import Utils (shellWords, shellQuote)
 
 -- | All commands available in the REPL.
 data Command
-    -- Schedule
-    = ScheduleCreate String String    -- ^ name start-date (YYYY-MM-DD, week containing)
-    | ScheduleView String             -- ^ name (tabular view)
-    | ScheduleViewByWorker String
-    | ScheduleViewByStation String
-    | ScheduleViewCompact String     -- ^ name (compact tabular view)
-    | ScheduleList
-    | ScheduleDelete String
-    | ScheduleHours String             -- ^ worker hours summary
-    | ScheduleDiagnose String         -- ^ diagnose unfilled positions
-    | ScheduleClear String            -- ^ remove all assignments from named schedule
-    -- Direct assignment
-    | CmdAssign String Int Int String Int    -- ^ schedule worker station date hour
-    | CmdUnassign String Int Int String Int  -- ^ schedule worker station date hour
     -- Skills / Stations (admin)
-    | StationCreate String Int Int    -- ^ name min-staff max-staff
+    = StationCreate String Int Int    -- ^ name min-staff max-staff
     | StationList
     | StationDelete String            -- ^ name (safe delete)
     | StationForceDelete String       -- ^ name (remove refs + delete)
@@ -113,7 +99,6 @@ data Command
     | PinList
     -- Import / Export
     | CmdExport String              -- ^ file path (all data)
-    | CmdExportSchedule String String  -- ^ schedule-name file-path
     | CmdImport String              -- ^ file path
     -- Audit
     | CmdAuditLog                   -- ^ show audit trail
@@ -132,7 +117,6 @@ data Command
     | CalendarViewCompact String String
     | CalendarHours String String
     | CalendarDiagnose String String
-    | CalendarDoCommit String String String (Maybe String) -- ^ schedule-name start end [note]
     | CalendarHistory
     | CalendarHistoryView String              -- ^ commit-id
     | CalendarUnfreeze String                 -- ^ single date
@@ -176,24 +160,6 @@ data Command
 
 parseCommand :: String -> Command
 parseCommand input = case shellWords input of
-    ["schedule", "create", name, date] -> ScheduleCreate name date
-    ["schedule", "create", name]       -> ScheduleCreate name "2026-04-06"
-    ["schedule", "view", name]         -> ScheduleView name
-    ["schedule", "view-compact", name]    -> ScheduleViewCompact name
-    ["schedule", "view-by-worker", name]  -> ScheduleViewByWorker name
-    ["schedule", "view-by-station", name] -> ScheduleViewByStation name
-    ["schedule", "view"]              -> Unknown "schedule view <name> — name required"
-    ["schedule", "list"]               -> ScheduleList
-    ["schedule", "delete", name]       -> ScheduleDelete name
-    ["schedule", "hours", name]         -> ScheduleHours name
-    ["schedule", "diagnose", name]     -> ScheduleDiagnose name
-    ["schedule", "clear", name]        -> ScheduleClear name
-
-    ["assign", sched, wid, sid, date, hr]
-        | all isDigit' [wid, sid, hr] -> CmdAssign sched (read wid) (read sid) date (read hr)
-    ["unassign", sched, wid, sid, date, hr]
-        | all isDigit' [wid, sid, hr] -> CmdUnassign sched (read wid) (read sid) date (read hr)
-
     ["station", "create", name] -> StationCreate name 1 1
     ["station", "create", name, mn, mx]
         | all isDigit' [mn, mx] -> StationCreate name (read mn) (read mx)
@@ -322,7 +288,6 @@ parseCommand input = case shellWords input of
         | all isDigit' [wid, sid] -> PinRemove (read wid) (read sid) day spec
     ["pin", "list"]                  -> PinList
 
-    ["export", name, file]          -> CmdExportSchedule name file
     ["export", file]                 -> CmdExport file
     ["import", file]                 -> CmdImport file
 
@@ -394,9 +359,6 @@ parseCommand input = case shellWords input of
     ["calendar", "view-compact", s, e]   -> CalendarViewCompact s e
     ["calendar", "hours", s, e]          -> CalendarHours s e
     ["calendar", "diagnose", s, e]       -> CalendarDiagnose s e
-    ["calendar", "commit", name, s, e]   -> CalendarDoCommit name s e Nothing
-    ("calendar" : "commit" : name : s : e : rest)
-        -> CalendarDoCommit name s e (Just (unwords rest))
     ["calendar", "history"]              -> CalendarHistory
     ["calendar", "history", cid]
         | isDigit' cid -> CalendarHistoryView cid

@@ -43,9 +43,8 @@ spec = do
                 , "shift create morning 6 14"
                 , "config set foo 1"
                 , "draft create 2026-04-13 2026-04-19"
-                , "calendar commit w1 2026-04-06 2026-04-12"
+                , "calendar unfreeze 2026-04-10"
                 , "pin 1 2 Monday morning"
-                , "assign sched 1 2 2026-04-06 8"
                 ]
 
         it "fails closed on an unclassified command" $ do

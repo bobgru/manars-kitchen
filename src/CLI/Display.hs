@@ -821,7 +821,6 @@ formatWorkerRefs r = unlines $
         [ field "pinned assignments"   (Service.Worker.wrPinned r)
         , field "calendar assignments" (Service.Worker.wrCalendar r)
         , field "draft assignments"    (Service.Worker.wrDraft r)
-        , field "schedule assignments" (Service.Worker.wrSchedule r)
         , field "absence requests"     (Service.Worker.wrAbsence r)
         , field "yearly allowances"    (Service.Worker.wrAllowances r)
         ]

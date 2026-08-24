@@ -580,7 +580,6 @@ data WorkerReferences = WorkerReferences
     , wrPinned          :: !Int
     , wrCalendar        :: !Int
     , wrDraft           :: !Int
-    , wrSchedule        :: !Int
     , wrAbsence         :: !Int
     , wrAllowances      :: !Int
     } deriving (Show)
@@ -597,7 +596,7 @@ configRefsNonEmpty r =
 scheduleRefsNonEmpty :: WorkerReferences -> Bool
 scheduleRefsNonEmpty r =
     wrPinned r > 0 || wrCalendar r > 0 || wrDraft r > 0 ||
-    wrSchedule r > 0 || wrAbsence r > 0 || wrAllowances r > 0
+    wrAbsence r > 0 || wrAllowances r > 0
 
 -- | True iff every reference group is empty.
 isWorkerUnreferenced :: WorkerReferences -> Bool
@@ -633,7 +632,7 @@ checkWorkerReferences repo wid = do
     (otModels, ppMap, tempSet) <- repoLoadEmployment repo
     let hasEmployment = Map.member wid otModels || Map.member wid ppMap || Set.member wid tempSet
 
-    -- Schedule/history: count via pins + we approximate calendar/draft/named/absence
+    -- Schedule/history: count via pins + we approximate calendar/draft/absence
     -- by scanning the bulk loads available on the repo.
     pins   <- repoLoadPins repo
     let pinCount = length [() | p <- pins, pinWorker p == wid]
@@ -649,14 +648,6 @@ checkWorkerReferences repo wid = do
     draftCount <- fmap sum $ mapM (\d -> do
         s <- repoLoadDraftAssignments repo (diId d)
         pure $ length [() | a <- Set.toList (unSchedule s), assignWorker a == wid]) drafts
-    -- Named schedules
-    schedNames <- repoListSchedules repo
-    schedCount <- fmap sum $ mapM (\nm -> do
-        ms <- repoLoadSchedule repo nm
-        case ms of
-            Nothing -> pure 0
-            Just s  -> pure $ length [() | a <- Set.toList (unSchedule s), assignWorker a == wid]
-        ) schedNames
     pure WorkerReferences
         { wrSkills          = skillCount
         , wrEmployment      = hasEmployment
@@ -673,7 +664,6 @@ checkWorkerReferences repo wid = do
         , wrPinned          = pinCount
         , wrCalendar        = calCount
         , wrDraft           = draftCount
-        , wrSchedule        = schedCount
         , wrAbsence         = absCount
         , wrAllowances      = allowCount
         }

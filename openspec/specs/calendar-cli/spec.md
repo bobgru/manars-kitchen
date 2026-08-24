@@ -1,7 +1,8 @@
 ## ADDED Requirements
 
 ### Requirement: Calendar view by date range
-The system SHALL provide `calendar view <start-date> <end-date>` that displays the calendar slice as a time-slot grid, using the same table format as `schedule view`.
+The system SHALL provide `calendar view <start-date> <end-date>` that displays the
+calendar slice as a time-slot grid, using the same table format as `draft view`.
 
 #### Scenario: View a week of calendar
 - **WHEN** user types `calendar view 2026-04-06 2026-04-12`
@@ -12,7 +13,9 @@ The system SHALL provide `calendar view <start-date> <end-date>` that displays t
 - **THEN** system displays "No calendar assignments in this range."
 
 ### Requirement: Calendar view-by-worker
-The system SHALL provide `calendar view-by-worker <start-date> <end-date>` that displays calendar assignments grouped by worker, using the same format as `schedule view-by-worker`.
+The system SHALL provide `calendar view-by-worker <start-date> <end-date>` that
+displays calendar assignments grouped by worker, using the same format as the
+draft and calendar by-worker renderer.
 
 #### Scenario: View by worker
 - **WHEN** user types `calendar view-by-worker 2026-04-06 2026-04-12`
@@ -45,21 +48,6 @@ The system SHALL provide `calendar diagnose <start-date> <end-date>` that runs c
 #### Scenario: Diagnose coverage
 - **WHEN** user types `calendar diagnose 2026-04-06 2026-04-12`
 - **THEN** system displays unfilled position analysis and suggestions for that date range
-
-### Requirement: Calendar commit command
-The system SHALL provide `calendar commit <schedule-name> <start-date> <end-date>` that loads a named schedule and commits it to the calendar for the specified date range, creating a history snapshot.
-
-#### Scenario: Commit a named schedule
-- **WHEN** user types `calendar commit week1 2026-04-06 2026-04-12`
-- **THEN** the schedule named "week1" is loaded, existing calendar assignments for Apr 6-12 are snapshotted to history, and the schedule's assignments are written to the calendar
-
-#### Scenario: Commit with optional note
-- **WHEN** user types `calendar commit week1 2026-04-06 2026-04-12 "initial April week 1"`
-- **THEN** the history commit includes the note "initial April week 1"
-
-#### Scenario: Commit nonexistent schedule
-- **WHEN** user types `calendar commit nosuch 2026-04-06 2026-04-12`
-- **THEN** system displays "Schedule not found: nosuch"
 
 ### Requirement: Calendar history commands
 The system SHALL provide `calendar history` to list all commits and `calendar history <commit-id>` to view the snapshot of a specific commit.

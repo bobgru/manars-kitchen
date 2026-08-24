@@ -95,9 +95,6 @@ cViewDraft      :: RpcDraftId -> ClientM DraftInfo
 cGenerateDraft  :: RpcDraftGenerate -> ClientM ScheduleResult
 cCommitDraft    :: RpcDraftCommit -> ClientM RpcOk
 cDiscardDraft   :: RpcDraftId -> ClientM RpcOk
-cListSchedules  :: RpcEmpty -> ClientM [T.Text]
-cViewSchedule   :: RpcScheduleName -> ClientM Schedule
-cDeleteSchedule :: RpcScheduleName -> ClientM RpcOk
 cViewCalendar   :: RpcDateRange -> ClientM Schedule
 cCalendarHistory :: RpcEmpty -> ClientM [CalendarCommit]
 cUnfreeze       :: UnfreezeReq -> ClientM RpcOk
@@ -169,9 +166,6 @@ cCreateSkill
     :<|> cGenerateDraft
     :<|> cCommitDraft
     :<|> cDiscardDraft
-    :<|> cListSchedules
-    :<|> cViewSchedule
-    :<|> cDeleteSchedule
     :<|> cViewCalendar
     :<|> cCalendarHistory
     :<|> cUnfreeze
@@ -250,67 +244,6 @@ parseDay s = case break (== '-') s of
 
 dispatchCommand :: RpcEnv -> Command -> IO ()
 dispatchCommand env cmd = case cmd of
-    -- Schedule
-    ScheduleList -> do
-        result <- run env (cListSchedules RpcEmpty)
-        case result of
-            Right names -> if null names
-                then putStrLn "  (no schedules)"
-                else mapM_ (\n -> putStrLn ("  " ++ T.unpack n)) names
-            Left err -> putStrLn err
-
-    ScheduleView name -> do
-        result <- run env (cViewSchedule (RpcScheduleName name))
-        case result of
-            Right s -> putStr (displaySchedule s)
-            Left err -> putStrLn err
-
-    ScheduleViewByWorker name -> do
-        result <- run env (cViewSchedule (RpcScheduleName name))
-        case result of
-            Right s -> putStr (displayScheduleByWorker s)
-            Left err -> putStrLn err
-
-    ScheduleViewByStation name -> do
-        result <- run env (cViewSchedule (RpcScheduleName name))
-        case result of
-            Right s -> putStr (displayScheduleByStation s)
-            Left err -> putStrLn err
-
-    ScheduleViewCompact name -> do
-        result <- run env (cViewSchedule (RpcScheduleName name))
-        case result of
-            Right s -> putStr (displaySchedule s)  -- simplified in remote mode
-            Left err -> putStrLn err
-
-    ScheduleDelete name -> requireAdmin env $
-        runOk env (cDeleteSchedule (RpcScheduleName name))
-            ("Deleted schedule: " ++ name)
-
-    ScheduleHours name -> do
-        result <- run env (cViewSchedule (RpcScheduleName name))
-        case result of
-            Right s -> putStr (displaySchedule s)  -- simplified in remote mode
-            Left err -> putStrLn err
-
-    ScheduleDiagnose name -> do
-        result <- run env (cViewSchedule (RpcScheduleName name))
-        case result of
-            Right s -> putStr (displaySchedule s)  -- simplified in remote mode
-            Left err -> putStrLn err
-
-    ScheduleClear _name ->
-        putStrLn "schedule clear is not supported in remote mode."
-
-    ScheduleCreate _name _date ->
-        putStrLn "schedule create is not supported in remote mode (use drafts)."
-
-    -- Direct assignment
-    CmdAssign {} ->
-        putStrLn "Direct assignment is not supported in remote mode."
-    CmdUnassign {} ->
-        putStrLn "Direct unassignment is not supported in remote mode."
-
     -- Skills
     SkillCreate name -> requireAdmin env $
         runOk env (cCreateSkill (CreateSkillReq (T.pack name) T.empty)) "Skill created."
@@ -607,9 +540,6 @@ dispatchCommand env cmd = case cmd of
     CalendarDiagnose startStr endStr ->
         dispatchCommand env (CalendarView startStr endStr)
 
-    CalendarDoCommit {} ->
-        putStrLn "Calendar commit is not supported in remote mode (use drafts)."
-
     CalendarHistory -> do
         result <- run env (cCalendarHistory RpcEmpty)
         case result of
@@ -758,9 +688,6 @@ dispatchCommand env cmd = case cmd of
         case result of
             Right _resp -> putStrLn "Export data received."
             Left err -> putStrLn err
-
-    CmdExportSchedule {} ->
-        putStrLn "Export schedule is not yet supported in remote mode."
 
     CmdImport _path ->
         putStrLn "Import in remote mode is not yet supported."

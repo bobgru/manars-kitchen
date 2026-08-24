@@ -86,10 +86,6 @@ mkSQLiteRepo path = do
         , repoSaveShift      = sqlSaveShift conn
         , repoDeleteShift    = sqlDeleteShift conn
         , repoLoadShifts     = sqlLoadShifts conn
-        , repoSaveSchedule   = sqlSaveSchedule conn
-        , repoLoadSchedule   = sqlLoadSchedule conn
-        , repoListSchedules  = sqlListSchedules conn
-        , repoDeleteSchedule = sqlDeleteSchedule conn
         , repoSaveSchedulerConfig = sqlSaveSchedulerConfig conn
         , repoLoadSchedulerConfig = sqlLoadSchedulerConfig conn
         , repoLoadPayPeriodConfig = sqlLoadPayPeriodConfig conn
@@ -246,7 +242,6 @@ sqlCascadeWorkerSchedule conn (WorkerId wid) = withTransaction conn $ do
     execute conn "DELETE FROM pinned_assignments WHERE worker_id = ?" (Only wid)
     execute conn "DELETE FROM calendar_assignments WHERE worker_id = ?" (Only wid)
     execute conn "DELETE FROM draft_assignments WHERE worker_id = ?" (Only wid)
-    execute conn "DELETE FROM assignments WHERE worker_id = ?" (Only wid)
     execute conn "DELETE FROM absence_requests WHERE worker_id = ?" (Only wid)
     execute conn "DELETE FROM yearly_allowances WHERE worker_id = ?" (Only wid)
 
@@ -768,60 +763,6 @@ sqlLoadShifts conn = do
     return [ShiftDef name sh eh | (name, sh, eh) <- rows]
 
 -- =====================================================================
--- Schedules
--- =====================================================================
-
-sqlSaveSchedule :: Connection -> Text -> Schedule -> IO ()
-sqlSaveSchedule conn name (Schedule assignments) = withTransaction conn $ do
-    -- Upsert the schedule name
-    execute conn
-        "INSERT OR REPLACE INTO schedules (name, created_at) VALUES (?, datetime('now'))"
-        (Only name)
-    -- Clear old assignments for this schedule
-    execute conn "DELETE FROM assignments WHERE schedule_name = ?" (Only name)
-    -- Insert all assignments
-    mapM_ (\a -> do
-        let WorkerId wid = assignWorker a
-            StationId sid = assignStation a
-            s = assignSlot a
-        execute conn
-            "INSERT INTO assignments \
-            \(schedule_name, worker_id, station_id, slot_date, slot_start, slot_duration_seconds) \
-            \VALUES (?, ?, ?, ?, ?, ?)"
-            (name, wid, sid, dayToText (slotDate s), todToText (slotStart s),
-             diffTimeToSeconds (slotDuration s))
-        ) (Set.toList assignments)
-
-sqlLoadSchedule :: Connection -> Text -> IO (Maybe Schedule)
-sqlLoadSchedule conn name = do
-    exists <- query conn "SELECT 1 FROM schedules WHERE name = ?" (Only name)
-        :: IO [Only Int]
-    case exists of
-        [] -> return Nothing
-        _  -> do
-            rows <- query conn
-                "SELECT worker_id, station_id, slot_date, slot_start, slot_duration_seconds \
-                \FROM assignments WHERE schedule_name = ?"
-                (Only name)
-                :: IO [(Int, Int, Text, Text, Int)]
-            let as = Set.fromList
-                    [Assignment (WorkerId w) (StationId st)
-                        (Slot (textToDay d) (textToTod t) (secondsToDiffTime dur))
-                    | (w, st, d, t, dur) <- rows]
-            return (Just (Schedule as))
-
-sqlListSchedules :: Connection -> IO [Text]
-sqlListSchedules conn = do
-    rows <- query_ conn "SELECT name FROM schedules ORDER BY created_at DESC"
-        :: IO [Only Text]
-    return [n | Only n <- rows]
-
-sqlDeleteSchedule :: Connection -> Text -> IO ()
-sqlDeleteSchedule conn name = do
-    execute conn "DELETE FROM assignments WHERE schedule_name = ?" (Only name)
-    execute conn "DELETE FROM schedules WHERE name = ?" (Only name)
-
--- =====================================================================
 -- Audit log
 -- =====================================================================
 
@@ -1015,8 +956,6 @@ sqlWipeAll conn = withTransaction conn $ do
     execute_ conn "DELETE FROM calendar_commit_assignments"
     execute_ conn "DELETE FROM calendar_commits"
     execute_ conn "DELETE FROM calendar_assignments"
-    execute_ conn "DELETE FROM assignments"
-    execute_ conn "DELETE FROM schedules"
     execute_ conn "DELETE FROM shifts"
     execute_ conn "DELETE FROM absence_requests"
     execute_ conn "DELETE FROM yearly_allowances"

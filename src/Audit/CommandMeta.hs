@@ -83,11 +83,6 @@ etImportExport = "import-export"
 -- | Classify a raw command string into structured metadata.
 classify :: String -> CommandMeta
 classify input = case shellWords input of
-    -- Schedule commands
-    ("schedule" : op : rest) -> classifySchedule op rest
-    -- Assignment commands
-    ("assign" : rest) -> classifyAssign rest
-    ("unassign" : rest) -> classifyUnassign rest
     -- Station commands
     ("station" : op : rest) -> classifyStation op rest
     -- Skill commands
@@ -135,39 +130,6 @@ classify input = case shellWords input of
     ["quit"]        -> nonMutating etSchedule "quit"
     ["exit"]        -> nonMutating etSchedule "quit"
     _               -> defaultMeta
-
--- Schedule
-classifySchedule :: String -> [String] -> CommandMeta
-classifySchedule op rest = case op of
-    "create" -> mutating etSchedule "create"
-    "delete" -> mutating etSchedule "delete"
-    "clear"  -> mutating etSchedule "clear"
-    "list"   -> nonMutating etSchedule "list"
-    "view"   -> nonMutating etSchedule "view"
-    "view-compact"    -> nonMutating etSchedule "view-compact"
-    "view-by-worker"  -> nonMutating etSchedule "view-by-worker"
-    "view-by-station" -> nonMutating etSchedule "view-by-station"
-    "hours"    -> nonMutating etSchedule "hours"
-    "diagnose" -> nonMutating etSchedule "diagnose"
-    _ -> nonMutating etSchedule (pack op)
-  where _unused = rest  -- suppress warning
-
--- Assign / Unassign
-classifyAssign :: [String] -> CommandMeta
-classifyAssign (_sched : wid : sid : _date : _hr : _) =
-    (mutating etSchedule "assign")
-        { cmEntityId = readMaybe wid
-        , cmTargetId = readMaybe sid
-        }
-classifyAssign _ = mutating etSchedule "assign"
-
-classifyUnassign :: [String] -> CommandMeta
-classifyUnassign (_sched : wid : sid : _date : _hr : _) =
-    (mutating etSchedule "unassign")
-        { cmEntityId = readMaybe wid
-        , cmTargetId = readMaybe sid
-        }
-classifyUnassign _ = mutating etSchedule "unassign"
 
 -- Station
 classifyStation :: String -> [String] -> CommandMeta
@@ -382,10 +344,6 @@ classifyCheckpoint op _rest = case op of
 -- Calendar
 classifyCalendar :: String -> [String] -> CommandMeta
 classifyCalendar op rest = case op of
-    "commit" -> case rest of
-        (_name : s : e : _) -> (mutating etCalendar "commit")
-            { cmDateFrom = dateOrNothing s, cmDateTo = dateOrNothing e }
-        _ -> mutating etCalendar "commit"
     "unfreeze" -> case rest of
         (s : e : _) -> (mutating etCalendar "unfreeze")
             { cmDateFrom = dateOrNothing s, cmDateTo = dateOrNothing e }
@@ -473,11 +431,6 @@ render meta = case (cmEntityType meta, cmOperation meta) of
 
 renderParts :: Text -> Text -> CommandMeta -> [Maybe String]
 renderParts et op meta
-    -- Schedule-level assign/unassign: "assign <sched> <wid> <sid>"
-    | et == etSchedule && op == "assign" =
-        [ Just "assign", Just "?", fmap show (cmEntityId meta), fmap show (cmTargetId meta) ]
-    | et == etSchedule && op == "unassign" =
-        [ Just "unassign", Just "?", fmap show (cmEntityId meta), fmap show (cmTargetId meta) ]
     -- Absence type commands use "absence-type" prefix
     | et == etAbsence && "type-" `isPrefixOf` unpack op =
         [ Just "absence-type", Just (drop 5 (unpack op)) ]
@@ -497,10 +450,6 @@ renderParts et op meta
         [ Just "export" ]
     | et == etImportExport && op == "import" =
         [ Just "import" ]
-    -- Calendar commit has name placeholder
-    | et == etCalendar && op == "commit" =
-        [ Just "calendar", Just "commit", Just "?" ]
-        ++ dateParts meta
     -- What-if: "what-if <op> ..."
     | et == etWhatIf =
         [ Just "what-if", Just (unpack op) ]

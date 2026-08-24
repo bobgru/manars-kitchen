@@ -6,7 +6,6 @@ The following endpoint categories SHALL be restricted to users with `Admin` role
 - Skill CRUD: `POST /api/skills`, `DELETE /api/skills/:id`
 - Station CRUD: `POST /api/stations`, `DELETE /api/stations/:id`, `PUT /api/stations/:id/hours`, `PUT /api/stations/:id/closure`
 - Shift CRUD: `POST /api/shifts`, `DELETE /api/shifts/:name`
-- Schedule management: `DELETE /api/schedules/:name`
 - Draft management: `POST /api/drafts`, `POST /api/drafts/:id/generate`, `POST /api/drafts/:id/commit`, `DELETE /api/drafts/:id`
 - Calendar mutations: `POST /api/calendar/unfreeze`
 - Config writes: `PUT /api/config/:key`, `POST /api/config/presets/:name`, `POST /api/config/reset`, `PUT /api/config/pay-period`
@@ -40,7 +39,6 @@ The following read-only endpoints SHALL be accessible to all authenticated users
 - `GET /api/skills`
 - `GET /api/stations`
 - `GET /api/shifts`
-- `GET /api/schedules` and `GET /api/schedules/:name`
 - `GET /api/calendar` and `GET /api/calendar/history` and `GET /api/calendar/history/:id`
 - `GET /api/config`
 - `GET /api/calendar/freeze-status`

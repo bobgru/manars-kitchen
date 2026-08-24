@@ -67,9 +67,6 @@ logoutC          :: ClientM NoContent
 listSkillsC      :: ClientM [Skill]
 listStationsC    :: ClientM [StationResp]
 listShiftsC      :: ClientM [ShiftDef]
-listSchedulesC   :: ClientM [Text]
-getScheduleC     :: String -> ClientM Schedule
-_deleteScheduleC :: String -> ClientM NoContent
 listDraftsC      :: ClientM [DraftInfo]
 createDraftC     :: CreateDraftReq -> ClientM DraftCreatedResp
 getDraftC        :: Int -> ClientM DraftInfo
@@ -184,9 +181,6 @@ _rebaseHintsC :: HintSessionRef -> ClientM RebaseResultResp
 logoutC
     :<|> listStationsC
     :<|> listShiftsC
-    :<|> listSchedulesC
-    :<|> getScheduleC
-    :<|> _deleteScheduleC
     :<|> listDraftsC
     :<|> createDraftC
     :<|> getDraftC
@@ -314,9 +308,6 @@ _rpcViewDraftC :: RpcDraftId -> ClientM DraftInfo
 _rpcGenerateDraftC :: RpcDraftGenerate -> ClientM ScheduleResult
 _rpcCommitDraftC :: RpcDraftCommit -> ClientM RpcOk
 _rpcDiscardDraftC :: RpcDraftId -> ClientM RpcOk
-rpcListSchedulesC :: RpcEmpty -> ClientM [Text]
-_rpcViewScheduleC :: RpcScheduleName -> ClientM Schedule
-_rpcDeleteScheduleC :: RpcScheduleName -> ClientM RpcOk
 _rpcViewCalendarC :: RpcDateRange -> ClientM Schedule
 _rpcCalendarHistoryC :: RpcEmpty -> ClientM [CalendarCommit]
 _rpcUnfreezeC :: UnfreezeReq -> ClientM RpcOk
@@ -388,9 +379,6 @@ rpcCreateSkillC
     :<|> _rpcGenerateDraftC
     :<|> _rpcCommitDraftC
     :<|> _rpcDiscardDraftC
-    :<|> rpcListSchedulesC
-    :<|> _rpcViewScheduleC
-    :<|> _rpcDeleteScheduleC
     :<|> _rpcViewCalendarC
     :<|> _rpcCalendarHistoryC
     :<|> _rpcUnfreezeC
@@ -566,10 +554,6 @@ spec = do
             result <- runClientM listShiftsC env
             result `shouldBe` Right []
 
-        it "GET /api/schedules returns empty list" $ withTestApp $ \env -> do
-            result <- runClientM listSchedulesC env
-            result `shouldBe` Right []
-
         it "GET /api/drafts returns empty list" $ withTestApp $ \env -> do
             result <- runClientM listDraftsC env
             result `shouldBe` Right []
@@ -589,11 +573,6 @@ spec = do
                 Right params -> length params `shouldSatisfy` (> 0)
 
     describe "Error responses" $ do
-        it "GET /api/schedules/:name returns 404 for missing schedule" $
-            withTestApp $ \env -> do
-                result <- runClientM (getScheduleC "nonexistent") env
-                result `shouldFailWith` 404
-
         it "GET /api/drafts/:id returns 404 for missing draft" $
             withTestApp $ \env -> do
                 result <- runClientM (getDraftC 999) env
@@ -929,7 +908,6 @@ spec = do
                 Right _ <- runClientM (rpcListSkillsC RpcEmpty) wEnv
                 Right _ <- runClientM (rpcListStationsC RpcEmpty) wEnv
                 Right _ <- runClientM (rpcListShiftsC RpcEmpty) wEnv
-                Right _ <- runClientM (rpcListSchedulesC RpcEmpty) wEnv
                 Right _ <- runClientM (rpcListDraftsC RpcEmpty) wEnv
                 Right _ <- runClientM (rpcShowConfigC RpcEmpty) wEnv
                 Right _ <- runClientM (rpcFreezeStatusC RpcEmpty) wEnv

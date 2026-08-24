@@ -39,7 +39,6 @@ library
                      , Repo.SQLite
                      , Service.Auth
                      , Service.User
-                     , Service.Schedule
                      , Service.Worker
                      , Service.Absence
                      , Service.Config

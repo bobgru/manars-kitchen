@@ -30,7 +30,6 @@ import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
 import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), SessionId(..), HintSessionRecord(..), WorkerSummary(..))
 import qualified Service.Worker as SW
 import qualified Service.User as SU
-import qualified Service.Schedule as SS
 import qualified Service.Draft as SD
 import qualified Service.Calendar as SC
 import qualified Service.Absence as SA
@@ -115,9 +114,6 @@ server execEnv cmdBus repo user =
     -- Original endpoints
     :<|> handleListStations repo
     :<|> handleListShifts repo
-    :<|> handleListSchedules repo
-    :<|> handleGetSchedule repo
-    :<|> handleDeleteSchedule cmdBus repo user
     :<|> handleListDrafts repo
     :<|> handleCreateDraft repo user
     :<|> handleGetDraft repo
@@ -245,27 +241,6 @@ handleListStations repo = do
 
 handleListShifts :: Repository -> Handler [ShiftDef]
 handleListShifts repo = liftIO $ repoLoadShifts repo
-
--- -----------------------------------------------------------------
--- Schedules
--- -----------------------------------------------------------------
-
-handleListSchedules :: Repository -> Handler [T.Text]
-handleListSchedules repo = liftIO $ SS.listSchedules repo
-
-handleGetSchedule :: Repository -> String -> Handler Schedule
-handleGetSchedule repo name = do
-    mSched <- liftIO $ SS.getSchedule repo (T.pack name)
-    case mSched of
-        Nothing -> throwApiError (NotFound ("Schedule not found: " ++ name))
-        Just s  -> pure s
-
-handleDeleteSchedule :: TopicBus CommandEvent -> Repository -> User -> String -> Handler NoContent
-handleDeleteSchedule cmdBus repo user name = do
-    requireAdmin user
-    liftIO $ SS.deleteSchedule repo (T.pack name)
-    logRest cmdBus user ("schedule delete " ++ shellQuote name)
-    pure NoContent
 
 -- -----------------------------------------------------------------
 -- Drafts
@@ -816,7 +791,7 @@ handleRollbackCheckpoint cmdBus repo user name = do
 handleExport :: Repository -> User -> Handler ExportResp
 handleExport repo user = do
     requireAdmin user
-    dat <- liftIO $ Exp.gatherExport repo Nothing
+    dat <- liftIO $ Exp.gatherExport repo
     pure (ExportResp dat)
 
 handleImport :: TopicBus CommandEvent -> Repository -> User -> ImportReq -> Handler ImportResp
@@ -1099,7 +1074,6 @@ toWorkerRefsResp r = WorkerReferencesResp
         [ countTxt "pinned"   (SW.wrPinned r)
         , countTxt "calendar" (SW.wrCalendar r)
         , countTxt "draft"    (SW.wrDraft r)
-        , countTxt "schedule" (SW.wrSchedule r)
         , countTxt "absence"  (SW.wrAbsence r)
         , countTxt "yearly allowances" (SW.wrAllowances r)
         ]

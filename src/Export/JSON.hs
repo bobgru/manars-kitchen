@@ -6,7 +6,6 @@ module Export.JSON
     , ExportSkill(..)
     , ExportStation(..)
     , ExportWorker(..)
-    , ExportAssignment(..)
     , ExportAbsenceType(..)
     , encodeExport
     , decodeExport
@@ -24,7 +23,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (Day, DayOfWeek(..), TimeOfDay(..), formatTime, defaultTimeLocale, parseTimeM)
+import Data.Time (DayOfWeek(..))
 import GHC.Generics (Generic)
 
 import Domain.Types
@@ -45,7 +44,6 @@ data ExportData = ExportData
     , expStations         :: [ExportStation]
     , expWorkers          :: [ExportWorker]
     , expAbsenceTypes     :: [ExportAbsenceType]
-    , expSchedules        :: Map.Map Text [ExportAssignment]
     } deriving (Show, Generic)
 
 data ExportSkill = ExportSkill
@@ -74,14 +72,6 @@ data ExportWorker = ExportWorker
     , ewShiftPrefs      :: [Text]
     } deriving (Show, Generic)
 
-data ExportAssignment = ExportAssignment
-    { eaWorker   :: Int
-    , eaStation  :: Int
-    , eaDate     :: Text
-    , eaStart    :: Text
-    , eaDuration :: Int
-    } deriving (Show, Generic)
-
 data ExportAbsenceType = ExportAbsenceType
     { eatId          :: Int
     , eatName        :: Text
@@ -100,7 +90,6 @@ instance ToJSON ExportData where
         , "stations"          .= expStations d
         , "workers"           .= expWorkers d
         , "absenceTypes"      .= expAbsenceTypes d
-        , "schedules"         .= expSchedules d
         ]
 
 instance FromJSON ExportData where
@@ -110,8 +99,9 @@ instance FromJSON ExportData where
         st   <- v .:? "stations"         >>= pure . maybe [] id
         wk   <- v .:? "workers"          >>= pure . maybe [] id
         at   <- v .:? "absenceTypes"     >>= pure . maybe [] id
-        sch  <- v .:? "schedules"        >>= pure . maybe Map.empty id
-        pure $ ExportData sk imps st wk at sch
+        -- A "schedules" key written by a pre-2026-08-23 build is ignored:
+        -- named schedules were removed and there is nowhere to put them.
+        pure $ ExportData sk imps st wk at
       where
         parseImp = withObject "implication" $ \v ->
             (,) <$> v .: "from" <*> v .: "to"
@@ -168,21 +158,6 @@ instance FromJSON ExportWorker where
                      <*> (v .:? "prefersVariety" >>= pure . maybe False id)
                      <*> (v .:? "shiftPrefs" >>= pure . maybe [] id)
 
-instance ToJSON ExportAssignment where
-    toJSON a = object
-        [ "worker"   .= eaWorker a
-        , "station"  .= eaStation a
-        , "date"     .= eaDate a
-        , "start"    .= eaStart a
-        , "duration" .= eaDuration a
-        ]
-
-instance FromJSON ExportAssignment where
-    parseJSON = withObject "ExportAssignment" $ \v ->
-        ExportAssignment <$> v .: "worker" <*> v .: "station"
-                         <*> v .: "date" <*> v .: "start"
-                         <*> (v .:? "duration" >>= pure . maybe 3600 id)
-
 instance ToJSON ExportAbsenceType where
     toJSON a = object
         [ "id"          .= eatId a
@@ -209,8 +184,8 @@ decodeExport = decode
 -- Gather export data from repository
 -- -----------------------------------------------------------------
 
-gatherExport :: Repository -> Maybe Text -> IO ExportData
-gatherExport repo mSchedName = do
+gatherExport :: Repository -> IO ExportData
+gatherExport repo = do
     -- Skills
     skillList <- repoListSkills repo
     let expSk = [ ExportSkill sid nm desc
@@ -259,25 +234,7 @@ gatherExport repo mSchedName = do
     let expAt = [ ExportAbsenceType tid (atName at) (atYearlyLimit at)
                 | (AbsenceTypeId tid, at) <- Map.toList (acTypes absCtx) ]
 
-    -- Schedules
-    schedNames <- case mSchedName of
-        Just n  -> pure [n]
-        Nothing -> repoListSchedules repo
-
-    scheds <- fmap Map.fromList $ mapM (\nm -> do
-        ms <- repoLoadSchedule repo nm
-        let assignments = case ms of
-                Nothing -> []
-                Just (Schedule as) ->
-                    [ ExportAssignment w s
-                        (T.pack $ formatTime defaultTimeLocale "%Y-%m-%d" (slotDate sl))
-                        (T.pack $ formatTime defaultTimeLocale "%H:%M" (slotStart sl))
-                        (round (toRational (slotDuration sl)))
-                    | Assignment (WorkerId w) (StationId s) sl <- Set.toList as ]
-        pure (nm, assignments)
-        ) schedNames
-
-    pure $ ExportData expSk expImps expSt expWk expAt scheds
+    pure $ ExportData expSk expImps expSt expWk expAt
 
 roleStr :: Role -> Text
 roleStr Admin  = "admin"
@@ -298,7 +255,6 @@ applyImport repo dat = do
         , map importImplication (expSkillImplications dat)
         , map (importWorker existingWorkers) (expWorkers dat)
         , map importAbsenceType (expAbsenceTypes dat)
-        , map (uncurry importSchedule) (Map.toList (expSchedules dat))
         ]
     pure msgs
   where
@@ -398,19 +354,3 @@ applyImport repo dat = do
         repoSaveAbsenceCtx repo ctx'
         pure ("Imported absence type: " ++ T.unpack nm)
 
-    importSchedule nm assignments = do
-        let parsed = [ Assignment (WorkerId (eaWorker a)) (StationId (eaStation a))
-                        (Slot day start (fromIntegral (eaDuration a)))
-                     | a <- assignments
-                     , Just day <- [parseDay' (eaDate a)]
-                     , Just start <- [parseTime' (eaStart a)]
-                     ]
-        repoSaveSchedule repo nm (Schedule (Set.fromList parsed))
-        pure ("Imported schedule '" ++ T.unpack nm ++ "' with "
-             ++ show (length parsed) ++ " assignments")
-
-parseDay' :: Text -> Maybe Day
-parseDay' = parseTimeM True defaultTimeLocale "%Y-%m-%d" . T.unpack
-
-parseTime' :: Text -> Maybe TimeOfDay
-parseTime' = parseTimeM True defaultTimeLocale "%H:%M" . T.unpack

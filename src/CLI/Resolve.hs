@@ -85,8 +85,6 @@ commandEntityMap =
     , (["skill", "force-delete"],           [Resolve ESkill])
     , (["skill", "implication"],           [Resolve ESkill, Resolve ESkill])
     , (["skill", "remove-implication"],  [Resolve ESkill, Resolve ESkill])
-    , (["assign"],                         [Skip, Resolve EWorker, Resolve EStation, Skip, Skip])
-    , (["unassign"],                       [Skip, Resolve EWorker, Resolve EStation, Skip, Skip])
     , (["absence", "set-allowance"],       [Resolve EWorker, Resolve EAbsenceType, Skip])
     , (["absence", "request"],             [Resolve EAbsenceType, Resolve EWorker, Skip, Skip])
     , (["vacation", "remaining"],          [Resolve EAbsenceType])

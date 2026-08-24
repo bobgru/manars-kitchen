@@ -48,10 +48,6 @@ type RawAPI =
     :<|> "api" :> "stations" :> Get '[JSON] [StationResp]
     -- Shifts (read)
     :<|> "api" :> "shifts" :> Get '[JSON] [ShiftDef]
-    -- Schedules
-    :<|> "api" :> "schedules" :> Get '[JSON] [Text]
-    :<|> "api" :> "schedules" :> Capture "name" String :> Get '[JSON] Schedule
-    :<|> "api" :> "schedules" :> Capture "name" String :> DeleteNoContent
     -- Drafts
     :<|> "api" :> "drafts" :> Get '[JSON] [DraftInfo]
     :<|> "api" :> "drafts" :> ReqBody '[JSON] CreateDraftReq :> Post '[JSON] DraftCreatedResp

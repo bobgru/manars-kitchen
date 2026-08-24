@@ -17,17 +17,17 @@ spec = do
     describe "classify" $ do
         -- 8.1: One test per command group
 
-        describe "schedule commands" $ do
-            it "classifies schedule create as mutating" $ do
-                let m = classify "schedule create week1 2026-04-06"
+        describe "group-less commands" $ do
+            it "keeps the schedule entity type for audit" $ do
+                let m = classify "audit"
                 cmEntityType m `shouldBe` Just "schedule"
-                cmOperation m `shouldBe` Just "create"
-                cmIsMutation m `shouldBe` True
+                cmOperation m `shouldBe` Just "audit"
+                cmIsMutation m `shouldBe` False
 
-            it "classifies schedule list as non-mutating" $ do
-                let m = classify "schedule list"
-                cmEntityType m `shouldBe` Just "schedule"
-                cmOperation m `shouldBe` Just "list"
+            it "has no schedule grammar left to classify" $ do
+                let m = classify "schedule create week1 2026-04-06"
+                cmEntityType m `shouldBe` Nothing
+                cmOperation m `shouldBe` Nothing
                 cmIsMutation m `shouldBe` False
 
         describe "station commands" $ do
@@ -160,13 +160,19 @@ spec = do
                 cmIsMutation m `shouldBe` True
 
         describe "calendar commands" $ do
-            it "classifies calendar commit with dates" $ do
+            it "classifies calendar view with dates" $ do
+                let m = classify "calendar view 2026-04-06 2026-04-12"
+                cmEntityType m `shouldBe` Just "calendar"
+                cmOperation m `shouldBe` Just "view"
+                cmIsMutation m `shouldBe` False
+
+            -- `calendar commit <name> ...` went away with named schedules; the
+            -- catch-all arm still names the operation but never mutates.
+            it "treats calendar commit as a non-mutating unknown subcommand" $ do
                 let m = classify "calendar commit week1 2026-04-06 2026-04-12 Initial schedule"
                 cmEntityType m `shouldBe` Just "calendar"
                 cmOperation m `shouldBe` Just "commit"
-                cmDateFrom m `shouldBe` Just "2026-04-06"
-                cmDateTo m `shouldBe` Just "2026-04-12"
-                cmIsMutation m `shouldBe` True
+                cmIsMutation m `shouldBe` False
 
         describe "pin commands" $ do
             it "classifies pin as mutating with IDs" $ do
@@ -292,8 +298,6 @@ spec = do
         testConsistency "calendar unfreeze 2026-04-10"
 
         -- Non-mutating commands
-        testConsistency "schedule list"
-        testConsistency "schedule view week1"
         testConsistency "station list"
         testConsistency "station view grill"
         testConsistency "skill list"
@@ -363,11 +367,8 @@ spec = do
                 , "draft generate"
                 , "draft commit"
                 , "draft discard"
-                , "calendar commit w1 2026-04-06 2026-04-12"
                 , "calendar unfreeze 2026-04-10"
                 , "what-if apply"
-                , "assign sched 1 2 2026-04-06 8"
-                , "unassign sched 1 2 2026-04-06 8"
                 ]
         mapM_ (\cmdStr ->
             it ("has entity type for: " ++ cmdStr) $

@@ -61,7 +61,7 @@ and `/rpc` requests to the backend at http://localhost:8080 (start
 ```
 $ make run
 manars> help                  # show command groups
-manars> help schedule         # show commands in a group
+manars> help draft            # show commands in a group
 ```
 
 Log in as `admin/admin` (created automatically). From there you can
@@ -81,18 +81,20 @@ The `help` command shows a summary of command groups. Use
 manars> help
 Command groups (type 'help <group>' for details):
 
-  schedule    Schedule creation, viewing, and management
+  draft       Draft scheduling sessions (staging area)
+  calendar    Calendar viewing, history, and freeze control
   worker      Worker skills, hours, preferences, and pairings
   skill       Skill definitions and implications
   station     Station setup, hours, and requirements
   ...
 
-manars> help schedule
-  schedule list                   List saved schedules
-  schedule view <name>            View a schedule (table)
-  schedule view-by-worker <name>  View schedule grouped by worker
-  schedule view-compact <name>    View schedule (compact, 100-col)
-  schedule diagnose <name>        Diagnose unfilled positions
+manars> help draft
+  draft create <start> <end> [--force]  Create a draft for date range
+  draft list                            List active drafts
+  draft view [id]                       View draft assignments (table)
+  draft view-compact [id]               View draft assignments (compact)
+  draft generate [id]                   Run scheduler within draft
+  draft commit [id] [note]              Commit draft to calendar
   ...
 ```
 
@@ -129,11 +131,13 @@ manars> context clear
 
 ### Compact schedule display
 
-`schedule view-compact` shows the same data as `schedule view` in a
-narrower format (fits in 100 columns) using abbreviated worker names:
+`draft view-compact` and `calendar view-compact` show the same data as
+their plain `view` counterparts in a narrower format (fits in 100
+columns) using abbreviated worker names:
 
 ```
-schedule view-compact week1
+draft view-compact 1
+calendar view-compact 2026-04-06 2026-04-12
 ```
 
 ### Checkpoints
@@ -146,7 +150,7 @@ manars> checkpoint create before-overtime
 Checkpoint created: before-overtime
 
 manars> worker set-overtime 2 on
-manars> schedule create week1-v2 2026-04-06
+manars> draft create 2026-04-06 2026-04-12
 
 manars> checkpoint rollback before-overtime
 Rolled back to: before-overtime
@@ -253,22 +257,34 @@ check.
 
 ### 4. Generate a schedule
 
+Every schedule is built inside a **draft** -- a staging area that holds
+assignments until they are committed to the calendar:
+
 ```
-schedule create week1 2026-04-06
+draft create 2026-04-06 2026-04-12
+draft generate 1
 ```
 
-This generates 1-hour slots for the week containing the given date,
-then runs the multi-phase scheduling algorithm. The result includes
-assignments, unfilled positions, and overtime hours.
+`draft create` generates 1-hour slots for the date range; `draft
+generate` runs the multi-phase scheduling algorithm over them. The
+result includes assignments, unfilled positions, and overtime hours.
 
 ### 5. Review
 
 ```
-schedule view week1              # time-slot grid
-schedule view-by-worker week1    # grouped by worker
-schedule view-by-station week1   # grouped by station
-schedule hours week1             # per-worker hour summary
-schedule diagnose week1          # coverage analysis + suggestions
+draft view 1                     # time-slot grid
+draft view-compact 1             # compact grid (100-col)
+draft hours 1                    # per-worker hour summary
+draft diagnose 1                 # coverage analysis + suggestions
+```
+
+Once a draft is committed the same views are available over the
+calendar, plus per-worker and per-station groupings:
+
+```
+calendar view 2026-04-06 2026-04-12
+calendar view-by-worker 2026-04-06 2026-04-12
+calendar view-by-station 2026-04-06 2026-04-12
 ```
 
 The diagnosis engine classifies each unfilled position (no qualified
@@ -293,19 +309,12 @@ fills around them.
 ### 7. Calendar and drafts
 
 The **calendar** is a continuous timeline of committed schedules. Once
-a schedule is committed, it becomes the official record for that date
+a draft is committed, it becomes the official record for that date
 range.
 
-```
-calendar commit week1 2026-04-06 2026-04-12 initial week 1
-calendar view 2026-04-06 2026-04-12
-calendar hours 2026-04-06 2026-04-12
-calendar history
-```
-
-**Drafts** are non-overlapping weekly schedules under development.
-Create a draft, generate a schedule inside it, review, and commit when
-ready:
+**Drafts** are non-overlapping schedules under development, and the
+only way into the calendar. Create a draft, generate a schedule inside
+it, review, and commit when ready:
 
 ```
 draft create 2026-04-13 2026-04-19
@@ -313,6 +322,12 @@ draft generate 1
 draft view-compact 1
 draft hours 1
 draft commit 1 week 2 via draft
+```
+
+```
+calendar view 2026-04-06 2026-04-12
+calendar hours 2026-04-06 2026-04-12
+calendar history
 ```
 
 Drafts support **cross-draft validation**: when you commit one draft
@@ -366,7 +381,6 @@ config show-pay-period
 ### 10. Import / export
 
 ```
-export week1 schedule.json    # export one schedule
 export all-data.json          # export everything
 import backup.json            # merge into current database
 import demo-export.json       # import data from a demo run
@@ -607,7 +621,6 @@ src/
     PayPeriod.hs             Pay period tracking
   Service/
     Auth.hs                  Login, user management
-    Schedule.hs              Schedule CRUD (repo-backed)
     Worker.hs                Worker configuration (repo-backed)
     Absence.hs               Absence operations (repo-backed)
     Config.hs                Config persistence

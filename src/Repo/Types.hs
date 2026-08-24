@@ -179,15 +179,6 @@ data Repository = Repository
     , repoLoadShifts     :: IO [ShiftDef]
 
       -- ---------------------------------------------------------------
-      -- Schedules
-      -- ---------------------------------------------------------------
-    , repoSaveSchedule   :: Text -> Schedule -> IO ()
-      -- ^ Save a schedule under a name (overwrites if exists).
-    , repoLoadSchedule   :: Text -> IO (Maybe Schedule)
-    , repoListSchedules  :: IO [Text]
-    , repoDeleteSchedule :: Text -> IO ()
-
-      -- ---------------------------------------------------------------
       -- Scheduler config
       -- ---------------------------------------------------------------
     , repoSaveSchedulerConfig :: SchedulerConfig -> IO ()
