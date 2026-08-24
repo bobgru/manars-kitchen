@@ -9,6 +9,7 @@ module Server.Json
     , RequestAbsenceReq(..)
       -- * Response types (existing)
     , DraftCreatedResp(..)
+    , FrozenDatesResp(..)
     , AbsenceCreatedResp(..)
       -- * Skill / Station / Shift CRUD
     , CreateSkillReq(..)
@@ -373,8 +374,11 @@ instance FromJSON CreateDraftReq where
     parseJSON = withObject "CreateDraftReq" $ \v ->
         CreateDraftReq <$> v .: "dateFrom" <*> v .: "dateTo"
 
+-- | @workerIds@ is optional: absent means "the active workers", resolved in
+-- 'Service.Draft.generateDraft'. A caller that wants the default should omit the
+-- key rather than send an empty list, which means "nobody".
 data GenerateDraftReq = GenerateDraftReq
-    { gdrWorkerIds :: ![Int]
+    { gdrWorkerIds :: !(Maybe [Int])
     } deriving (Show)
 
 instance ToJSON GenerateDraftReq where
@@ -382,7 +386,7 @@ instance ToJSON GenerateDraftReq where
 
 instance FromJSON GenerateDraftReq where
     parseJSON = withObject "GenerateDraftReq" $ \v ->
-        GenerateDraftReq <$> v .: "workerIds"
+        GenerateDraftReq <$> v .:? "workerIds"
 
 data CommitDraftReq = CommitDraftReq
     { cmrNote :: !T.Text
@@ -427,6 +431,35 @@ instance ToJSON DraftCreatedResp where
 instance FromJSON DraftCreatedResp where
     parseJSON = withObject "DraftCreatedResp" $ \v ->
         DraftCreatedResp <$> v .: "id"
+
+-- | 409 body for a draft creation refused by the freeze line.
+--
+-- Carries @error@ so that a client which only reads that key still shows
+-- something useful, and the three dates so that a client can name the range or
+-- offer an unfreeze affordance later. Neither force nor unfreeze is reachable
+-- over HTTP, so this is terminal for a REST caller.
+data FrozenDatesResp = FrozenDatesResp
+    { fdrError      :: !T.Text
+    , fdrFreezeLine :: !Day
+    , fdrFrozenFrom :: !Day
+    , fdrFrozenTo   :: !Day
+    } deriving (Show, Eq)
+
+instance ToJSON FrozenDatesResp where
+    toJSON r = object
+        [ "error"      .= fdrError r
+        , "freezeLine" .= fdrFreezeLine r
+        , "frozenFrom" .= fdrFrozenFrom r
+        , "frozenTo"   .= fdrFrozenTo r
+        ]
+
+instance FromJSON FrozenDatesResp where
+    parseJSON = withObject "FrozenDatesResp" $ \v ->
+        FrozenDatesResp
+            <$> v .: "error"
+            <*> v .: "freezeLine"
+            <*> v .: "frozenFrom"
+            <*> v .: "frozenTo"
 
 data AbsenceCreatedResp = AbsenceCreatedResp
     { acrId :: !Int

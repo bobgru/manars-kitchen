@@ -56,6 +56,17 @@ apr d = fromGregorian 2026 4 d
 may :: Int -> Day
 may d = fromGregorian 2026 5 d
 
+-- | Create a draft, forcing past the freeze line, and flatten the refusal to a
+-- string for 'expectationFailure'. The fixture dates are fixed 2026 dates and
+-- so frozen for any run after them; the alternating-weekend reasoning these
+-- tests depend on would be unreadable with dates relative to today.
+createForced :: Repository -> Day -> Day -> IO (Either String Int)
+createForced repo from to =
+    either (Left . show) Right
+        <$> Draft.createDraft repo opts from to
+  where
+    opts = Draft.defaultCreateDraftOpts { Draft.cdoForce = True }
+
 -- Workers
 w_marco, w_lucia, w_carol :: WorkerId
 w_marco = WorkerId 5
@@ -204,7 +215,7 @@ spec = do
         it "returns empty when calendar has not changed since draft creation" $
             withTestRepo $ \repo -> do
                 -- Create a draft (no calendar changes)
-                result <- Draft.createDraft repo (may 1) (may 31)
+                result <- createForced repo (may 1) (may 31)
                 case result of
                     Left err -> expectationFailure err
                     Right did -> do
@@ -214,7 +225,7 @@ spec = do
         it "removes violating assignments and returns violations when calendar changed" $
             withTestRepo $ \repo -> do
                 -- Create a May draft
-                result <- Draft.createDraft repo (may 1) (may 31)
+                result <- createForced repo (may 1) (may 31)
                 case result of
                     Left err -> expectationFailure err
                     Right did -> do
@@ -255,7 +266,7 @@ spec = do
 
         it "returns empty on second call when no further calendar changes" $
             withTestRepo $ \repo -> do
-                result <- Draft.createDraft repo (may 1) (may 31)
+                result <- createForced repo (may 1) (may 31)
                 case result of
                     Left err -> expectationFailure err
                     Right did -> do

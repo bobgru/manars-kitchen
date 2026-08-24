@@ -8,7 +8,8 @@ import Control.Concurrent.MVar (newEmptyMVar, putMVar, tryTakeMVar)
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time (Day, fromGregorian)
+import Data.Time (Day, fromGregorian, addDays)
+import Data.Time.Clock (getCurrentTime, utctDay)
 import Data.Proxy (Proxy(..))
 import qualified Data.ByteString.Char8 as BS8
 import Network.HTTP.Client (ManagerSettings, newManager, defaultManagerSettings, managerModifyRequest, requestHeaders, parseRequest, httpLbs, responseStatus, responseBody, responseOpen, responseClose, brRead)
@@ -33,7 +34,7 @@ import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
 import Domain.Pin (PinnedAssignment)
 import Domain.Absence (AbsenceType(..), AbsenceContext(..), AbsenceRequest, emptyAbsenceContext)
-import Domain.Scheduler (ScheduleResult)
+import Domain.Scheduler (ScheduleResult(..))
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..))
 import Service.Auth (register)
@@ -535,6 +536,19 @@ apr d = fromGregorian 2026 4 d
 may :: Int -> Day
 may d = fromGregorian 2026 5 d
 
+-- | A date @n@ days from today.
+--
+-- REST offers neither force nor unfreeze, so a draft whose range reaches back
+-- past the freeze line is refused outright. Any test that must create a draft
+-- has to pick dates relative to the run, not the fixed 2026 dates used
+-- elsewhere in this module for ranges that are only read.
+fromToday :: Integer -> IO Day
+fromToday n = addDays n . utctDay <$> getCurrentTime
+
+-- | A future week, far enough out that no test's draft touches frozen dates.
+futureWeek :: IO (Day, Day)
+futureWeek = (,) <$> fromToday 30 <*> fromToday 36
+
 -- -----------------------------------------------------------------
 -- Specs
 -- -----------------------------------------------------------------
@@ -585,8 +599,9 @@ spec = do
 
     describe "Draft lifecycle" $ do
         it "create -> get -> discard" $ withTestApp $ \env -> do
+            (from, to) <- futureWeek
             -- Create
-            Right resp <- runClientM (createDraftC (CreateDraftReq (apr 6) (apr 12))) env
+            Right resp <- runClientM (createDraftC (CreateDraftReq from to)) env
             let did = dcrId resp
             -- Get
             Right _draft <- runClientM (getDraftC did) env
@@ -597,8 +612,20 @@ spec = do
             result `shouldFailWith` 404
 
         it "overlapping draft returns 409" $ withTestApp $ \env -> do
-            Right _ <- runClientM (createDraftC (CreateDraftReq (apr 6) (apr 12))) env
-            result <- runClientM (createDraftC (CreateDraftReq (apr 10) (apr 16))) env
+            (from, to) <- futureWeek
+            overlapFrom <- fromToday 34
+            overlapTo <- fromToday 40
+            Right _ <- runClientM (createDraftC (CreateDraftReq from to)) env
+            result <- runClientM
+                (createDraftC (CreateDraftReq overlapFrom overlapTo)) env
+            result `shouldFailWith` 409
+
+        -- REST has no force flag and no way to unfreeze, so a past range is a
+        -- dead end rather than a prompt.
+        it "draft over frozen dates returns 409" $ withTestApp $ \env -> do
+            from <- fromToday (-10)
+            to <- fromToday (-4)
+            result <- runClientM (createDraftC (CreateDraftReq from to)) env
             result `shouldFailWith` 409
 
         it "generate populates schedule" $ withSeededApp $ \repo env -> do
@@ -610,17 +637,38 @@ spec = do
                 (Set.singleton (SkillId 1))
             SW.setStationHours repo sid 9 12
             -- Create and generate
-            Right resp <- runClientM (createDraftC (CreateDraftReq (may 4) (may 10))) env
+            (from, to) <- futureWeek
+            Right resp <- runClientM (createDraftC (CreateDraftReq from to)) env
             let did = dcrId resp
             Right _ <- runClientM
-                (generateDraftC did (GenerateDraftReq [1])) env
+                (generateDraftC did (GenerateDraftReq (Just [1]))) env
             -- Clean up
             _ <- runClientM (discardDraftC did) env
             pure ()
 
+        -- Omitting workerIds means the active workers, so this must produce a
+        -- non-empty schedule without the client naming anyone.
+        it "generate without workerIds uses the active workers" $
+            withSeededApp $ \repo env -> do
+                _ <- SW.addSkill repo "grill" ""
+                sid <- SW.addStation repo "grill" 1 1
+                SW.grantWorkerSkill repo (WorkerId 1) (SkillId 1)
+                SW.setStationRequiredSkills repo sid
+                    (Set.singleton (SkillId 1))
+                SW.setStationHours repo sid 9 12
+                (from, to) <- futureWeek
+                Right resp <- runClientM (createDraftC (CreateDraftReq from to)) env
+                let did = dcrId resp
+                Right result <- runClientM
+                    (generateDraftC did (GenerateDraftReq Nothing)) env
+                Set.null (unSchedule (srSchedule result)) `shouldBe` False
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
         it "commit moves assignments to calendar" $ withSeededApp $ \_ env -> do
             -- Create draft
-            Right resp <- runClientM (createDraftC (CreateDraftReq (may 4) (may 10))) env
+            (from, to) <- futureWeek
+            Right resp <- runClientM (createDraftC (CreateDraftReq from to)) env
             let did = dcrId resp
             -- Commit
             Right _ <- runClientM
@@ -862,8 +910,9 @@ spec = do
                 Right _ <- runClientM (rpcExportAllC RpcEmpty) aEnv
                 Right _ <- runClientM
                     (rpcSetConfigC (RpcConfigSet "shift-pref-bonus" 5.0)) aEnv
+                (from, to) <- futureWeek
                 Right _ <- runClientM
-                    (rpcCreateDraftC (CreateDraftReq (apr 6) (apr 12))) aEnv
+                    (rpcCreateDraftC (CreateDraftReq from to)) aEnv
                 pure ()
 
         it "normal user is refused admin-only RPC endpoints" $

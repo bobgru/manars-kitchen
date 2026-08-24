@@ -8,9 +8,11 @@ import Data.Time
     ( Day, TimeOfDay(..), fromGregorian, toGregorian
     , addDays, gregorianMonthLength
     )
+import Data.Time.Clock (getCurrentTime, utctDay)
 
+import Auth.Types (UserId(..))
 import Domain.Types
-    ( WorkerId(..), StationId(..)
+    ( WorkerId(..), StationId(..), WorkerStatus(..)
     , Slot(..), Assignment(..), Schedule(..)
     )
 import Repo.SQLite (mkSQLiteRepo)
@@ -18,6 +20,7 @@ import Repo.Types (Repository(..), DraftInfo(..))
 import Domain.SchedulerConfig (SchedulerConfig(..))
 import qualified Service.Draft as Draft
 import qualified Service.Calendar as Cal
+import qualified Service.FreezeLine as Freeze
 import qualified Service.Worker as SW
 import Service.PubSub
     ( TopicBus, ProgressEvent(..), newTopicBus, subscribe )
@@ -79,6 +82,26 @@ apr d = fromGregorian 2026 4 d
 may :: Int -> Day
 may d = fromGregorian 2026 5 d
 
+-- | A date @n@ days from today, for the tests that need one the freeze line
+-- cannot reach. Named apart from the @today@ locals below, which are fixtures
+-- standing in for a particular Wednesday.
+fromToday :: Integer -> IO Day
+fromToday n = addDays n . utctDay <$> getCurrentTime
+
+-- | Create a draft, forcing past the freeze line, and flatten the refusal to a
+-- string for 'expectationFailure'.
+--
+-- Every fixture date in this module is a fixed 2026 date, so it is frozen for
+-- any run after it — but the freeze line is not what these tests are about, and
+-- pinning them to relative dates would make the Mon-Fri reasoning below
+-- unreadable.
+createForced :: Repository -> Day -> Day -> IO (Either String Int)
+createForced repo from to =
+    either (Left . show) Right
+        <$> Draft.createDraft repo opts from to
+  where
+    opts = Draft.defaultCreateDraftOpts { Draft.cdoForce = True }
+
 spec :: Spec
 spec = do
     -- ---------------------------------------------------------------
@@ -131,7 +154,7 @@ spec = do
     describe "Draft create/list/delete round-trip" $ do
         it "creates, lists, and deletes a draft" $ withTestRepo $ \repo -> do
             -- Create
-            result <- Draft.createDraft repo (apr 1) (apr 30)
+            result <- createForced repo (apr 1) (apr 30)
             case result of
                 Left err -> expectationFailure err
                 Right did -> do
@@ -149,39 +172,111 @@ spec = do
                     drafts' <- Draft.listDrafts repo
                     length drafts' `shouldBe` 0
 
+    describe "Freeze line on create" $ do
+        -- Without force, the fixture dates are in the past and refused. The
+        -- refusal names the frozen sub-range so a caller can report it.
+        it "refuses a frozen range and names it" $ withTestRepo $ \repo -> do
+            freezeLine <- Freeze.computeFreezeLine
+            result <- Draft.createDraft repo Draft.defaultCreateDraftOpts
+                            (apr 1) (apr 30)
+            case result of
+                Right _ -> expectationFailure "Expected a frozen-dates refusal"
+                Left Draft.DraftOverlapsExisting ->
+                    expectationFailure "Expected frozen dates, got an overlap"
+                Left (Draft.DraftCoversFrozenDates fr) -> do
+                    Draft.frFreezeLine fr `shouldBe` freezeLine
+                    Draft.frFrom fr `shouldBe` apr 1
+                    Draft.frTo fr `shouldBe` apr 30
+            -- The refusal wrote nothing.
+            drafts <- Draft.listDrafts repo
+            length drafts `shouldBe` 0
+
+        it "creates a range entirely after the freeze line without force" $
+            withTestRepo $ \repo -> do
+                from <- fromToday 30
+                to <- fromToday 36
+                result <- Draft.createDraft repo Draft.defaultCreateDraftOpts from to
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right _  -> do
+                        drafts <- Draft.listDrafts repo
+                        length drafts `shouldBe` 1
+
+        -- An unfreeze covering every frozen date is as good as force, which is
+        -- what makes `calendar unfreeze` followed by `draft create` work.
+        it "creates a frozen range when the caller has unfrozen it" $
+            withTestRepo $ \repo -> do
+                let opts = Draft.defaultCreateDraftOpts
+                        { Draft.cdoUnfreezes = Set.singleton (apr 1, apr 30) }
+                result <- Draft.createDraft repo opts (apr 1) (apr 30)
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right _  -> do
+                        drafts <- Draft.listDrafts repo
+                        length drafts `shouldBe` 1
+
     describe "Non-overlapping constraint" $ do
         it "rejects overlapping date ranges" $ withTestRepo $ \repo -> do
-            result1 <- Draft.createDraft repo (apr 1) (apr 30)
+            result1 <- createForced repo (apr 1) (apr 30)
             case result1 of
                 Left err -> expectationFailure err
                 Right _ -> do
                     -- Try to create an overlapping draft
-                    result2 <- Draft.createDraft repo (apr 15) (may 15)
+                    result2 <- createForced repo (apr 15) (may 15)
                     case result2 of
                         Left _  -> return ()  -- expected
                         Right _ -> expectationFailure "Expected overlap rejection"
 
         it "allows non-overlapping date ranges" $ withTestRepo $ \repo -> do
-            result1 <- Draft.createDraft repo (apr 1) (apr 30)
+            result1 <- createForced repo (apr 1) (apr 30)
             case result1 of
                 Left err -> expectationFailure err
                 Right _ -> do
-                    result2 <- Draft.createDraft repo (may 1) (may 31)
+                    result2 <- createForced repo (may 1) (may 31)
                     case result2 of
                         Left err -> expectationFailure ("Should allow non-overlapping: " ++ err)
                         Right _  -> do
                             drafts <- Draft.listDrafts repo
                             length drafts `shouldBe` 2
 
+    describe "activeWorkerIds" $ do
+        it "returns every seeded worker" $ withTestRepo $ \repo -> do
+            workers <- Draft.activeWorkerIds repo
+            workers `shouldBe` allTestWorkers
+
+        -- Deactivating a worker is meant to keep them out of new schedules;
+        -- excluding them from the default candidate set is how that happens.
+        it "excludes a deactivated worker" $ withTestRepo $ \repo -> do
+            repoSetWorkerStatus repo (UserId 4) WSInactive Nothing
+            workers <- Draft.activeWorkerIds repo
+            workers `shouldBe` Set.delete (WorkerId 4) allTestWorkers
+
     describe "Draft generate" $ do
+        -- Nothing means the active workers, so this fills the draft without the
+        -- caller enumerating anyone.
+        it "defaults to the active workers when given no set" $
+            withTestRepo $ \repo -> do
+                _ <- SW.addStation repo "grill" 1 1
+                bus <- newTopicBus
+                result <- createForced repo (apr 6) (apr 10)
+                case result of
+                    Left err -> expectationFailure err
+                    Right did -> do
+                        genResult <- Draft.generateDraft repo did Nothing bus
+                        case genResult of
+                            Left err -> expectationFailure err
+                            Right _  -> do
+                                sched <- repoLoadDraftAssignments repo did
+                                Set.null (unSchedule sched) `shouldBe` False
+
         it "produces a schedule within the draft" $ withTestRepo $ \repo -> do
-            result <- Draft.createDraft repo (apr 6) (apr 12)
+            result <- createForced repo (apr 6) (apr 12)
             case result of
                 Left err -> expectationFailure err
                 Right did -> do
                     -- Generate with no workers (should produce empty schedule)
                     bus <- newTopicBus
-                    genResult <- Draft.generateDraft repo did Set.empty bus
+                    genResult <- Draft.generateDraft repo did (Just Set.empty) bus
                     case genResult of
                         Left err -> expectationFailure err
                         Right _  -> do
@@ -194,11 +289,11 @@ spec = do
         it "publishes no progress when optimization is disabled" $ withTestRepo $ \repo -> do
             _ <- SW.addStation repo "grill" 1 1
             (bus, readEventCount) <- collectingProgressBus
-            result <- Draft.createDraft repo (apr 6) (apr 12)
+            result <- createForced repo (apr 6) (apr 12)
             case result of
                 Left err -> expectationFailure err
                 Right did -> do
-                    genResult <- Draft.generateDraft repo did allTestWorkers bus
+                    genResult <- Draft.generateDraft repo did (Just allTestWorkers) bus
                     case genResult of
                         Left err -> expectationFailure err
                         Right _  -> do
@@ -214,11 +309,11 @@ spec = do
             _ <- SW.addStation repo "grill" 1 1
             setOptEnabled repo 1.0
             bus <- newTopicBus
-            result <- Draft.createDraft repo (apr 6) (apr 10)
+            result <- createForced repo (apr 6) (apr 10)
             case result of
                 Left err -> expectationFailure err
                 Right did -> do
-                    genResult <- Draft.generateDraft repo did allTestWorkers bus
+                    genResult <- Draft.generateDraft repo did (Just allTestWorkers) bus
                     case genResult of
                         Left err -> expectationFailure err
                         Right _  -> do
@@ -246,7 +341,7 @@ spec = do
             let original = mkSchedule [ mkAssignment 1 1 (apr 6) 8 ]
             repoSaveCalendar repo (apr 6) (apr 12) original
             -- Create a draft and manually save assignments
-            result <- Draft.createDraft repo (apr 6) (apr 12)
+            result <- createForced repo (apr 6) (apr 12)
             case result of
                 Left err -> expectationFailure err
                 Right did -> do
@@ -256,7 +351,7 @@ spec = do
                     commitResult <- Draft.commitDraft repo did "test commit"
                     case commitResult of
                         Left err  -> expectationFailure err
-                        Right () -> do
+                        Right _ -> do
                             -- Calendar should have draft's assignments
                             current <- Cal.loadCalendarSlice repo (apr 6) (apr 12)
                             current `shouldBe` draftSched
@@ -271,7 +366,7 @@ spec = do
         it "leaves calendar unchanged" $ withTestRepo $ \repo -> do
             let original = mkSchedule [ mkAssignment 1 1 (apr 6) 8 ]
             repoSaveCalendar repo (apr 6) (apr 12) original
-            result <- Draft.createDraft repo (apr 6) (apr 12)
+            result <- createForced repo (apr 6) (apr 12)
             case result of
                 Left err -> expectationFailure err
                 Right did -> do
@@ -286,11 +381,11 @@ spec = do
     describe "Concurrent drafts" $ do
         it "this-month + next-month can coexist" $ withTestRepo $ \repo -> do
             -- Simulate this-month (Apr 9-30) and next-month (May 1-31)
-            result1 <- Draft.createDraft repo (apr 9) (apr 30)
+            result1 <- createForced repo (apr 9) (apr 30)
             case result1 of
                 Left err -> expectationFailure err
                 Right _ -> do
-                    result2 <- Draft.createDraft repo (may 1) (may 31)
+                    result2 <- createForced repo (may 1) (may 31)
                     case result2 of
                         Left err -> expectationFailure ("Should allow concurrent: " ++ err)
                         Right _  -> do

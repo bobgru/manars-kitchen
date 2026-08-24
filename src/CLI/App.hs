@@ -418,9 +418,9 @@ handleCommand st cmd = case cmd of
         case resolved of
             Left err -> putStrLn err
             Right did -> do
-                users <- repoListUsers (asRepo st)
-                let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                result <- withProgressPrinting (Draft.generateDraft (asRepo st) did workers)
+                -- No explicit worker set: the service defaults to the active
+                -- workers, which is the one definition REST shares.
+                result <- withProgressPrinting (Draft.generateDraft (asRepo st) did Nothing)
                 case result of
                     Left err -> putStrLn ("Error: " ++ err)
                     Right sr -> do
@@ -437,33 +437,27 @@ handleCommand st cmd = case cmd of
         case resolved of
             Left err -> putStrLn err
             Right did -> do
-                -- Load draft metadata before commit (commit deletes the draft)
-                mDraft <- Draft.loadDraft (asRepo st) did
                 let note = T.pack (maybe "" id mNote)
                 result <- Draft.commitDraft (asRepo st) did note
                 case result of
                     Left err  -> putStrLn ("Error: " ++ err)
-                    Right ()  -> do
+                    Right outcome -> do
                         putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
-                        -- Clean up hint session for this draft
-                        repoDeleteHintSession (asRepo st) (asSessionId st) did
+                        -- The persisted hints went with the draft; the
+                        -- in-memory session is ours alone to clear.
                         mHs <- readIORef (asHintSession st)
                         case mHs of
                             Just hs | hstDraftId hs == did -> writeIORef (asHintSession st) Nothing
                             _ -> return ()
-                        -- Auto-refreeze: check if committed dates included historical dates
-                        case mDraft of
-                            Nothing -> return ()
-                            Just draft -> do
-                                freezeLine <- Freeze.computeFreezeLine
-                                let frozen = Freeze.frozenDatesInRange freezeLine
-                                                (diDateFrom draft) (diDateTo draft)
-                                unfreezes <- readIORef (asUnfreezes st)
-                                if not (null frozen) && not (Set.null unfreezes)
-                                    then do
-                                        writeIORef (asUnfreezes st) Set.empty
-                                        putStrLn "Historical dates refrozen. All temporary unfreezes cleared."
-                                    else return ()
+                        -- Auto-refreeze. The service decided whether the range
+                        -- reached back past the freeze line; the unfreezes it
+                        -- invalidates are ours to drop.
+                        unfreezes <- readIORef (asUnfreezes st)
+                        if Draft.coCoveredFrozenDates outcome && not (Set.null unfreezes)
+                            then do
+                                writeIORef (asUnfreezes st) Set.empty
+                                putStrLn "Historical dates refrozen. All temporary unfreezes cleared."
+                            else return ()
 
     DraftDiscard mDidStr -> requireAdmin st $ do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -475,8 +469,8 @@ handleCommand st cmd = case cmd of
                     Left err  -> putStrLn ("Error: " ++ err)
                     Right ()  -> do
                         putStrLn ("Draft #" ++ show did ++ " discarded.")
-                        -- Clean up hint session for this draft
-                        repoDeleteHintSession (asRepo st) (asSessionId st) did
+                        -- The persisted hints went with the draft; the
+                        -- in-memory session is ours alone to clear.
                         mHs <- readIORef (asHintSession st)
                         case mHs of
                             Just hs | hstDraftId hs == did -> writeIORef (asHintSession st) Nothing
@@ -2155,29 +2149,33 @@ withProgressPrinting action = do
 -- Draft creation with freeze-line check
 -- -----------------------------------------------------------------
 
+-- | Create a draft, printing whatever the service refused with.
+--
+-- The freeze rule itself lives in 'Draft.createDraft'; this only supplies the
+-- session's unfrozen ranges and renders the outcome.
 createDraftWithFreezeCheck :: AppState -> Day -> Day -> Bool -> IO ()
 createDraftWithFreezeCheck st dateFrom dateTo force = do
-    freezeLine <- Freeze.computeFreezeLine
     unfreezes <- readIORef (asUnfreezes st)
-    let frozen = Freeze.frozenDatesInRange freezeLine dateFrom dateTo
-        stillFrozen = filter (not . Freeze.isDateUnfrozen unfreezes) frozen
-    case stillFrozen of
-        (firstFrozen : _) | not force -> do
-            let lastFrozen = last' firstFrozen stillFrozen
+    let opts = Draft.CreateDraftOpts { Draft.cdoForce = force
+                                     , Draft.cdoUnfreezes = unfreezes
+                                     }
+    result <- Draft.createDraft (asRepo st) opts dateFrom dateTo
+    case result of
+        Right did -> putStrLn ("Created draft #" ++ show did
+                              ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
+        Left Draft.DraftOverlapsExisting ->
+            putStrLn "Error: Date range overlaps an existing draft."
+        Left (Draft.DraftCoversFrozenDates fr) -> do
+            let firstFrozen = Draft.frFrom fr
+                lastFrozen  = Draft.frTo fr
             putStrLn ("This draft covers frozen dates (freeze line: "
-                     ++ show freezeLine ++ ").")
+                     ++ show (Draft.frFreezeLine fr) ++ ").")
             putStrLn ("  Frozen dates in range: " ++ show firstFrozen
                      ++ " to " ++ show lastFrozen)
             putStrLn ("  To unfreeze: calendar unfreeze "
                      ++ show firstFrozen ++ " " ++ show lastFrozen)
             putStrLn ("  To override: draft create "
                      ++ show dateFrom ++ " " ++ show dateTo ++ " --force")
-        _ -> do
-            result <- Draft.createDraft (asRepo st) dateFrom dateTo
-            case result of
-                Right did -> putStrLn ("Created draft #" ++ show did
-                                      ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
-                Left err  -> putStrLn ("Error: " ++ err)
 
 -- -----------------------------------------------------------------
 -- Help registry
@@ -2501,8 +2499,3 @@ displayViolationReport draft workerNames stationNames violations = do
 -- | Show a Double with 1 decimal place.
 showFFloat1 :: Double -> String
 showFFloat1 x = show (fromIntegral (round (x * 10) :: Integer) / 10.0 :: Double)
-
--- | Safe version of 'last' with a default value.
-last' :: a -> [a] -> a
-last' def [] = def
-last' _   xs = last xs

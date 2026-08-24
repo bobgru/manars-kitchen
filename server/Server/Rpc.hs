@@ -289,9 +289,10 @@ newtype RpcDraftId = RpcDraftId { rdiId :: Int } deriving (Show)
 instance ToJSON RpcDraftId where toJSON r = object ["draftId" .= rdiId r]
 instance FromJSON RpcDraftId where parseJSON = withObject "RpcDraftId" $ \v -> RpcDraftId <$> v .: "draftId"
 
-data RpcDraftGenerate = RpcDraftGenerate { rdgDraftId :: !Int, rdgWorkerIds :: ![Int] } deriving (Show)
+-- | @workerIds@ absent means the active workers; an empty list means nobody.
+data RpcDraftGenerate = RpcDraftGenerate { rdgDraftId :: !Int, rdgWorkerIds :: !(Maybe [Int]) } deriving (Show)
 instance ToJSON RpcDraftGenerate where toJSON r = object ["draftId" .= rdgDraftId r, "workerIds" .= rdgWorkerIds r]
-instance FromJSON RpcDraftGenerate where parseJSON = withObject "RpcDraftGenerate" $ \v -> RpcDraftGenerate <$> v .: "draftId" <*> v .: "workerIds"
+instance FromJSON RpcDraftGenerate where parseJSON = withObject "RpcDraftGenerate" $ \v -> RpcDraftGenerate <$> v .: "draftId" <*> v .:? "workerIds"
 
 data RpcDraftCommit = RpcDraftCommit { rdcDraftId :: !Int, rdcNote :: !T.Text } deriving (Show)
 instance ToJSON RpcDraftCommit where toJSON r = object ["draftId" .= rdcDraftId r, "note" .= rdcNote r]
@@ -709,11 +710,21 @@ rpcListPins repo _ = liftIO $ SW.listPins repo
 -- Draft handlers
 -- -----------------------------------------------------------------
 
+-- | Create a draft on behalf of a remote CLI. Force and unfreezes are session
+-- state that does not cross the wire, so this is the strict path: a frozen
+-- range is refused, with a message the client prints as-is.
 rpcCreateDraft :: Repository -> CreateDraftReq -> Handler DraftCreatedResp
 rpcCreateDraft repo req = do
-    result <- liftIO $ SD.createDraft repo (cdrDateFrom req) (cdrDateTo req)
+    result <- liftIO $ SD.createDraft repo SD.defaultCreateDraftOpts
+                            (cdrDateFrom req) (cdrDateTo req)
     case result of
-        Left msg  -> throwApiError (Conflict msg)
+        Left SD.DraftOverlapsExisting ->
+            throwApiError (Conflict "Date range overlaps an existing draft.")
+        Left (SD.DraftCoversFrozenDates fr) ->
+            throwApiError (Conflict
+                ("Date range covers frozen dates " ++ show (SD.frFrom fr)
+                    ++ " to " ++ show (SD.frTo fr)
+                    ++ " (freeze line " ++ show (SD.frFreezeLine fr) ++ ")."))
         Right did -> pure (DraftCreatedResp did)
 
 rpcListDrafts :: Repository -> RpcEmpty -> Handler [DraftInfo]
@@ -728,7 +739,7 @@ rpcViewDraft repo req = do
 
 rpcGenerateDraft :: Repository -> RpcDraftGenerate -> Handler ScheduleResult
 rpcGenerateDraft repo req = do
-    let workers = Set.fromList (map WorkerId (rdgWorkerIds req))
+    let workers = fmap (Set.fromList . map WorkerId) (rdgWorkerIds req)
     -- No subscriber: see handleGenerateDraft.
     result <- liftIO $ do
         progressBus <- newTopicBus
@@ -742,7 +753,9 @@ rpcCommitDraft cmdBus repo req = do
     result <- liftIO $ SD.commitDraft repo (rdcDraftId req) (rdcNote req)
     case result of
         Left msg -> throwApiError (NotFound msg)
-        Right () -> do
+        -- The frozen-coverage flag is dropped: unfreezes live in the remote
+        -- client's session, and this handler cannot reach into it.
+        Right _  -> do
             logRpcBus cmdBus ("draft commit " ++ show (rdcDraftId req))
             pure RpcOk
 

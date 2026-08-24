@@ -103,21 +103,46 @@ spec = do
             isDateUnfrozen unfreezes (fromGregorian 2026 4 2) `shouldBe` True
             isDateUnfrozen unfreezes (fromGregorian 2026 3 26) `shouldBe` False
 
-    describe "freeze check integration" $ do
-        it "unfrozen dates bypass freeze warning" $ do
-            let freezeLine = fromGregorian 2026 4 7
-                unfreezes = Set.fromList
-                    [ (fromGregorian 2026 4 1, fromGregorian 2026 4 7) ]
-                frozen = frozenDatesInRange freezeLine
-                            (fromGregorian 2026 4 1) (fromGregorian 2026 4 14)
-                stillFrozen = filter (not . isDateUnfrozen unfreezes) frozen
-            stillFrozen `shouldBe` []
+    describe "frozenRangeFor" $ do
+        let freezeLine = fromGregorian 2026 4 7
 
-        it "partially unfrozen range leaves some dates frozen" $ do
-            let freezeLine = fromGregorian 2026 4 7
-                unfreezes = Set.fromList
+        it "range entirely after the freeze line is not frozen" $
+            frozenRangeFor freezeLine Set.empty
+                (fromGregorian 2026 4 8) (fromGregorian 2026 4 14)
+                    `shouldBe` Nothing
+
+        it "reports the first and last still-frozen date" $
+            frozenRangeFor freezeLine Set.empty
+                (fromGregorian 2026 4 5) (fromGregorian 2026 4 12)
+                    `shouldBe` Just (fromGregorian 2026 4 5, fromGregorian 2026 4 7)
+
+        it "a single frozen date reports itself as both ends" $
+            frozenRangeFor freezeLine Set.empty freezeLine freezeLine
+                `shouldBe` Just (freezeLine, freezeLine)
+
+        it "a fully unfrozen range is not frozen" $ do
+            let unfreezes = Set.fromList
+                    [ (fromGregorian 2026 4 1, fromGregorian 2026 4 7) ]
+            frozenRangeFor freezeLine unfreezes
+                (fromGregorian 2026 4 1) (fromGregorian 2026 4 14)
+                    `shouldBe` Nothing
+
+        -- The unfrozen prefix is dropped from the reported range, so the message
+        -- names only what the caller still has to deal with.
+        it "a partially unfrozen range reports only what is left" $ do
+            let unfreezes = Set.fromList
                     [ (fromGregorian 2026 4 1, fromGregorian 2026 4 3) ]
-                frozen = frozenDatesInRange freezeLine
-                            (fromGregorian 2026 4 1) (fromGregorian 2026 4 14)
-                stillFrozen = filter (not . isDateUnfrozen unfreezes) frozen
-            length stillFrozen `shouldBe` 4  -- Apr 4, 5, 6, 7
+            frozenRangeFor freezeLine unfreezes
+                (fromGregorian 2026 4 1) (fromGregorian 2026 4 14)
+                    `shouldBe` Just (fromGregorian 2026 4 4, fromGregorian 2026 4 7)
+
+        -- An unfreeze in the middle leaves a gap, which the first/last pair
+        -- cannot express. Reporting the outer bounds is the honest summary: every
+        -- date named is at least plausibly frozen, and the caller is refused
+        -- either way.
+        it "an unfreeze in the middle still reports the outer bounds" $ do
+            let unfreezes = Set.fromList
+                    [ (fromGregorian 2026 4 3, fromGregorian 2026 4 4) ]
+            frozenRangeFor freezeLine unfreezes
+                (fromGregorian 2026 4 1) (fromGregorian 2026 4 14)
+                    `shouldBe` Just (fromGregorian 2026 4 1, fromGregorian 2026 4 7)

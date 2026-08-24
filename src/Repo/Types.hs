@@ -281,6 +281,9 @@ data Repository = Repository
       -- ^ session_id, draft_id -> Maybe (hints, checkpoint)
     , repoDeleteHintSession :: SessionId -> Int -> IO ()
       -- ^ session_id, draft_id — delete (no-op if absent)
+    , repoDeleteDraftHintSessions :: Int -> IO ()
+      -- ^ draft_id — delete every session's hints for a draft. Used when the
+      -- draft goes away, which invalidates other sessions' saved hints too.
 
       -- ---------------------------------------------------------------
       -- Audit log (extended queries)

@@ -115,9 +115,9 @@ server execEnv cmdBus repo user =
     :<|> handleListStations repo
     :<|> handleListShifts repo
     :<|> handleListDrafts repo
-    :<|> handleCreateDraft repo user
+    :<|> handleCreateDraft cmdBus repo user
     :<|> handleGetDraft repo
-    :<|> handleGenerateDraft repo user
+    :<|> handleGenerateDraft cmdBus repo user
     :<|> handleCommitDraft cmdBus repo user
     :<|> handleDiscardDraft cmdBus repo user
     :<|> handleGetCalendar repo
@@ -249,13 +249,29 @@ handleListShifts repo = liftIO $ repoLoadShifts repo
 handleListDrafts :: Repository -> Handler [DraftInfo]
 handleListDrafts repo = liftIO $ SD.listDrafts repo
 
-handleCreateDraft :: Repository -> User -> CreateDraftReq -> Handler DraftCreatedResp
-handleCreateDraft repo user req = do
+-- | Create a draft. There is no force and no unfreeze over HTTP, so
+-- 'SD.defaultCreateDraftOpts' is the only option set a REST caller can have,
+-- and a frozen range is terminal: 409 naming it.
+handleCreateDraft :: TopicBus CommandEvent -> Repository -> User -> CreateDraftReq
+                  -> Handler DraftCreatedResp
+handleCreateDraft cmdBus repo user req = do
     requireAdmin user
-    result <- liftIO $ SD.createDraft repo (cdrDateFrom req) (cdrDateTo req)
+    result <- liftIO $ SD.createDraft repo SD.defaultCreateDraftOpts
+                            (cdrDateFrom req) (cdrDateTo req)
     case result of
-        Left msg  -> throwApiError (Conflict msg)
-        Right did -> pure (DraftCreatedResp did)
+        Left SD.DraftOverlapsExisting ->
+            throwApiError (Conflict "Date range overlaps an existing draft.")
+        Left (SD.DraftCoversFrozenDates fr) ->
+            throwConflictWithBody FrozenDatesResp
+                { fdrError      = "Date range covers frozen dates."
+                , fdrFreezeLine = SD.frFreezeLine fr
+                , fdrFrozenFrom = SD.frFrom fr
+                , fdrFrozenTo   = SD.frTo fr
+                }
+        Right did -> do
+            logRest cmdBus user
+                ("draft create " ++ show (cdrDateFrom req) ++ " " ++ show (cdrDateTo req))
+            pure (DraftCreatedResp did)
 
 handleGetDraft :: Repository -> Int -> Handler DraftInfo
 handleGetDraft repo did = do
@@ -264,10 +280,13 @@ handleGetDraft repo did = do
         Nothing -> throwApiError (NotFound "Draft not found")
         Just d  -> pure d
 
-handleGenerateDraft :: Repository -> User -> Int -> GenerateDraftReq -> Handler ScheduleResult
-handleGenerateDraft repo user did req = do
+-- | Generate within a draft. An absent @workerIds@ means the active workers,
+-- resolved by the service layer; an empty list means nobody, and is honoured.
+handleGenerateDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> GenerateDraftReq
+                    -> Handler ScheduleResult
+handleGenerateDraft cmdBus repo user did req = do
     requireAdmin user
-    let workers = Set.fromList (map WorkerId (gdrWorkerIds req))
+    let workers = fmap (Set.fromList . map WorkerId) (gdrWorkerIds req)
     -- No subscriber: this is a synchronous request/response, so there is
     -- nowhere to put interim optimizer progress.
     result <- liftIO $ do
@@ -275,15 +294,20 @@ handleGenerateDraft repo user did req = do
         SD.generateDraft repo did workers progressBus
     case result of
         Left msg -> throwApiError (NotFound msg)
-        Right r  -> pure r
+        Right r  -> do
+            logRest cmdBus user ("draft generate " ++ show did)
+            pure r
 
+-- | Commit a draft. The outcome's frozen-coverage flag is ignored here: a REST
+-- caller holds no temporary unfreezes to clear, and cannot clear a CLI
+-- session's.
 handleCommitDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> CommitDraftReq -> Handler NoContent
 handleCommitDraft cmdBus repo user did req = do
     requireAdmin user
     result <- liftIO $ SD.commitDraft repo did (cmrNote req)
     case result of
         Left msg -> throwApiError (NotFound msg)
-        Right () -> do
+        Right _  -> do
             logRest cmdBus user ("draft commit " ++ show did)
             pure NoContent
 

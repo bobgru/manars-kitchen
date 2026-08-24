@@ -315,10 +315,10 @@ draft open 4
 #
 # The freeze line defaults to yesterday. Dates on or before
 # the freeze line are "frozen" — creating a draft that covers them
-# triggers a warning. The intended workflow for intentional history edits:
+# is refused. The intended workflow for intentional history edits:
 # 1. Check freeze status
 # 2. Explicitly unfreeze the historical dates
-# 3. Create and commit the draft (no warning since dates are unfrozen)
+# 3. Create and commit the draft (no refusal since dates are unfrozen)
 # 4. Unfreezes auto-clear after committing historical dates
 
 # Discard the cross-validation demo draft so we start clean

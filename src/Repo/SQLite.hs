@@ -122,6 +122,7 @@ mkSQLiteRepo path = do
         , repoSaveHintSession   = sqlSaveHintSession conn
         , repoLoadHintSession   = sqlLoadHintSession conn
         , repoDeleteHintSession = sqlDeleteHintSession conn
+        , repoDeleteDraftHintSessions = sqlDeleteDraftHintSessions conn
         , repoAuditSince        = sqlAuditSince conn
         })
 
@@ -1303,6 +1304,12 @@ sqlDeleteHintSession conn (SessionId sid) draftId =
     execute conn
         "DELETE FROM hint_sessions WHERE session_id = ? AND draft_id = ?"
         (sid, draftId)
+
+sqlDeleteDraftHintSessions :: Connection -> Int -> IO ()
+sqlDeleteDraftHintSessions conn draftId =
+    execute conn
+        "DELETE FROM hint_sessions WHERE draft_id = ?"
+        (Only draftId)
 
 -- =====================================================================
 -- Audit log (extended queries)

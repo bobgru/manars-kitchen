@@ -155,7 +155,7 @@ spec = do
                         ("Expected SessionInvalid, got: " ++ show other)
 
     describe "E2E: draft commit/discard cleans up hint session" $ do
-        it "deleting hint session on commit simulates cleanup" $
+        it "commit deletes the hint session" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "eve"
                 (sid, _tok) <- repoCreateSession repo uid
@@ -168,14 +168,12 @@ spec = do
                 -- Verify session exists
                 loaded <- repoLoadHintSession repo sid did
                 loaded `shouldBe` Just (HintSessionRecord hints cp)
-                -- Simulate commit cleanup: commit the draft, then delete hint session
+                -- The service layer does the cleanup; no caller help needed.
                 _ <- Draft.commitDraft repo did "test commit"
-                repoDeleteHintSession repo sid did
-                -- Verify session is gone
                 afterCommit <- repoLoadHintSession repo sid did
                 afterCommit `shouldBe` Nothing
 
-        it "deleting hint session on discard simulates cleanup" $
+        it "discard deletes the hint session" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "frank"
                 (sid, _tok) <- repoCreateSession repo uid
@@ -187,15 +185,32 @@ spec = do
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sid did hints cp
-                -- Simulate discard cleanup
                 _ <- Draft.discardDraft repo did
-                repoDeleteHintSession repo sid did
-                -- Verify session is gone
                 afterDiscard <- repoLoadHintSession repo sid did
                 afterDiscard `shouldBe` Nothing
                 -- Verify draft is also gone
                 drafts <- Draft.listDrafts repo
                 length drafts `shouldBe` 0
+
+        -- The draft is gone for everyone, so every session's hints against it
+        -- are stale — not just those of the session that committed.
+        it "commit deletes every session's hints for the draft" $
+            withTestRepo $ \(repo, bus) -> do
+                uidA <- createTestUser repo "grace"
+                uidB <- createTestUser repo "heidi"
+                (sidA, _tokA) <- repoCreateSession repo uidA
+                (sidB, _tokB) <- repoCreateSession repo uidB
+                did <- createTestDraft repo
+                publishCommand bus CLI "grace" "station create 1 grill"
+                entries <- repoGetAuditLog repo
+                let cp = aeId (last entries)
+                repoSaveHintSession repo sidA did [WaiveOvertime (WorkerId 1)] cp
+                repoSaveHintSession repo sidB did [WaiveOvertime (WorkerId 2)] cp
+                _ <- Draft.commitDraft repo did "test commit"
+                afterA <- repoLoadHintSession repo sidA did
+                afterB <- repoLoadHintSession repo sidB did
+                afterA `shouldBe` Nothing
+                afterB `shouldBe` Nothing
 
 -- | Helper: a test Slot
 testSlot :: Slot
@@ -221,11 +236,14 @@ createTestUser repo name = do
         Right uid -> return uid
         Left err  -> error $ "Failed to create test user: " ++ show err
 
--- | Helper: create a test draft for April 2026.
+-- | Helper: create a test draft for April 2026. Forced past the freeze line —
+-- the fixture dates are fixed and so frozen for any run after them, and this
+-- suite is about hints, not the freeze line.
 createTestDraft :: Repository -> IO Int
 createTestDraft repo = do
-    result <- Draft.createDraft repo (fromGregorian 2026 4 6) (fromGregorian 2026 4 12)
+    let opts = Draft.defaultCreateDraftOpts { Draft.cdoForce = True }
+    result <- Draft.createDraft repo opts (fromGregorian 2026 4 6) (fromGregorian 2026 4 12)
     case result of
         Right did -> return did
-        Left err  -> error $ "Failed to create test draft: " ++ err
+        Left err  -> error $ "Failed to create test draft: " ++ show err
 

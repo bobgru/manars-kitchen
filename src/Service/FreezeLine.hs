@@ -3,6 +3,7 @@ module Service.FreezeLine
     , isFrozen
     , frozenDatesInRange
     , isDateUnfrozen
+    , frozenRangeFor
     ) where
 
 import Data.Time (Day, addDays)
@@ -32,3 +33,18 @@ frozenDatesInRange freezeLine start end =
 isDateUnfrozen :: Set.Set (Day, Day) -> Day -> Bool
 isDateUnfrozen unfreezes date =
     any (\(s, e) -> date >= s && date <= e) (Set.toList unfreezes)
+
+-- | The still-frozen sub-range of @start@..@end@, given a freeze line and the
+-- set of temporarily unfrozen ranges. 'Nothing' when the range touches no
+-- frozen date, or when every frozen date it touches has been unfrozen.
+--
+-- The result is the first and last still-frozen date, so it can be reported
+-- without listing every date in between. Frozen dates are contiguous from
+-- @start@ in practice — the freeze line is a single cut-off — but an unfreeze
+-- may punch a hole in the middle, in which case the reported range spans the
+-- hole.
+frozenRangeFor :: Day -> Set.Set (Day, Day) -> Day -> Day -> Maybe (Day, Day)
+frozenRangeFor freezeLine unfreezes start end =
+    case filter (not . isDateUnfrozen unfreezes) (frozenDatesInRange freezeLine start end) of
+        []       -> Nothing
+        (d : ds) -> Just (d, last (d : ds))

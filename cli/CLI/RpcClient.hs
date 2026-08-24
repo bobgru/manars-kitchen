@@ -472,7 +472,9 @@ dispatchCommand env cmd = case cmd of
 
     DraftGenerate mDid -> case mDid of
         Just didStr -> do
-            result <- run env (cGenerateDraft (RpcDraftGenerate (read didStr) []))
+            -- Nothing, not []: the server picks the active workers. An empty
+            -- list would mean "schedule nobody".
+            result <- run env (cGenerateDraft (RpcDraftGenerate (read didStr) Nothing))
             case result of
                 Right _r -> putStrLn "Draft generated."
                 Left err -> putStrLn err
