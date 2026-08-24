@@ -1,6 +1,6 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-23 · at commit `a9c4d28` on `docs/draft-page-decisions`
+**Last updated:** 2026-08-24 · at commit `08a2d6d` on `docs/draft-page-decisions`
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -17,7 +17,15 @@ leaving a stale claim behind.
 The admin web UI has pages for skills, stations, workers, shifts, and a
 read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
-`openspec/changes/archive/` for what has shipped (29 changes).
+`openspec/changes/archive/` for what has shipped (32 changes).
+
+**Named schedules no longer exist.** Removed 2026-08-24 in `08a2d6d`. Every
+schedule is built inside a draft and reaches the calendar by committing that
+draft. If you find a reference to `schedule create`, `assign`, `unassign` or
+`calendar commit <name> ...` anywhere, it is stale documentation. The
+`schedules` and `assignments` tables are still readable in any database created
+before that commit — the `CREATE TABLE` statements went, no `DROP TABLE`
+replaced them — so nothing in the code may name either table again.
 
 **`CONTEXT.md` at the repo root is the glossary of record**, and `docs/adr/` holds the
 decisions that a reader would otherwise wonder about. Read both before touching
@@ -38,13 +46,15 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at the optimizer move** plus the structured-rename and SSE
-role-filtering work described above — all of this was green, with `LANG` unset:
+**Verification baseline at the named-schedule removal** — the optimizer move, the
+structured-rename and SSE role-filtering work, and the removal itself. All of this
+was green, with `LANG` unset:
 
 - `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
   stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
-- 261 integration + 363 unit examples, 0 failures, 1 pending (the weekend
-  divergence in item 4)
+- 255 integration + 363 unit examples, 0 failures, 1 pending (the weekend
+  divergence in item 4). The integration count fell from 261 with the
+  named-schedule tests.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
 - demo runs end to end, exit 0
@@ -81,10 +91,11 @@ so nobody re-derives them:
 - **The one missing read is a draft's assignments.** `GET /api/drafts/:id` returns
   metadata only. Nothing exposes `repoLoadDraftAssignments`, so a browser can see a
   draft only by re-running `generate`, which mutates it.
-- **There is no `/schedules` route at all.** `web/src/App.tsx` has none and
-  `path="*"` redirects to `/`, so the sidebar link silently bounces to the dashboard.
-  The claim that "routes are already in place" was false. Only the sidebar link
-  (`Sidebar.tsx:9`) and the CSS vocabulary in `App.css` exist.
+- **There was never a `/schedules` route.** `web/src/App.tsx` has none and
+  `path="*"` redirects to `/`, so the sidebar link silently bounced to the dashboard.
+  The claim that "routes are already in place" was false. The sidebar link now reads
+  "Drafts" → `/drafts` and bounces the same way until step 5 lands; the CSS
+  vocabulary in `App.css` is the only other thing that exists.
 - **The REST draft endpoints skip rules the CLI enforces**, because those rules live
   in `src/CLI/App.hs` rather than the service layer: the freeze-line check on create
   (`App.hs:2393`), validation before viewing (`App.hs:558`), what-if-session cleanup
@@ -111,7 +122,7 @@ event.
 
 #### Steps, in order
 
-Each is independently shippable. Two are done:
+Each is independently shippable. Three are done:
 
 - ~~**Expose ids on `/api/workers` and `/api/stations`**~~ — shipped as `a9c4d28`.
   `GET /api/stations` returns a new `StationResp` with `id`; `GET /api/workers` returns
@@ -127,22 +138,14 @@ Each is independently shippable. Two are done:
   `src/CLI/App.hs`. No behaviour change at the default `opt-enabled` of `0`. **This
   surfaced a pre-existing defect — see item 4.**
 
-1. **Remove the named-schedule surface.** The largest step. `src/Service/Schedule.hs`;
-   the four `repoSaveSchedule` / `repoLoadSchedule` / `repoListSchedules` /
-   `repoDeleteSchedule` fields; the `CREATE TABLE` statements for `schedules` and
-   `assignments` (`Repo/Schema.hs:138-149`) — **statements only, no `DROP TABLE`**;
-   the `schedule *` commands, `assign`, `unassign`, `export <name> <file>`
-   (`export <file>` is a different command and stays); `calendar commit <name> ...`
-   (`App.hs:911`), which sourced its assignments from a named schedule; the three
-   `/api/schedules` endpoints and their RPC twins; the matching `commandEntityMap` /
-   `classify` / `isMutating` arms. Four non-obvious dependencies must be handled, not
-   deleted around: the demo's first section (`demo/restaurant-setup.txt:247-257`) must
-   be rewritten onto drafts; the export/import JSON `schedules` key
-   (`Export/JSON.hs:263-268, 408`) with `export.json` and `demo-export.json`
-   regenerated; `wrSchedule` in worker safe-delete (`Service/Worker.hs:653-659`); and
-   ~13 specs, of which `assign-name-args` and `compact-schedule-display` are archived
-   outright. The optimizer is **no longer** a dependency here — it moved to
-   `draft generate` first, precisely so this step is pure removal.
+1. ~~**Remove the named-schedule surface.**~~ — shipped as `08a2d6d`, and pure removal
+   as intended once the optimizer had moved. Worth carrying forward: the demo now
+   builds week 1 inside a draft, so **every draft id in `demo/restaurant-setup.txt`
+   shifted by one** — a later edit that inserts or removes a `draft create` has to
+   shift them again. `export.json` and `demo-export.json` are gitignored, so the demo
+   regenerates them and no fixture is committed. `etSchedule` survives in
+   `src/Audit/CommandMeta.hs` as the entity type for the group-less commands (`help`,
+   `quit`, `audit`, `replay`, `demo`, `use`, `context`) — it is not dead code.
 2. **Push the draft lifecycle rules into the service layer** — freeze check into
    `createDraft` (returning a structured refusal naming the frozen range, surfaced as
    409 via `throwConflictWithBody`), what-if-session cleanup and auto-refreeze into
@@ -245,9 +248,11 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
 
 ### 5. Smaller backlog
 
-- **Station safe-delete ignores schedule assignments.** `safeDeleteStation`
-  checks worker station preferences and station required skills only. Assignment
-  checking was deferred because "active schedule" needs defining. Revisit
+- **Station safe-delete ignores assignments.** `safeDeleteStation` checks worker
+  station preferences and station required skills only. Assignment checking was
+  deferred because "active schedule" needed defining; now that drafts are the only
+  answer, the two tables to check are `calendar_assignments` and
+  `draft_assignments` — the same pair `safeDeleteWorker` already counts. Revisit
   alongside item 1.
 - **The `demo` command is wrong for the web terminal.** It wipes the database and
   replays the audit log, which is useless on a fresh DB. The `--demo` CLI flag
