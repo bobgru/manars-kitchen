@@ -9,15 +9,15 @@
 #
 # What this does and does not protect:
 #
-#   Does    -- confines writes to the repo and ~/.stack, and confines network
-#              egress to an allowlist of Anthropic domains. Keeps the git
-#              guardrail hook un-editable by mounting it and the settings file
-#              read-only.
-#   Does NOT -- protect the mounted paths themselves. The agent can still damage
-#              the repo working tree or the 116G ~/.stack cache; both are
-#              recoverable but the cache is slow to rebuild. It also does not
-#              prevent exfiltration of anything reachable inside the container
-#              over the permitted egress. Only run this on a repo you trust.
+#   Does    -- confines writes to the repo, and confines network egress to an
+#              allowlist of Anthropic domains. Keeps the git guardrail hook
+#              un-editable by mounting it and the settings file read-only. The
+#              Haskell toolchain lives in the image, so the host's ~/.stack is
+#              not exposed at all.
+#   Does NOT -- protect the repo working tree, which is mounted read-write and is
+#              the one thing the agent can still damage. It also does not prevent
+#              exfiltration of anything reachable inside the container over the
+#              permitted egress. Only run this on a repo you trust.
 
 set -euo pipefail
 
@@ -35,18 +35,23 @@ CONTAINER_HOME="$HOME"
 HOOK_SRC="$HOME/.claude/hooks/block-dangerous-git.sh"
 STATUSLINE_SRC="$HOME/.claude/statusline.sh"
 SETTINGS_SRC="$REPO_DIR/dev/docker/claude-settings.json"
-STACK_ROOT="$HOME/.stack"
-WT_BIN="$(command -v wt || true)"
+# worktrunk is no longer taken from the host -- the image installs it. See the
+# mount list below.
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 build() {
+    # Context is the repo root, not dev/docker: the image pre-builds the
+    # project's Haskell dependencies and so needs stack.yaml, stack.yaml.lock
+    # and manars-kitchen.cabal. .dockerignore keeps the context small by
+    # excluding build output -- without it the context is ~863 MB.
     docker build \
         --build-arg "USERNAME=$CONTAINER_USER" \
         --build-arg "USER_UID=$CONTAINER_UID" \
         --build-arg "USER_GID=$CONTAINER_GID" \
         -t "$IMAGE" \
-        "$REPO_DIR/dev/docker"
+        -f "$REPO_DIR/dev/docker/Dockerfile" \
+        "$REPO_DIR"
 }
 
 preflight() {
@@ -56,8 +61,6 @@ has no protection against destructive git commands."
 
     [ -x "$HOOK_SRC" ] || die "$HOOK_SRC is not executable (chmod +x it).
 A non-executable hook fails open: the tool call proceeds."
-
-    [ -d "$STACK_ROOT" ] || die "$STACK_ROOT not found; nothing to mount."
 
     # Cosmetic, so a warning rather than a hard failure. claude-settings.json
     # names the mount path unconditionally; without the file the status line
@@ -153,9 +156,12 @@ run() {
         # The project. Read-write: this is the work.
         -v "$REPO_DIR:$REPO_DIR:rw"
 
-        # 116G of prebuilt GHC toolchains and compiled snapshots. Read-write
-        # because Stack writes pantry and stack.sqlite3 during a build.
-        -v "$STACK_ROOT:$CONTAINER_HOME/.stack:rw"
+        # The host's ~/.stack is deliberately NOT mounted. The image owns the
+        # Haskell toolchain -- GHC plus every dependency, built at image build
+        # time -- and mounting the host's over it would shadow all of that. The
+        # old mount also assumed a Linux host of matching architecture with GHC
+        # actually in ~/.stack/programs; on macOS none of those hold. See
+        # dev/docker/README.md 5.4.
 
         # Claude Code state (auth, history, sessions) persisted across runs, but
         # container-local -- deliberately NOT the host's ~/.claude, so a YOLO
@@ -179,8 +185,21 @@ run() {
     # Commit authorship inside the container.
     [ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:$CONTAINER_HOME/.gitconfig:ro")
 
-    # worktrunk, if installed on the host. Saves a Rust toolchain in the image.
-    [ -n "$WT_BIN" ] && mounts+=(-v "$WT_BIN:/usr/local/bin/wt:ro")
+    # worktrunk is installed in the image now (prebuilt static musl, ~8 MB, no
+    # Rust toolchain). It used to be bind-mounted from the host, which only
+    # worked when host and container shared OS and architecture -- on a macOS
+    # host it was Mach-O in a Linux container and every call died with
+    # "exec format error". See dev/docker/README.md 5.7. Requires a rebuild:
+    # ./dev/claude-container.sh build
+
+    # Worktrunk's project-hook approvals, read-only. Without this the container
+    # has no approval, so the [[pre-merge]] test gate in .config/wt.toml is
+    # silently skipped -- and an agent inside cannot grant it, because
+    # `wt config approvals add` cannot prompt non-interactively. Read-only so a
+    # YOLO session cannot approve new commands for itself; the parent directory
+    # stays writable, so worktrunk can still take its approvals.toml.lock.
+    [ -f "$HOME/.config/worktrunk/approvals.toml" ] && mounts+=(
+        -v "$HOME/.config/worktrunk/approvals.toml:$CONTAINER_HOME/.config/worktrunk/approvals.toml:ro")
 
     local -a caps=()
     if [ "${SKIP_FIREWALL:-0}" = "1" ]; then

@@ -473,22 +473,75 @@ analysis, assumptions and limits are in `dev/docker/README.md` — read it befor
 relying on the setup, particularly §3 (the undocumented behaviour it depends on)
 and §6 (what it does not protect).
 
-**Git guardrails are active** and block destructive git commands via a
-`PreToolUse` hook. Two consequences worth knowing up front:
+**The container image now owns the Haskell toolchain.** Changed 2026-08-30. GHC and
+every dependency are built into the image (`stack setup` + `stack build
+--only-dependencies` over just `stack.yaml`, `stack.yaml.lock`,
+`manars-kitchen.cabal` and `Setup.hs`, so Docker's layer cache reuses the lot when
+those are unchanged). **The host's `~/.stack` is no longer mounted** — it would
+shadow all of it, and the old arrangement assumed a Linux host of matching
+architecture with GHC in `~/.stack/programs`, none of which holds on macOS. The
+build context is now the repo root, with a new `.dockerignore`. Cold build ~196s
+plus GHC download, warm rebuild 1.3s, image 5.98 GB. Details and measurements in
+`dev/docker/README.md` §5.4.
 
-- `wt merge` is allowed — it is local-only. `wt step push` is blocked.
+**One thing still unfixed: the launcher does not work on macOS.** `CONTAINER_HOME`
+is `"$HOME"`, i.e. `/Users/<user>`, while the image's `HOME` is `/home/<user>`, so
+every derived mount lands on a path the image does not use — and a same-path
+`/Users` bind mount is **silently dropped** by Docker Desktop, no error, empty
+directory. The image itself builds and works on macOS; only the launcher's path
+mapping is wrong. Fix and evidence in `dev/docker/README.md` §5.8.
+
+**Git guardrails** block destructive git commands via a `PreToolUse` hook at
+`~/.claude/hooks/block-dangerous-git.sh`, wired from `~/.claude/settings.json`.
+**They are per-machine, and this file used to claim they were active when they
+were not installed at all** — the setup had only ever been done inside the
+container. Installed on the macOS host and re-verified on 2026-08-30. On a new
+machine, **check before trusting it**: the hook file must exist and be
+executable, and `~/.claude/settings.json` must have a `hooks.PreToolUse` entry.
+There is one copy — `dev/claude-container.sh` bind-mounts the *host's* script
+into the container read-only, and `preflight()` refuses to launch without it.
+
+Four consequences worth knowing up front:
+
+- `wt merge` is allowed; `wt step push` and `wt merge --no-hooks` are blocked.
+  **The reason is not local-vs-remote** — worktrunk has no remote surface at all,
+  and `wt step push` only fast-forwards a local branch. It is that `wt merge`
+  runs the `[[pre-merge]]` test gate and the other two bypass it. Full reasoning
+  in `dev/docker/README.md` §5.2; do not "fix" the apparent inconsistency by
+  blocking `wt merge`, which was tried and reverted because it breaks the
+  container workflow.
+- **That gate needs a per-machine approval.** Granted on the macOS host on
+  2026-08-30 with `wt config approvals add --yes` — plain `add` cannot prompt in a
+  non-interactive session and just fails. It is stored in
+  `~/.config/worktrunk/approvals.toml`, **machine-local and not in the repo**, so a
+  new machine starts ungated. `dev/claude-container.sh` now bind-mounts that file
+  read-only, which was verified safe: a read-only file mount leaves the parent
+  directory writable, so worktrunk can still take its `.lock`. Check with
+  `wt config approvals list`; reasoning in `dev/docker/README.md` §5.2.
 - **The hook inspects the entire command line, so it false-positives on prose.**
   A commit message or test fixture that merely mentions a blocked command gets
   blocked. Workaround: put the text in a file — `git commit -F <file>`, prompts
-  via stdin. **Do not obfuscate a command to get around the hook**; move the text
-  or amend the pattern list deliberately.
+  via stdin, and the `Write` tool rather than a shell heredoc. **Do not obfuscate
+  a command to get around the hook**; move the text or amend the pattern list
+  deliberately.
+- **Re-installing from the `git-guardrails-claude-code` skill silently downgrades
+  it.** The bundled script is a naive literal grep with no normalisation, no
+  worktrunk patterns, and a `jq` call that fails *open*. See
+  `dev/docker/README.md` §5.1.
 
 **Parallel agents in worktrees.** `.worktreeinclude` and `.config/wt.toml` are
 committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 §5.6. Operationally:
 
-- Worktrunk project config needs a one-time interactive `wt config approvals add`
-  that an agent cannot grant. Agents should use
+- **`wt` is installed in the image now**, from upstream's prebuilt static musl
+  binary, arch-selected and checksummed. It used to be bind-mounted from the host,
+  which only worked when host and container shared OS and arch — on macOS it was
+  Mach-O against a Linux container and every call died with `exec format error`.
+  Fixed 2026-08-30; see `dev/docker/README.md` §5.7. Requires
+  `./dev/claude-container.sh build`.
+- Worktrunk project config needs a one-time `wt config approvals add --yes` that
+  an agent cannot do interactively; granted on this host 2026-08-30 and now mounted
+  into the container. Agents should use
   `wt switch -c <branch> --no-cd --no-hooks` plus an explicit
   `wt step copy-ignored`.
 - `wt list`'s would-conflict pre-flight needs git ≥ 2.38; a host on 2.34 reports
