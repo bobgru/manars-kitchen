@@ -52,7 +52,7 @@ import qualified Service.Absence as SA
 import qualified Service.Config as SC
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
-import Service.DraftValidation (DraftViolation(..), validateDraftAgainstCalendar)
+import Service.DraftValidation (DraftViolation(..), pruneDraftViolations)
 import qualified Service.FreezeLine as Freeze
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
@@ -319,8 +319,9 @@ handleCommand st cmd = case cmd of
         case mDraft of
             Nothing -> putStrLn "Draft not found."
             Just d  -> do
-                -- Validate draft against calendar before displaying
-                violations <- validateDraftAgainstCalendar (asRepo st) did
+                -- Validate draft against calendar before displaying, pruning
+                -- what no longer holds
+                violations <- pruneDraftViolations (asRepo st) did
                 -- Display violation report if any
                 if null violations
                     then return ()

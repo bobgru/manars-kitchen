@@ -1,6 +1,7 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-24 · at commit `a4a2d30` on `docs/draft-page-decisions`
+**Last updated:** 2026-08-30 · on `master` at commit `eae0084`, plus the
+uncommitted item 1 step 3 split described below
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -70,15 +71,16 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at the service-layer move** — everything above, plus the
-optimizer move, the structured-rename and SSE role-filtering work, and the
-named-schedule removal. All of this was green, with `LANG` unset:
+**Verification baseline at the draft-validation split** — everything above, plus the
+service-layer and optimizer moves, the structured-rename and SSE role-filtering work,
+and the named-schedule removal. All of this was green, with `LANG` unset:
 
 - `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
   stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
-- 258 integration + 373 unit examples, 0 failures, 1 pending (the weekend
+- 258 integration + 379 unit examples, 0 failures, 1 pending (the weekend
   divergence in item 4). The integration count fell to 255 with the named-schedule
-  tests removed, then rose again with the freeze-line and active-worker coverage.
+  tests removed, then rose again with the freeze-line and active-worker coverage; the
+  unit count rose from 373 to 379 with the step 3 coverage.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
 - demo runs end to end, exit 0
@@ -125,7 +127,8 @@ so nobody re-derives them:
   — see the service-layer paragraph above — and the two draft handlers now call
   `logRest`, so create and generate finally reach the audit log, the terminal pane
   and the SSE feed. What remains in the CLI is **validation before viewing**: `draft
-  open` prunes as a side effect of reading (`App.hs:558`), which is step 3 below.
+  open` prunes as a side effect of reading (`App.hs:324`), which was step 3, now
+  shipped.
 
 #### Decisions
 
@@ -141,7 +144,8 @@ so nobody re-derives them:
 
 #### Steps, in order
 
-Each is independently shippable. Two preliminaries are done, and so are steps 1 and 2:
+Each is independently shippable. Two preliminaries are done, and so are steps 1, 2
+and 3:
 
 - ~~**Expose ids on `/api/workers` and `/api/stations`**~~ — shipped as `a9c4d28`.
   `GET /api/stations` returns a new `StationResp` with `id`; `GET /api/workers` returns
@@ -171,11 +175,24 @@ Each is independently shippable. Two preliminaries are done, and so are steps 1 
    details worth carrying forward are in the service-layer paragraph near the top of
    this file. This was originally the first half of a larger step; the validation split
    is now step 3 on its own, per `CLAUDE.md`'s independently-shippable rule.
-3. **Split `validateDraftAgainstCalendar`** into `computeDraftViolations` (no writes,
-   no staleness gate) and `pruneDraftViolations` (staleness gate plus writes), with an
-   `isDraftStale` predicate between them. Behaviour is unchanged for existing callers
-   — `src/CLI/App.hs:323` is the only one — but the split is what lets step 5 expose a
-   read that does not mutate.
+3. ~~**Split `validateDraftAgainstCalendar`.**~~ — shipped 2026-08-30.
+   `Service.DraftValidation` now exports `isDraftStale` (takes a loaded `DraftInfo`,
+   not an id), `computeDraftViolations` (no writes, **no staleness gate**) and
+   `pruneDraftViolations` (the gate, then the computation, then the removal — exactly
+   what the old function did). `validateDraftAgainstCalendar` is gone rather than kept
+   as an alias; `src/CLI/App.hs` was its only production caller and now calls
+   `pruneDraftViolations`. A private `validateDraft` holds the shared body and returns
+   the draft's schedule alongside the violations, so the pruning path does not load the
+   assignments twice.
+
+   **The gate hides real violations, and now there is a test that says so.** Only a
+   *calendar commit* makes a draft stale, so anything else that invalidates an
+   assignment — an approved absence, a revoked skill, a changed hour limit — is invisible
+   to `pruneDraftViolations` for as long as the calendar sits still. `test/DraftValidationSpec.hs`
+   pins this down with an approved absence over a draft assignment: `pruneDraftViolations`
+   returns `[]` while `computeDraftViolations` reports the conflict. Step 5's endpoint
+   must use the latter, and the deferred draft-workflow question below should treat the
+   staleness trigger as too narrow, not just wrongly-responding.
 4. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
    deltas removing the `Non-overlapping date ranges` requirement from `draft-session`
    and the matching scenarios from `draft-shortcuts` — plus the commit 409 and
@@ -183,7 +200,10 @@ Each is independently shippable. Two preliminaries are done, and so are steps 1 
    dates was replaced by draft #N*.
 5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
    GET must not mutate** — it reports violations without deleting them or bumping
-   `last_validated_at`. Pruning gets an explicit `POST /api/drafts/:id/revalidate`.
+   `last_validated_at`, which is what `computeDraftViolations` is for (step 3). Pruning
+   gets an explicit `POST /api/drafts/:id/revalidate`, which calls
+   `pruneDraftViolations`. `isDraftStale` is there if the response should also say
+   whether the calendar has moved.
 6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
    discard. No assignment grid.
 7. **Draft detail page** — the assignment grid, violations alongside assignments.
@@ -310,14 +330,14 @@ things occupy that space and neither does the job:
   every assignment that no longer validates —
   `repoSaveDraftAssignments repo draftId cleanedSched` — and leaves the holes for the
   admin to refill by re-running `draft generate`
-  (`src/Service/DraftValidation.hs:141-152`).
+  (`src/Service/DraftValidation.hs:131-152`, `pruneDraftViolations`).
 
 The specific concerns:
 
 1. **Pruning is not rebasing.** A moved calendar should arguably produce a *proposed*
    updated draft the admin can accept or reject, not silent deletion.
 2. **Reading mutates.** Pruning fires as a side effect of `draft open`
-   (`App.hs:558`), so viewing a draft changes it. Item 1's steps 4 and 6 contain that
+   (`App.hs:324`), so viewing a draft changes it. Item 1's steps 4 and 6 contain that
    damage — they stop the browser inheriting it — but do not fix it.
 3. **Violations are not durable.** They are returned once and never persisted, so the
    record of what was removed and why exists only in whatever output happened to see
@@ -326,7 +346,7 @@ The specific concerns:
    prunes its siblings the next time they are opened — the right trigger, the wrong
    response, per (1).
 5. **The look-back window is narrow.** Validation examines the seven days *before* the
-   draft's start (`DraftValidation.hs:105-107`), so calendar assignments inside the
+   draft's start (`DraftValidation.hs:165-166`), so calendar assignments inside the
    draft's own range are never compared against it. That is why "the calendar for my
    dates was just replaced" reports nothing today, and why item 1 step 4 has to add
    that message separately.
