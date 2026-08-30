@@ -31,8 +31,9 @@ and commit now returns 409 naming the overlapping drafts, requiring an explicit
 `POST /api/drafts/:id/commit/force` or `draft commit --force` to proceed.
 
 Draft staleness detection already existed for the sequential case —
-`validateDraftAgainstCalendar` compares `diLastValidatedAt` against
-`repoCalendarCommitsAfter` — and generalises to overlapping drafts unchanged. What it
+`isDraftStale` compares `diLastValidatedAt` against `repoCalendarCommitsAfter`,
+and `pruneDraftViolations` gates on it — and generalises to overlapping drafts
+unchanged. What it
 does *not* do is notice that the calendar inside a draft's own range was replaced,
 because its look-back window is the seven days before the draft's start. That is why
 the "replaced by draft #N" message had to be added separately, and it is part of the

@@ -37,10 +37,12 @@ and the history record it leaves behind. The date range is the claim: dates in
 range with no assignment are cleared, not skipped.
 
 **Named schedule**:
-The superseded artefact — a set of assignments stored under a text name, with no
-date-range identity and no relationship to the calendar. Retained for the CLI's
-`schedule *` commands only. New work uses drafts and the calendar.
-_Avoid_: treating this as the current model, or as a synonym for **Schedule**.
+The removed artefact — a set of assignments stored under a text name, with no
+date-range identity and no relationship to the calendar. Deleted outright; there
+is no `schedule create`, `assign` or `unassign`. Every schedule is built inside a
+draft and reaches the calendar by committing that draft.
+_Avoid_: using this term for anything current. A reference to it in
+documentation or a comment is stale, not a description of a surface that exists.
 
 ### Editing a draft
 
@@ -66,7 +68,7 @@ _Avoid_: using "hint" for a what-if. A hint proposes; a what-if enacts. Each hin
 names the what-if an admin could add in response.
 
 **Diagnose**:
-Producing the hints for a draft, a named schedule, or a calendar range.
+Producing the hints for a draft or a calendar range.
 
 **Rebase**:
 Re-examining a what-if session after the data beneath it changed, classifying
@@ -76,6 +78,42 @@ each what-if as irrelevant, compatible, conflicting, or structural.
 Running the scheduler over a draft, using the draft's current assignments as the
 seed. Generating overwrites the draft's assignments; it does not touch the
 calendar.
+
+### Problems
+
+**Problem**:
+Something about a set of assignments that wants an admin's attention. Always
+scoped to a date range — there is no "all problems". A problem knows which
+entities it touches: at most one worker, at most one station, and a date or slot
+scope. Some touch only two of the three.
+_Avoid_: using "problem" loosely for a bug in the software.
+
+**Violation**:
+The kind of **Problem** where an existing assignment breaks a hard rule — skill
+qualification, absence, alternating weekends, period or daily hours, rest period,
+consecutive hours, avoid-pairing. Something is scheduled that should not be.
+
+**Compromise**:
+The kind of **Problem** where an assignment is legal but ignores a stated
+preference — a worker's station or shift preference, their wish for variety,
+their hour headroom. Nothing is broken; someone did not get what they wanted.
+_Avoid_: calling this a soft violation. Nothing is violated, so the word invites
+the reader to treat it as a **Violation**.
+
+**Understaffing**:
+The kind of **Problem** where a station has fewer assignments than its minimum
+staffing for a slot. A station whose minimum is zero is not understaffed by
+having nobody — it is simply not being staffed.
+
+**Unfilled**:
+A station and slot the scheduler could not staff. The raw fact, and not yet a
+judgement: an unfilled slot is **Understaffing** only where the station's minimum
+staffing is above zero.
+
+**Horizon**:
+The date range a problem view is scoped to — today, the current pay period, or
+the next one. Derived from the **Pay period**, so it follows however the
+restaurant is paid rather than assuming a week.
 
 ### Time boundaries
 

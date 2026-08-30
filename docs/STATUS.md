@@ -20,6 +20,14 @@ read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
 
+**The project no longer uses OpenSpec.** Switched 2026-08-30 to `grill-with-docs`:
+grill the design first, then capture what was settled as glossary entries in
+`CONTEXT.md` and, where a decision is hard to reverse, an ADR in `docs/adr/`. See
+`CLAUDE.md`. Do not create new `openspec/changes/` entries — `openspec/specs/` and
+`openspec/changes/archive/` stay as the record of what shipped and are still worth
+reading, they are just no longer extended. This file remains the authoritative
+next-steps record.
+
 **Named schedules no longer exist.** Removed 2026-08-24 in `08a2d6d`. Every
 schedule is built inside a draft and reaches the calendar by committing that
 draft. If you find a reference to `schedule create`, `assign`, `unassign` or
@@ -78,7 +86,7 @@ and the named-schedule removal. All of this was green, with `LANG` unset:
 - `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
   stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
 - 258 integration + 379 unit examples, 0 failures, 1 pending (the weekend
-  divergence in item 4). The integration count fell to 255 with the named-schedule
+  divergence in item 6). The integration count fell to 255 with the named-schedule
   tests removed, then rose again with the freeze-line and active-worker coverage; the
   unit count rose from 373 to 379 with the step 3 coverage.
 - `cd web && npm run build` — clean
@@ -159,7 +167,7 @@ and 3:
   `generateDraft` now takes a `TopicBus ProgressEvent` and calls `optimizeSchedule`;
   the CLI's `[opt]` printer moved into a `withProgressPrinting` helper in
   `src/CLI/App.hs`. No behaviour change at the default `opt-enabled` of `0`. **This
-  surfaced a pre-existing defect — see item 4.**
+  surfaced a pre-existing defect — see item 6.**
 
 1. ~~**Remove the named-schedule surface.**~~ — shipped as `08a2d6d`, and pure removal
    as intended once the optimizer had moved. Worth carrying forward: the demo now
@@ -212,9 +220,56 @@ For both page steps, follow `WorkersListPage.tsx` — the most recent and comple
 the skills/stations pages where they differ. The three existing list/detail pairs are
 inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
 key naming); prefer the worker page's choices. **Exercise them against a live server**,
-not just `tsc` — see the last bullet of item 5.
+not just `tsc` — see the last bullet of item 7.
 
-### 2. Shift delete orphans worker preferences
+### 2. The problem view — designed 2026-08-30, not started
+
+The `/` dashboard becomes a visualization of **problems** across workers, stations and
+slots. The full design and the rejected alternatives are in **ADR 0004**; the vocabulary
+is in `CONTEXT.md` under "Problems". Read both before starting — the shape is not
+obvious from the code, and three of the pieces do not exist yet.
+
+What this needs, roughly in dependency order:
+
+1. **Generalise the validation core.** `Service.DraftValidation.validateDraft` is private
+   and takes a `DraftInfo`; it needs to take a `Schedule` plus a `(Day, Day)` range so
+   the calendar slice can be fed through it. This is the "virtual default draft" — there
+   is deliberately no default draft *row*, see the ADR. Today's step 3 split already
+   isolated the body, so this is close to mechanical.
+2. **Compromise has no implementation at all.** The soft score lives only inside the
+   optimizer's hill climbing (`Domain.Scheduler.scoreSlotWorker`, seven components, some
+   of them penalties) and reaches no client. Deriving per-assignment compromises from the
+   penalty components is new work, and each one owes the detail pane a sentence — "Ana
+   got the same station three days running", not "score 0.31".
+3. **A nullable zone label on `Station`**, for grouping the station view. Not
+   coordinates; the floor plan is deferred in the ADR.
+4. **An auto-approve flag on `AbsenceType`**, same shape as the existing `atYearlyLimit`,
+   so a sick call submitted from a mobile client takes effect immediately instead of
+   waiting for approval. **This lets a worker grant themselves an absence**, because
+   `handleRequestAbsence` is `requireSelfOrAdmin` — intended for sick leave, but it is an
+   authorization change, so do not slip it in silently.
+5. **The three visualizations plus the horizon control.** Projections of one problem set;
+   cells aggregate to most-severe plus earliest affected date.
+
+Two things to carry forward. The horizon is a **required input**, not a filter applied
+afterwards — a problem set without a date range is meaningless. And the reason this is
+not built on persisted violations is the sick-call case: an approved absence invalidates
+calendar assignments *without changing the calendar*, so anything recomputed on write
+misses it. That is the same blind spot as the staleness gate in item 1 step 3.
+
+### 3. The demo is not representative of a working restaurant
+
+`make fast-demo` reports **199 assignments, 159 unfilled**. A real restaurant is mostly
+staffed, so a demo that is 80% holes gives a false picture of what the problem view will
+show and makes it impossible to tell a real regression from the fixture. Either fix the
+fixture so it fills, or — better — split it into a few named scenarios (fully staffed;
+one worker calls in sick; a station reopens understaffed) so each surface can be
+exercised against the state it is meant to display.
+
+Note if you edit `demo/restaurant-setup.txt`: **every draft id in it is positional**, so
+inserting or removing a `draft create` shifts the rest.
+
+### 4. Shift delete orphans worker preferences
 
 `worker_shift_prefs.shift_name` is a plain string with no foreign key or cascade,
 and `sqlDeleteShift` in `src/Repo/SQLite.hs` is a bare
@@ -226,7 +281,7 @@ The Shifts page's confirm modal currently *warns the user* about this; the schem
 gap is unfixed. Consider the safe-delete / force-delete pattern already
 established for skills, stations and workers.
 
-### 3. Make the integration-test DB path unique per run
+### 5. Make the integration-test DB path unique per run
 
 **Agreed with the user, and still open.** Do not be misled by commit `455e48b`, whose
 message reads "Fix integration test coupling by path" — that commit actually carried the
@@ -251,7 +306,7 @@ the `-wal` and `-shm` sidecars too, not just the `.db`.**
 If you hit broad unrelated test failures, suspect this before suspecting a
 regression.
 
-### 4. The optimizer diverges on any date range containing a Saturday
+### 6. The optimizer diverges on any date range containing a Saturday
 
 **Found 2026-08-23 while moving the optimizer into `draft generate`.** Pre-existing,
 and unreachable at the default `opt-enabled` of `0` — which is the only reason nobody
@@ -289,7 +344,7 @@ Whoever picks this up: a clock check *inside* the rebuild, or an iteration cap, 
 turn an OOM into a slow response — worth having regardless of the root cause, because a
 `POST /api/drafts/:id/generate` that OOMs takes the server down with it.
 
-### 5. Smaller backlog
+### 7. Smaller backlog
 
 - **Station safe-delete ignores assignments.** `safeDeleteStation` checks worker
   station preferences and station required skills only. Assignment checking was
@@ -442,7 +497,7 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
   (routes, CSS, cross-cutting types), *then* fan agents out onto leaf files, each
   with an explicit list of files it owns and files it must not touch. Four agents
   worked concurrently this way with zero merge conflicts. Note that worktrees
-  isolate source but **not** `/tmp` — see item 3.
+  isolate source but **not** `/tmp` — see item 5.
 
 ---
 

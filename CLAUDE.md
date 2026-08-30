@@ -8,4 +8,7 @@
 
 ## Workflow
 
-- Keep OpenSpec changes small and independently shippable. Prefer breaking work into pieces that can be efficiently implemented over large monolithic changes; if a change feels large, look for natural split points.
+- This project uses `grill-with-docs`, not OpenSpec. Grill the design first — numbered questions, one round at a time, a recommendation with each — and wait for answers before implementing. Capture what gets settled as glossary entries in `CONTEXT.md` and, when a decision is hard to reverse and the result of a real trade-off, an ADR in `docs/adr/`.
+- Do not create new `openspec/changes/` entries. `openspec/specs/` and `openspec/changes/archive/` remain the historical record of what shipped — read them, don't extend them.
+- `docs/STATUS.md` is the authoritative record of agreed next steps. Keep it current: when you finish an item, delete it rather than leaving a stale claim behind.
+- Keep each shippable piece small and independent. Prefer breaking work into pieces that can be efficiently implemented over large monolithic changes; if a change feels large, look for natural split points.
