@@ -380,8 +380,26 @@ in-container: stack build --dry-run
   → Would build: * manars-kitchen-0.1.0.0        (every dependency reused)
 ```
 
-The cost is image size: 5.98 GB, against a lean image plus a host mount before.
-That is the trade — portability and a warm cache in the image, paid for in bytes.
+**Also VERIFIED 2026-08-30 on x86_64 Linux**, natively:
+```
+$ ./dev/claude-container.sh build          # cold: 15m20s total, 483s for this layer
+image size: 4.77 GB
+in-container: stack path --compiler-exe
+  → ~/.stack/programs/x86_64-linux/ghc-tinfo6-9.10.3/bin/ghc-9.10.3
+in-container: stack build --dry-run
+  → Would build: * manars-kitchen-0.1.0.0        (every dependency reused)
+```
+
+The cost is image size: 5.98 GB on macOS, 4.77 GB on Linux, against a lean image
+plus a host mount before. That is the trade — portability and a warm cache in the
+image, paid for in bytes.
+
+**On Linux the local `.stack-work` is shared with the host** — it lives in the
+mounted repo — so host and container builds reuse each other's artifacts and, after
+one build on each side, each is a no-op. That only holds while both pass the same
+flags. A host-only `--extra-lib-dirs` (this repo had one, an obsolete `libgmp.so`
+shim) makes stack *unregister* the package on the other side, so every alternation
+becomes a full local rebuild.
 
 **Do not add `--fast` to any stack invocation**, in the Dockerfile or at runtime.
 It changes the build flags, so nothing here matches and the entire dependency set

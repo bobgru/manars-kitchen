@@ -365,31 +365,32 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
   trusting them.**
-- **The container has not been re-verified on the Linux x86_64 laptop.** All of the
-  2026-08-30 container work — arch-selected downloads, the conditional `groupadd`,
-  the in-image Haskell toolchain, `CONTAINER_HOME`/`CONTAINER_REPO`, the
-  `safe.directory` exception — was verified only on arm64 macOS. Deliberately not
-  tested under `--platform linux/amd64` emulation, because compiling 146
-  dependencies through QEMU takes hours; run it natively on the laptop instead.
-  The reasoning says it should be a no-op there, and each claim is checkable:
-    - `dpkg --print-architecture` returns `amd64`, so node/stack/awscli/worktrunk
-      resolve to the same `x86_64`/`x64` URLs that were previously hardcoded. The
-      worktrunk layer specifically *was* verified on `linux/amd64`, checksum and
-      all.
-    - The conditional `groupadd` only skips when that gid already exists. The old
-      unconditional `groupadd --gid 1000` succeeded on that host, which proves gid
-      1000 is free once `userdel -r ubuntu` has run, so the new code takes the same
-      branch.
-    - `CONTAINER_HOME="/home/$(id -un)"` equals `$HOME` there, and if the checkout
-      is at `~/fun/manars-kitchen` then `CONTAINER_REPO` equals the old host-path
-      mount exactly. **If the checkout lives anywhere else, the mount path changes**
-      — harmless, but it will not match the old absolute paths in `.stack-work`.
-    - `safe.directory` is inert: a native Linux bind mount preserves ownership, so
-      the dubious-ownership error never arises.
-  **The one real regression to expect** is the loss of the 116 GB `~/.stack` mount:
-  the first image build downloads GHC and compiles all dependencies (~196s on
-  macOS), and other snapshots or GHC versions cached on that host are no longer
-  reused by the container.
+- **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
+  natively, not under emulation). Every claim the previous entry listed as expected
+  held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk
+  to the same URLs that used to be hardcoded, the conditional `groupadd` took the
+  create branch, `CONTAINER_HOME` = `$HOME` = `/home/bobgru`, `CONTAINER_REPO` =
+  the host path, and `safe.directory` was inert. Measured:
+    - cold image build 15m20s (the Haskell layer alone is 483s), image **4.77 GB**
+      — smaller than macOS's 5.98 GB.
+    - in-container: non-root uid 1000, no `sudo`, both firewall self-tests pass
+      against the Bedrock endpoint, hook and `settings.json` refuse writes with
+      `Read-only file system`, `wt` v0.75.0 runs with `pre-merge test` **APPROVED**,
+      `stack build --dry-run` wants only `manars-kitchen` itself.
+    - `stack build --pedantic` clean, `stack test` unit suite **379 examples, 0
+      failures, 1 pending** — identical to the macOS run.
+  **The `~/.stack` regression is smaller than feared on this host**: only the
+  project's own `.stack-work` is shared through the bind mount, and after one
+  build on each side, host and container builds are mutual no-ops — they reuse
+  each other's artifacts rather than thrashing. The one-off cost is that the
+  first container build **unregisters** the local package, because the host's
+  last build had recorded `--extra-lib-dirs=$HOME/.local/lib/gmp-shim` (the
+  obsolete `libgmp.so` workaround below; the host now has `libgmp-dev`, and that
+  directory no longer exists). Once neither side passes that flag, the caches
+  agree. Do not reintroduce a host-only `extra-lib-dirs`: it makes every
+  host↔container alternation a full local rebuild.
+  Not re-run here: the §3 `git branch -D` YOLO guardrail probe (the read-only
+  mounts were checked instead).
 
 ---
 
