@@ -207,6 +207,13 @@ RUN set -eux; \
     rm -rf "$HOME/deps/.stack-work"
 USER root
 
+# Git refuses to operate on a repository whose directory belongs to another user
+# ("fatal: detected dubious ownership"). Docker Desktop reports the *root* of a
+# bind mount as 0:0 even when the files inside it are the container user's, so
+# every git command in the mounted repo fails without this. The path must match
+# CONTAINER_REPO in claude-container.sh.
+RUN git config --system --add safe.directory "/home/${USERNAME}/fun/manars-kitchen"
+
 WORKDIR /home/${USERNAME}/fun/manars-kitchen
 
 # Starts as root to apply iptables, then drops to $USERNAME.

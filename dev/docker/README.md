@@ -471,13 +471,53 @@ $ docker run --rm -v "$PWD:/home/$USER/fun/manars-kitchen:rw" \
 Would build: * manars-kitchen-0.1.0.0
 ```
 
-**Not yet applied to the launcher.** It still sets `CONTAINER_HOME="$HOME"`,
-which is `/Users/<user>` on macOS while the image's `HOME` is `/home/<user>` —
-so every mount derived from it (the state volume, the statusline, `.gitconfig`,
-the worktrunk approvals) lands on a path the image does not use. Fixing it means
-setting `CONTAINER_HOME="/home/$(id -un)"` to match the Dockerfile and mounting
-the repo under it, and re-checking worktrunk's `worktree-path` template (§5.3)
-against the new location.
+**Applied.** The launcher now sets `CONTAINER_HOME="/home/$(id -un)"` to match the
+Dockerfile and derives `CONTAINER_REPO="$CONTAINER_HOME/fun/<repo>"`, which the
+repo is mounted at and which `-w` uses. Every other mount was already derived from
+`CONTAINER_HOME`, so they followed. On a Linux host whose home is `/home/<user>`
+this is byte-identical to the old behaviour.
+
+Note the coupling: the Dockerfile hardcodes `/home/${USERNAME}/fun/manars-kitchen`
+in `WORKDIR` and in the `safe.directory` below, while the launcher derives the last
+segment with `basename`. Renaming the checkout directory breaks the pair.
+
+### 5.9 Git refuses the mounted repo: the bind-mount root reports as 0:0
+
+With the paths fixed, every git command in the repo still failed:
+
+```
+fatal: detected dubious ownership in repository at '/home/<user>/fun/manars-kitchen'
+```
+
+The container user matched the host exactly (uid 504, gid 20) and the *files* in
+the repo were `504:20` — but the **root of the bind mount** reported as `0:0`:
+
+```
+container id:     uid=504 gid=20 user=bogrudem
+repo dir owner:   0:0            <-- the mount root
+a file owner:     504:20         <-- everything inside it
+```
+
+Git's ownership check looks at the repository directory, so it saw root-owned and
+refused. This never appeared on the Linux host, where the bind mount preserves
+ownership exactly; it is a Docker Desktop / virtiofs behaviour.
+
+**Fix:** the image marks that one path as trusted —
+`git config --system --add safe.directory "/home/${USERNAME}/fun/manars-kitchen"`.
+Deliberately the exact path and not `*`: worktrees created inside the mount are
+owned by the container user and need no exception, so `*` would widen the
+exception for nothing.
+
+**VERIFIED 2026-08-30** — the whole launcher path, on arm64 macOS:
+
+```
+pwd:            /home/bogrudem/fun/manars-kitchen
+git in repo:    draft-validation-split-and-problem-view
+wt approvals:   APPROVED  (post-start copy, pre-merge test)
+deps to build:  1                       (only manars-kitchen itself)
+stack build --pedantic                  clean, zero warnings
+stack test      258 integration + 379 unit examples, 0 failures, 1 pending
+```
 
 ---
 

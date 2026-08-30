@@ -484,12 +484,25 @@ build context is now the repo root, with a new `.dockerignore`. Cold build ~196s
 plus GHC download, warm rebuild 1.3s, image 5.98 GB. Details and measurements in
 `dev/docker/README.md` §5.4.
 
-**One thing still unfixed: the launcher does not work on macOS.** `CONTAINER_HOME`
-is `"$HOME"`, i.e. `/Users/<user>`, while the image's `HOME` is `/home/<user>`, so
-every derived mount lands on a path the image does not use — and a same-path
-`/Users` bind mount is **silently dropped** by Docker Desktop, no error, empty
-directory. The image itself builds and works on macOS; only the launcher's path
-mapping is wrong. Fix and evidence in `dev/docker/README.md` §5.8.
+**The container now works end to end on a macOS host.** Verified 2026-08-30:
+`stack build --pedantic` clean and `stack test` green inside it (258 + 379
+examples, 0 failures, 1 pending), with only `manars-kitchen` itself left to
+compile. Two things had to change beyond the image:
+
+- **Container paths no longer mirror the host.** `CONTAINER_HOME` is
+  `/home/$(id -un)`, matching the Dockerfile, and the repo mounts at
+  `$CONTAINER_HOME/fun/manars-kitchen`. Mirroring only ever existed to keep the
+  mounted `~/.stack`'s absolute paths valid, and on macOS it silently failed:
+  Docker Desktop **drops a bind mount whose target is the same `/Users` path as
+  its source**, with no error and an empty directory. `dev/docker/README.md` §5.8.
+- **`safe.directory` for the repo.** Docker Desktop reports the bind-mount *root*
+  as `0:0` even though the files inside are the container user's, so git refused
+  the repo with "detected dubious ownership" and nothing git-shaped worked. The
+  image marks that one path trusted. §5.9.
+
+There is a coupling to know about: the Dockerfile hardcodes
+`/home/${USERNAME}/fun/manars-kitchen` while the launcher derives the last segment
+with `basename`. Renaming the checkout directory breaks the pair.
 
 **Git guardrails** block destructive git commands via a `PreToolUse` hook at
 `~/.claude/hooks/block-dangerous-git.sh`, wired from `~/.claude/settings.json`.

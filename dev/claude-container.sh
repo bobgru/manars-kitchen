@@ -24,13 +24,25 @@ set -euo pipefail
 IMAGE=manars-kitchen-claude
 STATE_VOLUME=manars-kitchen-claude-state
 
-# Absolute host paths. The container deliberately mirrors them so Stack's cached
-# absolute paths and worktrunk's repo_path templates keep working.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_USER="$(id -un)"
 CONTAINER_UID="$(id -u)"
 CONTAINER_GID="$(id -g)"
-CONTAINER_HOME="$HOME"
+
+# Container paths, which are NOT the host's. This used to mirror the host
+# ($CONTAINER_HOME="$HOME", repo mounted at its own path) so that absolute paths
+# baked into the mounted ~/.stack stayed valid. That mount is gone -- the image
+# owns the toolchain -- so mirroring buys nothing, and on macOS it actively
+# breaks: $HOME is /Users/<user> there while the image's HOME is /home/<user>,
+# and Docker Desktop *silently drops* a bind mount whose target equals a /Users
+# source path, leaving an empty directory and no error. See
+# dev/docker/README.md 5.8.
+#
+# So use the image's own layout unconditionally. It matches the Dockerfile's HOME
+# and WORKDIR, and is identical to the old behaviour on a Linux host whose home is
+# /home/<user>.
+CONTAINER_HOME="/home/$CONTAINER_USER"
+CONTAINER_REPO="$CONTAINER_HOME/fun/$(basename "$REPO_DIR")"
 
 HOOK_SRC="$HOME/.claude/hooks/block-dangerous-git.sh"
 STATUSLINE_SRC="$HOME/.claude/statusline.sh"
@@ -153,8 +165,9 @@ run() {
     preflight
 
     local -a mounts=(
-        # The project. Read-write: this is the work.
-        -v "$REPO_DIR:$REPO_DIR:rw"
+        # The project. Read-write: this is the work. Mounted at the image's
+        # path, not the host's -- see CONTAINER_REPO above.
+        -v "$REPO_DIR:$CONTAINER_REPO:rw"
 
         # The host's ~/.stack is deliberately NOT mounted. The image owns the
         # Haskell toolchain -- GHC plus every dependency, built at image build
@@ -244,7 +257,7 @@ run() {
         -e "CONTAINER_USER=$CONTAINER_USER" \
         -e "SKIP_FIREWALL=${SKIP_FIREWALL:-0}" \
         -e "ALLOWED_DOMAINS_EXTRA=${ALLOWED_DOMAINS_EXTRA:-}" \
-        -w "$REPO_DIR" \
+        -w "$CONTAINER_REPO" \
         "$IMAGE" "$@"
 }
 
