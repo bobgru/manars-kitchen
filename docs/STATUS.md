@@ -365,6 +365,31 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
   trusting them.**
+- **The container has not been re-verified on the Linux x86_64 laptop.** All of the
+  2026-08-30 container work — arch-selected downloads, the conditional `groupadd`,
+  the in-image Haskell toolchain, `CONTAINER_HOME`/`CONTAINER_REPO`, the
+  `safe.directory` exception — was verified only on arm64 macOS. Deliberately not
+  tested under `--platform linux/amd64` emulation, because compiling 146
+  dependencies through QEMU takes hours; run it natively on the laptop instead.
+  The reasoning says it should be a no-op there, and each claim is checkable:
+    - `dpkg --print-architecture` returns `amd64`, so node/stack/awscli/worktrunk
+      resolve to the same `x86_64`/`x64` URLs that were previously hardcoded. The
+      worktrunk layer specifically *was* verified on `linux/amd64`, checksum and
+      all.
+    - The conditional `groupadd` only skips when that gid already exists. The old
+      unconditional `groupadd --gid 1000` succeeded on that host, which proves gid
+      1000 is free once `userdel -r ubuntu` has run, so the new code takes the same
+      branch.
+    - `CONTAINER_HOME="/home/$(id -un)"` equals `$HOME` there, and if the checkout
+      is at `~/fun/manars-kitchen` then `CONTAINER_REPO` equals the old host-path
+      mount exactly. **If the checkout lives anywhere else, the mount path changes**
+      — harmless, but it will not match the old absolute paths in `.stack-work`.
+    - `safe.directory` is inert: a native Linux bind mount preserves ownership, so
+      the dubious-ownership error never arises.
+  **The one real regression to expect** is the loss of the 116 GB `~/.stack` mount:
+  the first image build downloads GHC and compiles all dependencies (~196s on
+  macOS), and other snapshots or GHC versions cached on that host are no longer
+  reused by the container.
 
 ---
 
