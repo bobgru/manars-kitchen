@@ -4,7 +4,12 @@ module Service.DraftValidation
       -- * Validation
     , validateAssignment
     , buildLookBackContext
-    , validateDraftAgainstCalendar
+      -- * Validating a draft against the calendar
+      --
+      -- $draftValidation
+    , isDraftStale
+    , computeDraftViolations
+    , pruneDraftViolations
     ) where
 
 import qualified Data.Map.Strict as Map
@@ -79,74 +84,118 @@ buildLookBackContext (Schedule as) =
         , dow == Saturday || dow == Sunday
         ]
 
--- | Validate a draft against the current calendar state.
--- Returns a list of violations (assignments that were removed).
-validateDraftAgainstCalendar :: Repository -> Int -> IO [DraftViolation]
-validateDraftAgainstCalendar repo draftId = do
+-- $draftValidation
+--
+-- Validating a draft against the calendar is three separable things, and
+-- callers want different subsets of them:
+--
+-- * 'isDraftStale' — has the calendar moved since this draft was last
+--   validated?
+-- * 'computeDraftViolations' — which of the draft's assignments no longer
+--   hold? A read: no writes, and no staleness gate.
+-- * 'pruneDraftViolations' — the gate, the computation, and the removal.
+--
+-- Anything that reports violations to a reader wants 'computeDraftViolations'.
+-- Only a caller that intends to change the draft wants 'pruneDraftViolations'.
+
+-- | Has the calendar moved since this draft was last validated? True when any
+-- calendar commit carries a timestamp after the draft's last-validated
+-- timestamp.
+--
+-- Takes a loaded 'DraftInfo' rather than an id so a caller that already has the
+-- draft does not read it again.
+isDraftStale :: Repository -> DraftInfo -> IO Bool
+isDraftStale repo draft =
+    not . null <$> repoCalendarCommitsAfter repo (diLastValidatedAt draft)
+
+-- | Which of a draft's assignments violate a hard constraint against the
+-- current calendar? Writes nothing, and does /not/ gate on staleness: every
+-- call validates whatever the draft holds right now.
+--
+-- Returns @[]@ for a draft that does not exist and for one with no
+-- assignments.
+computeDraftViolations :: Repository -> Int -> IO [DraftViolation]
+computeDraftViolations repo draftId = do
+    mDraft <- repoGetDraft repo draftId
+    case mDraft of
+        Nothing    -> return []
+        Just draft -> snd <$> validateDraft repo draft
+
+-- | Validate a draft against the current calendar and remove the assignments
+-- that no longer hold, returning what was removed.
+--
+-- A no-op returning @[]@ unless the draft is stale — re-validating a draft the
+-- calendar has not moved under would find nothing new. Once past that gate the
+-- last-validated timestamp is bumped whether or not anything was removed, so a
+-- clean pass is not repeated on the next open.
+pruneDraftViolations :: Repository -> Int -> IO [DraftViolation]
+pruneDraftViolations repo draftId = do
     mDraft <- repoGetDraft repo draftId
     case mDraft of
         Nothing -> return []
         Just draft -> do
-            -- Stale detection: check for calendar commits after last-validated timestamp
-            commits <- repoCalendarCommitsAfter repo (diLastValidatedAt draft)
-            if null commits
-                then return []  -- not stale, skip validation
+            stale <- isDraftStale repo draft
+            if not stale
+                then return []
                 else do
-                    -- Load draft assignments
-                    draftSched <- repoLoadDraftAssignments repo draftId
-                    let draftAssignments = Set.toList (unSchedule draftSched)
-                    if null draftAssignments
-                        then do
-                            -- No assignments to validate, just update timestamp
-                            repoUpdateDraftValidatedAt repo draftId
-                            return []
+                    (draftSched, violations) <- validateDraft repo draft
+                    if null violations
+                        then return ()
                         else do
-                            -- Load look-back context (7 days before draft start)
-                            let lookBackStart = addDays (-7) (diDateFrom draft)
-                                lookBackEnd   = addDays (-1) (diDateFrom draft)
-                            lookBackSched <- Cal.loadCalendarSlice repo lookBackStart lookBackEnd
+                            let violatingAssigns =
+                                    Set.fromList (map dvAssignment violations)
+                                cleanedSched = Schedule (Set.difference
+                                    (unSchedule draftSched) violatingAssigns)
+                            repoSaveDraftAssignments repo draftId cleanedSched
+                    repoUpdateDraftValidatedAt repo draftId
+                    return violations
 
-                            -- Build the SchedulerContext for validation
-                            let prevWeekendWorkers = buildLookBackContext lookBackSched
-                            skillCtx   <- repoLoadSkillCtx repo
-                            workerCtx  <- repoLoadWorkerCtx repo
-                            absenceCtx <- repoLoadAbsenceCtx repo
-                            cfg        <- repoLoadSchedulerConfig repo
+-- | The shared body of 'computeDraftViolations' and 'pruneDraftViolations':
+-- validate every assignment the draft holds against a calendar look-back
+-- window. Returns the draft's assignments alongside the violations so a caller
+-- that prunes does not load them a second time.
+validateDraft :: Repository -> DraftInfo -> IO (Schedule, [DraftViolation])
+validateDraft repo draft = do
+    draftSched <- repoLoadDraftAssignments repo (diId draft)
+    let draftAssignments = Set.toList (unSchedule draftSched)
+    if null draftAssignments
+        then return (draftSched, [])
+        else do
+            -- Load look-back context (7 days before draft start)
+            let lookBackStart = addDays (-7) (diDateFrom draft)
+                lookBackEnd   = addDays (-1) (diDateFrom draft)
+            lookBackSched <- Cal.loadCalendarSlice repo lookBackStart lookBackEnd
 
-                            let ctx = SchedulerContext
-                                    { schSkillCtx    = skillCtx
-                                    , schWorkerCtx   = workerCtx
-                                    , schAbsenceCtx  = absenceCtx
-                                    , schSlots       = []
-                                    , schWorkers     = Set.empty
-                                    , schClosedSlots = Set.empty
-                                    , schShifts      = []
-                                    , schPrevWeekendWorkers = prevWeekendWorkers
-                                    , schConfig      = cfg
-                                    , schPeriodBounds = (diDateFrom draft, diDateTo draft)
-                                    , schCalendarHours = Map.empty
-                                    }
+            -- Build the SchedulerContext for validation
+            let prevWeekendWorkers = buildLookBackContext lookBackSched
+            skillCtx   <- repoLoadSkillCtx repo
+            workerCtx  <- repoLoadWorkerCtx repo
+            absenceCtx <- repoLoadAbsenceCtx repo
+            cfg        <- repoLoadSchedulerConfig repo
 
-                            -- Build combined schedule: look-back + draft assignments
-                            let combinedSched = Schedule (Set.union (unSchedule lookBackSched)
-                                                                    (unSchedule draftSched))
+            let ctx = SchedulerContext
+                    { schSkillCtx    = skillCtx
+                    , schWorkerCtx   = workerCtx
+                    , schAbsenceCtx  = absenceCtx
+                    , schSlots       = []
+                    , schWorkers     = Set.empty
+                    , schClosedSlots = Set.empty
+                    , schShifts      = []
+                    , schPrevWeekendWorkers = prevWeekendWorkers
+                    , schConfig      = cfg
+                    , schPeriodBounds = (diDateFrom draft, diDateTo draft)
+                    , schCalendarHours = Map.empty
+                    }
 
-                            -- Validate each draft assignment
-                            let violations = concatMap (\a ->
-                                    case validateAssignment ctx a combinedSched of
-                                        Just v  -> [v]
-                                        Nothing -> []
-                                    ) draftAssignments
+            -- Build combined schedule: look-back + draft assignments
+            let combinedSched = Schedule (Set.union (unSchedule lookBackSched)
+                                                    (unSchedule draftSched))
 
-                            -- Auto-remove violating assignments
-                            if null violations
-                                then do
-                                    repoUpdateDraftValidatedAt repo draftId
-                                    return []
-                                else do
-                                    let violatingAssigns = Set.fromList (map dvAssignment violations)
-                                        cleanedSched = Schedule (Set.difference
-                                            (unSchedule draftSched) violatingAssigns)
-                                    repoSaveDraftAssignments repo draftId cleanedSched
-                                    repoUpdateDraftValidatedAt repo draftId
-                                    return violations
+            -- Validate each draft assignment
+            let violations = concatMap (\a ->
+                    case validateAssignment ctx a combinedSched of
+                        Just v  -> [v]
+                        Nothing -> []
+                    ) draftAssignments
+
+            return (draftSched, violations)

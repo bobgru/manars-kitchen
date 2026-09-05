@@ -42,12 +42,14 @@ argument weakens — noted per item.
 
 | # | Assumption | If it does not hold |
 |---|---|---|
-| A1 | **A git guardrail PreToolUse hook is installed and executable.** Ours is `~/.claude/hooks/block-dangerous-git.sh`, wired from `~/.claude/settings.json`, blocking `git push`, `reset --hard`, `clean -f`, `branch -D`, `checkout .`, `restore .`, `wt step push`. | YOLO mode has no protection against destructive git commands. The launcher refuses to start (`preflight`) rather than run unprotected. |
+| A1 | **A git guardrail PreToolUse hook is installed and executable.** Ours is `~/.claude/hooks/block-dangerous-git.sh`, wired from `~/.claude/settings.json`, blocking `git push`, `reset --hard`, `clean -f`, `branch -D`, `checkout .`, `restore .`, `wt step push`, `wt merge --no-hooks`. It is the **host's** script, bind-mounted read-only — installing it on the host is what protects the container, so there is one copy and no drift. | YOLO mode has no protection against destructive git commands. The launcher refuses to start (`preflight`) rather than run unprotected. |
 | A2 | **The hook is executable.** A non-executable hook **fails open** — the tool call proceeds. | Silent loss of all protection. The launcher checks `-x` explicitly for this reason. |
+| A2b | **`jq` is on `PATH`.** The hook parses the tool input with it. It now fails *closed* if `jq` is absent, but the launcher does not check this. | Every `Bash` call is blocked until `jq` is installed — noisy, but not a silent loss of protection. |
 | A3 | **The repo is trusted.** Anthropic's docs are explicit that a container does not stop a malicious project from exfiltrating anything reachable inside it, including Claude credentials. | This design is not a malware sandbox. Do not point it at untrusted code. |
 | A4 | **Docker is usable without sudo** and the kernel supports `NET_ADMIN`/`NET_RAW` for iptables. | The firewall cannot be applied. `SKIP_FIREWALL=1` degrades to no egress control — announced loudly at startup. |
-| A5 | **Single-user Linux workstation, uid/gid 1000.** The container user is built to match. | The mounted build cache is unusable (see A6) and file ownership breaks. Rebuild the image with `--build-arg USER_UID=...`. |
-| A6 | **A large host build cache exists and is worth reusing.** Here: `~/.stack`, 116 GB. | Drop the mount and accept a long cold start. This is the single biggest performance decision. |
+| A5 | **The container user matches the host's uid and gid.** The launcher passes `id -u`/`id -g`; the image reuses an existing group when that gid is already taken, so a macOS host (gid 20 = `dialout`) builds too. | Files written in the mounted repo get the wrong owner. |
+| A6 | ~~A large host build cache exists and is worth reusing.~~ **No longer assumed.** The image owns GHC and every dependency; the host's `~/.stack` is not mounted. See §5.4. | n/a |
+| A6b | **The repo is mounted at `/home/<user>/fun/manars-kitchen`, not at its host path.** | On macOS a same-path bind mount is silently dropped and the container sees an empty directory. See §5.8. |
 | A7 | **Worktrunk (`wt`) is used for parallel agents**, and its worktree path template is under our control. Default template places worktrees in a *sibling* directory of the repo. | Worktrees land outside the bind mount and are invisible to the container. See §5.3. |
 | A8 | **Credentials are supplied by environment variable**, obtained on the host. Interactive `/login` cannot complete in a headless container — the OAuth callback cannot reach a browser, and neither can an AWS SSO login. | No authentication. See §7 for the three paths; note `claude setup-token` is **not** the answer for Bedrock. |
 | A9 | **Mounted paths are reconstructible.** Repo is in git; the build cache can be rebuilt. | You are trusting a YOLO agent with unrecoverable data. Don't. |
@@ -84,6 +86,7 @@ BLOCKED  git push origin master
 BLOCKED  git -C /home/.../.worktrees/x push
 BLOCKED  git reset --hard
 BLOCKED  wt step push
+BLOCKED  wt merge --no-hooks
 allowed  wt merge
 allowed  git status
 ```
@@ -246,22 +249,91 @@ subcommand, so `git -C /path/to/worktree push` contains no literal `git push`
 and slips through. This is not hypothetical: driving parallel worktrees from a
 primary checkout is exactly `git -C <path>` shaped.
 
-Our hook normalises first — collapsing whitespace and iteratively stripping
-git's and worktrunk's global options — then matches. **VERIFIED** across 32
-cases, including false-positive checks so ordinary work is not blocked:
+Our hook normalises first — collapsing whitespace and stripping git's global
+options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--namespace`, `--exec-path`,
+and short flags) — then matches both the raw and the normalised form.
+**RE-VERIFIED 2026-08-30** across 45 cases, including false-positive checks so
+ordinary work is not blocked:
 
 ```
 BLOCKED  git -C dir -c k=v push          allowed  git log --grep=push
 BLOCKED  git --git-dir=... push          allowed  git commit -m "add push handler"
 BLOCKED  git branch -Dr origin/x         allowed  git branch -d merged-branch
+BLOCKED  git  push  (double space)       allowed  git --no-pager log --oneline -3
 ```
 
-### 5.2 `wt merge` should NOT be blocked
+**Do not re-install the hook from the `git-guardrails-claude-code` skill and
+assume you are done.** That skill bundles a *naive* script — a literal
+`grep -qE` over an unnormalised command string, with no whitespace collapsing,
+no global-option stripping, no worktrunk patterns, and a `jq` call that **fails
+open** if `jq` is missing. Installing it verbatim silently reverts every
+protection in this section. It happened on 2026-08-30: the host had no hook at
+all, the skill was run, and the naive version had to be brought back up to what
+this document already claimed. If you re-install, re-run the 45-case probe.
+
+### 5.2 `wt merge` should NOT be blocked, and it is not about remotes
 
 We initially blocked it as a "pushing command". **That was wrong.** `wt merge` is
 entirely local — commit, squash, rebase, fast-forward, cleanup — and never
 fetches or pushes. Blocking it also defeats a `pre-merge` hook used as a local
-CI gate. `wt step push` is the command that actually pushes. Corrected.
+CI gate, and it breaks the containerized workflow, whose whole purpose is to
+leave results on the default branch.
+
+**A second correction, 2026-08-30.** This section used to end "`wt step push` is
+the command that actually pushes". That is also wrong. `wt step push` is
+`Fast-forward target to current branch` — it takes a `[TARGET]` branch and
+`--no-ff`, has no refspec and no remote argument, and never contacts a remote
+either. **Worktrunk has no remote surface at all**: the whole command set is
+`switch`, `list`, `remove`, `merge`, `step`, `hook`, `config`, and none of them
+reach the network. Verified against `wt` v0.75.0.
+
+So the real distinction is not local-vs-remote — both move the local default
+branch — it is **the pre-merge gate**:
+
+- `wt merge` runs hooks by default, so the project's `[[pre-merge]]` gate
+  (`stack build --pedantic && stack test`) has to pass first. Allowed.
+- `wt step push` is a raw building block that runs no hooks, so it lands
+  untested work on the default branch. Blocked.
+- `wt merge --no-hooks` is the supported bypass of that same gate. **Blocked as
+  of 2026-08-30.** `--no-hooks` on `wt switch` is legitimate and stays allowed.
+
+The only way worktrunk reaches a remote is a hook *you* configure that shells
+out to `git push` — and the guardrail **would not stop it**, because the hook
+inspects the command line Claude submits (`wt merge`), not the subprocesses it
+spawns.
+
+**The `[[pre-merge]]` gate is inert until approved, and the container has no
+approval.** Worktrunk requires a one-time per-project approval before it will run
+project hooks; until then `wt config approvals list` reports them UNAPPROVED and
+they are silently skipped. Plain `wt config approvals add` **fails in any
+non-interactive session** ("Cannot prompt for approval in non-interactive
+environment") — use `wt config approvals add --yes`, having read the command list
+it prints.
+
+Granted on the macOS host 2026-08-30. Approvals live in
+`~/.config/worktrunk/approvals.toml`, keyed by repo identifier
+(`projects."github.com/bobgru/manars-kitchen"`), and are **machine-local, not in
+the repo**. Until 2026-08-30 the container had no approval at all and an agent
+inside could not grant one, so in YOLO mode `wt merge` landed work on the default
+branch without running the tests — the one place the "it tests first" argument
+does real work was the one place it did not hold.
+
+**Fixed:** `claude-container.sh` now bind-mounts that file read-only. Read-only so
+a YOLO session cannot approve new commands for itself.
+
+The worry that motivated leaving this out — that worktrunk keeps an
+`approvals.toml.lock` beside the file, so a read-only mount would break commands
+needing that lock — **was tested and is unfounded.** A read-only *file* mount does
+not make its parent directory read-only:
+
+```
+-- file readable?             yes
+-- file writable?             Read-only file system   (intended)
+-- parent dir writable?       yes: approvals.toml.lock created
+```
+
+Still verify with `wt config approvals list` inside the container after any change
+— but see §5.7 first, because on a macOS host `wt` cannot run in there at all.
 
 ### 5.3 Worktrees land outside the mount
 
@@ -279,24 +351,59 @@ worktree-path = "{{ repo_path }}/.worktrees/{{ branch | sanitize }}"
 `.worktrees/` is already in worktrunk's built-in copy-ignored excludes. Add it to
 `.gitignore`.
 
-### 5.4 Reusing a host build cache requires identical user and HOME
+### 5.4 The image owns the Haskell toolchain; the host cache is not mounted
 
-Build tools bake absolute paths into their caches. Reusing the host's
-`~/.stack` (116 GB: 58 GB of compiler toolchains, 56 GB of compiled
-dependencies) requires the container user to match the host in **name, uid, gid
-and HOME**. Get this wrong and the mount is dead weight.
+This used to mount the host's `~/.stack` (116 GB: 58 GB of compiler toolchains,
+56 GB of compiled dependencies) and install no compiler at all. That required the
+host to be **Linux, on a matching architecture, with GHC actually present in
+`~/.stack/programs`** — three assumptions that all fail on a macOS host, where GHC
+lives in `~/.ghcup` as Mach-O binaries and `~/.stack/programs` does not exist. The
+container had no compiler and could not build the project.
 
-Two incidental notes: Ubuntu 24.04 ships its own uid-1000 `ubuntu` user that
-collides and must be removed first; and glibc is backward compatible, so a
-newer base image runs the host's older-glibc compiler binaries fine.
+Now the image installs GHC via `stack setup` — which picks the compiler the pinned
+snapshot names, so the version is not written down twice — and pre-builds every
+dependency with `stack build --only-dependencies`. **The host's `~/.stack` is no
+longer mounted**, because mounting it would shadow all of that.
 
-**VERIFIED** — the container installs no compiler, yet:
+Only `stack.yaml`, `stack.yaml.lock`, `manars-kitchen.cabal` and `Setup.hs` are
+copied before that step, so Docker's layer cache reuses the whole dependency build
+whenever those four are unchanged. Editing source does not invalidate it.
+
+**VERIFIED 2026-08-30** on arm64 macOS, which the old design could not build at all:
 ```
-toolchains visible: 26
-The Glorious Glasgow Haskell Compilation System, version 9.10.3
-$ stack build   →   0.47s (no-op, cache is live)
-$ npm run build →   2.0s
+$ ./dev/claude-container.sh build          # cold:  146 dependency actions, ~196s
+$ ./dev/claude-container.sh build          # warm:  1.3s, 16 CACHED layers
+image size: 5.98 GB
+in-container: stack path --compiler-exe
+  → ~/.stack/programs/aarch64-linux/ghc-tinfo6-9.10.3/bin/ghc-9.10.3
+in-container: stack build --dry-run
+  → Would build: * manars-kitchen-0.1.0.0        (every dependency reused)
 ```
+
+**Also VERIFIED 2026-08-30 on x86_64 Linux**, natively:
+```
+$ ./dev/claude-container.sh build          # cold: 15m20s total, 483s for this layer
+image size: 4.77 GB
+in-container: stack path --compiler-exe
+  → ~/.stack/programs/x86_64-linux/ghc-tinfo6-9.10.3/bin/ghc-9.10.3
+in-container: stack build --dry-run
+  → Would build: * manars-kitchen-0.1.0.0        (every dependency reused)
+```
+
+The cost is image size: 5.98 GB on macOS, 4.77 GB on Linux, against a lean image
+plus a host mount before. That is the trade — portability and a warm cache in the
+image, paid for in bytes.
+
+**On Linux the local `.stack-work` is shared with the host** — it lives in the
+mounted repo — so host and container builds reuse each other's artifacts and, after
+one build on each side, each is a no-op. That only holds while both pass the same
+flags. A host-only `--extra-lib-dirs` (this repo had one, an obsolete `libgmp.so`
+shim) makes stack *unregister* the package on the other side, so every alternation
+becomes a full local rebuild.
+
+**Do not add `--fast` to any stack invocation**, in the Dockerfile or at runtime.
+It changes the build flags, so nothing here matches and the entire dependency set
+recompiles. `CLAUDE.md` states this as a rule for agents.
 
 ### 5.5 A newer base image can fix host tooling bugs
 
@@ -312,6 +419,123 @@ corrupt each other and produce **20–99 misleading failures on correct code**,
 including trivial assertions. `/tmp` is container-local, so *one* container per
 agent would isolate this — but a single container running parallel worktrees
 still collides. Fix the test paths; don't rely on the container.
+
+### 5.7 On a macOS host, `wt` does not work in the container at all
+
+The image deliberately does not install worktrunk — §4 mounts the **host's**
+binary to save a Rust toolchain in the image:
+
+```sh
+[ -n "$WT_BIN" ] && mounts+=(-v "$WT_BIN:/usr/local/bin/wt:ro")
+```
+
+That only works when the host and the container share OS and architecture. This
+setup was built on a Linux host, where it does. On a macOS host the mounted
+binary is Mach-O and the container is Linux, so **every `wt` call inside dies
+immediately**. Measured 2026-08-30 on macOS 15 / Docker Desktop 29.7.2
+(`linux/aarch64`):
+
+```
+$ file $(command -v wt)
+/opt/homebrew/bin/wt: Mach-O 64-bit executable arm64
+
+$ docker run --rm -v /tmp/wt-probe:/usr/local/bin/wt:ro debian:stable-slim \
+      /usr/local/bin/wt --version
+exec /usr/local/bin/wt: exec format error          # exit 255
+```
+
+Consequences on a macOS host: no parallel-worktree workflow inside the container,
+and the §5.2 approvals question is moot there — no usable `wt` means no `wt merge`
+to gate. The approvals mount is still correct, for the Linux host where `wt` runs.
+
+Three ways out, none done: install worktrunk in the image (costs a Rust toolchain,
+and A6's whole point is to keep the image lean); mount a Linux `wt` built or
+downloaded separately; or accept that `wt` is host-side only on macOS and drive
+worktrees from the host, using the container for builds. **Also note
+`/opt/homebrew` is not in Docker Desktop's default File Sharing list**, so even a
+Linux binary living there would be refused with "mounts denied" until the path is
+added under Settings → Resources → File Sharing.
+
+### 5.8 On macOS, a same-path bind mount is silently dropped
+
+`claude-container.sh` mirrors host absolute paths — `-v "$REPO_DIR:$REPO_DIR:rw"`
+— and §1's design constraint 2 explains why: Stack baked absolute paths into the
+mounted `~/.stack`, so the paths had to match. **On macOS that mount does not
+happen at all, and Docker reports no error.** The container sees an empty
+directory, or none:
+
+```
+$ docker run --rm -v "$PWD:$PWD:rw" -w "$PWD" IMAGE bash -c 'ls stack.yaml'
+  (nothing — the directory exists because -w created it, and is empty)
+
+$ docker run --rm -v "$PWD:/mnt/repo:ro" IMAGE bash -c 'ls /mnt/repo | wc -l'
+  29                                    # a different target works fine
+```
+
+The host path is `/Users/<user>/...`, which Docker Desktop already manages inside
+its VM; bind-mounting a host `/Users` path onto the same container path is
+dropped rather than refused. Contrast §5.7, where an unshared path was refused
+loudly with "mounts denied" — this failure is silent, which makes it much worse.
+
+**The reason for mirroring is gone.** It existed only to keep the mounted
+`~/.stack`'s absolute paths valid, and §5.4 removed that mount. So the repo can
+be mounted wherever the image expects it. **VERIFIED** — mounting at the image's
+own `HOME` shape works on macOS and gives a working build:
+
+```
+$ docker run --rm -v "$PWD:/home/$USER/fun/manars-kitchen:rw" \
+      -w "/home/$USER/fun/manars-kitchen" -e HOME="/home/$USER" IMAGE \
+      bash -c 'stack build --dry-run'
+Would build: * manars-kitchen-0.1.0.0
+```
+
+**Applied.** The launcher now sets `CONTAINER_HOME="/home/$(id -un)"` to match the
+Dockerfile and derives `CONTAINER_REPO="$CONTAINER_HOME/fun/<repo>"`, which the
+repo is mounted at and which `-w` uses. Every other mount was already derived from
+`CONTAINER_HOME`, so they followed. On a Linux host whose home is `/home/<user>`
+this is byte-identical to the old behaviour.
+
+Note the coupling: the Dockerfile hardcodes `/home/${USERNAME}/fun/manars-kitchen`
+in `WORKDIR` and in the `safe.directory` below, while the launcher derives the last
+segment with `basename`. Renaming the checkout directory breaks the pair.
+
+### 5.9 Git refuses the mounted repo: the bind-mount root reports as 0:0
+
+With the paths fixed, every git command in the repo still failed:
+
+```
+fatal: detected dubious ownership in repository at '/home/<user>/fun/manars-kitchen'
+```
+
+The container user matched the host exactly (uid 504, gid 20) and the *files* in
+the repo were `504:20` — but the **root of the bind mount** reported as `0:0`:
+
+```
+container id:     uid=504 gid=20 user=bogrudem
+repo dir owner:   0:0            <-- the mount root
+a file owner:     504:20         <-- everything inside it
+```
+
+Git's ownership check looks at the repository directory, so it saw root-owned and
+refused. This never appeared on the Linux host, where the bind mount preserves
+ownership exactly; it is a Docker Desktop / virtiofs behaviour.
+
+**Fix:** the image marks that one path as trusted —
+`git config --system --add safe.directory "/home/${USERNAME}/fun/manars-kitchen"`.
+Deliberately the exact path and not `*`: worktrees created inside the mount are
+owned by the container user and need no exception, so `*` would widen the
+exception for nothing.
+
+**VERIFIED 2026-08-30** — the whole launcher path, on arm64 macOS:
+
+```
+pwd:            /home/bogrudem/fun/manars-kitchen
+git in repo:    draft-validation-split-and-problem-view
+wt approvals:   APPROVED  (post-start copy, pre-merge test)
+deps to build:  1                       (only manars-kitchen itself)
+stack build --pedantic                  clean, zero warnings
+stack test      258 integration + 379 unit examples, 0 failures, 1 pending
+```
 
 ---
 

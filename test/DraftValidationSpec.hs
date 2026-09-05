@@ -8,20 +8,23 @@ import qualified Data.Set as Set
 import Data.Time (Day, TimeOfDay(..), fromGregorian)
 
 import Domain.Types
-    ( WorkerId(..), StationId(..), SkillId(..)
+    ( WorkerId(..), StationId(..), SkillId(..), AbsenceTypeId(..)
     , Slot(..), Assignment(..), Schedule(..)
     )
 import Domain.Scheduler (SchedulerContext(..))
 import Domain.Skill (SkillContext(..))
 import Domain.Worker (WorkerContext(..))
-import Domain.Absence (emptyAbsenceContext)
+import Domain.Absence
+    ( AbsenceContext(..), AbsenceType(..)
+    , emptyAbsenceContext, requestAbsence, approveAbsence
+    )
 import Domain.SchedulerConfig (defaultConfig)
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..))
+import Repo.Types (Repository(..), DraftInfo)
 import Service.DraftValidation
     ( DraftViolation(..)
     , validateAssignment, buildLookBackContext
-    , validateDraftAgainstCalendar
+    , computeDraftViolations, pruneDraftViolations, isDraftStale
     )
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
@@ -66,6 +69,34 @@ createForced repo from to =
         <$> Draft.createDraft repo opts from to
   where
     opts = Draft.defaultCreateDraftOpts { Draft.cdoForce = True }
+
+-- | Create a forced draft and hand the action both its id and its loaded
+-- 'DraftInfo' — 'isDraftStale' takes the record, not the id.
+withDraft :: Repository -> Day -> Day -> (Int -> DraftInfo -> IO ()) -> IO ()
+withDraft repo from to action = do
+    result <- createForced repo from to
+    case result of
+        Left err  -> expectationFailure err
+        Right did -> do
+            mDraft <- repoGetDraft repo did
+            case mDraft of
+                Nothing    -> expectationFailure
+                    ("draft " ++ show did ++ " not found after creation")
+                Just draft -> action did draft
+
+-- | An absence context holding one approved single-day absence. Saving this
+-- invalidates any draft assignment for that worker on that day *without*
+-- committing anything to the calendar — which is exactly the situation that
+-- separates 'computeDraftViolations' from 'pruneDraftViolations'.
+absenceFor :: WorkerId -> Day -> AbsenceContext
+absenceFor w day =
+    let atype = AbsenceTypeId 1
+        ctx0  = emptyAbsenceContext
+            { acTypes = Map.singleton atype (AbsenceType "vacation" False) }
+        (ctx1, aid) = requestAbsence w atype day day ctx0
+    in case approveAbsence aid ctx1 of
+        Just ctx2 -> ctx2
+        Nothing   -> error "absenceFor: could not approve the absence"
 
 -- Workers
 w_marco, w_lucia, w_carol :: WorkerId
@@ -209,9 +240,9 @@ spec = do
             buildLookBackContext sched `shouldBe` Set.empty
 
     -- ---------------------------------------------------------------
-    -- Integration tests for validateDraftAgainstCalendar
+    -- Integration tests for pruneDraftViolations
     -- ---------------------------------------------------------------
-    describe "validateDraftAgainstCalendar" $ do
+    describe "pruneDraftViolations" $ do
         it "returns empty when calendar has not changed since draft creation" $
             withTestRepo $ \repo -> do
                 -- Create a draft (no calendar changes)
@@ -219,7 +250,7 @@ spec = do
                 case result of
                     Left err -> expectationFailure err
                     Right did -> do
-                        violations <- validateDraftAgainstCalendar repo did
+                        violations <- pruneDraftViolations repo did
                         violations `shouldBe` []
 
         it "removes violating assignments and returns violations when calendar changed" $
@@ -247,7 +278,7 @@ spec = do
                         Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" calSched
 
                         -- Validate the draft
-                        violations <- validateDraftAgainstCalendar repo did
+                        violations <- pruneDraftViolations repo did
                         -- Should have violations for Marco's weekend assignments
                         length violations `shouldSatisfy` (>= 1)
                         all (\v -> assignWorker (dvAssignment v) == w_marco) violations
@@ -284,9 +315,81 @@ spec = do
                         Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" calSched
 
                         -- First call: should detect violations
-                        violations1 <- validateDraftAgainstCalendar repo did
+                        violations1 <- pruneDraftViolations repo did
                         length violations1 `shouldSatisfy` (>= 1)
 
                         -- Second call: no further calendar changes, should return empty
-                        violations2 <- validateDraftAgainstCalendar repo did
+                        violations2 <- pruneDraftViolations repo did
                         violations2 `shouldBe` []
+
+    -- ---------------------------------------------------------------
+    -- isDraftStale: the gate, on its own
+    -- ---------------------------------------------------------------
+    describe "isDraftStale" $ do
+        it "is False when no calendar commit has landed since the draft" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \_ draft ->
+                    isDraftStale repo draft `shouldReturn` False
+
+        it "is True once a calendar commit lands after the draft" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \_ draft -> do
+                    threadDelay 1100000  -- committed_at > last_validated_at
+                    Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend"
+                        (mkSchedule [mkAssignment 5 1 (apr 25) 9])
+                    isDraftStale repo draft `shouldReturn` True
+
+    -- ---------------------------------------------------------------
+    -- computeDraftViolations: the read half of the split. No staleness
+    -- gate, no writes.
+    -- ---------------------------------------------------------------
+    describe "computeDraftViolations" $ do
+        it "reports violations on a draft the calendar has not moved under" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \did draft -> do
+                    repoSaveDraftAssignments repo did
+                        (mkSchedule [mkAssignment 5 1 (may 2) 9])
+                    -- Marco is now on approved absence on May 2. No calendar
+                    -- commit, so the draft is not stale.
+                    repoSaveAbsenceCtx repo (absenceFor w_marco (may 2))
+                    isDraftStale repo draft `shouldReturn` False
+
+                    -- The gated path therefore sees nothing at all...
+                    pruneDraftViolations repo did `shouldReturn` []
+
+                    -- ...while the read reports the violation.
+                    violations <- computeDraftViolations repo did
+                    map dvConstraint violations `shouldBe` ["absence conflict"]
+                    map (assignWorker . dvAssignment) violations
+                        `shouldBe` [w_marco]
+
+        it "does not remove the assignments it reports" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \did _ -> do
+                    let draftSched = mkSchedule
+                            [ mkAssignment 5 1 (may 2) 9    -- Marco, will violate
+                            , mkAssignment 8 1 (may 4) 9    -- Lucia, will not
+                            ]
+                    repoSaveDraftAssignments repo did draftSched
+                    repoSaveAbsenceCtx repo (absenceFor w_marco (may 2))
+
+                    violations1 <- computeDraftViolations repo did
+                    length violations1 `shouldBe` 1
+
+                    -- The draft is untouched: both assignments still there.
+                    afterSched <- repoLoadDraftAssignments repo did
+                    afterSched `shouldBe` draftSched
+
+                    -- And nothing was consumed — a second call reports the same
+                    -- violation, so last_validated_at was not bumped either.
+                    violations2 <- computeDraftViolations repo did
+                    violations2 `shouldBe` violations1
+
+        it "returns empty for a draft with no assignments" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \did _ ->
+                    computeDraftViolations repo did `shouldReturn` []
+
+        it "returns empty for a draft that does not exist" $
+            withTestRepo $ \repo ->
+                computeDraftViolations repo 9999 `shouldReturn` []

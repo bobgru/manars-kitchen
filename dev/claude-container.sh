@@ -9,44 +9,61 @@
 #
 # What this does and does not protect:
 #
-#   Does    -- confines writes to the repo and ~/.stack, and confines network
-#              egress to an allowlist of Anthropic domains. Keeps the git
-#              guardrail hook un-editable by mounting it and the settings file
-#              read-only.
-#   Does NOT -- protect the mounted paths themselves. The agent can still damage
-#              the repo working tree or the 116G ~/.stack cache; both are
-#              recoverable but the cache is slow to rebuild. It also does not
-#              prevent exfiltration of anything reachable inside the container
-#              over the permitted egress. Only run this on a repo you trust.
+#   Does    -- confines writes to the repo, and confines network egress to an
+#              allowlist of Anthropic domains. Keeps the git guardrail hook
+#              un-editable by mounting it and the settings file read-only. The
+#              Haskell toolchain lives in the image, so the host's ~/.stack is
+#              not exposed at all.
+#   Does NOT -- protect the repo working tree, which is mounted read-write and is
+#              the one thing the agent can still damage. It also does not prevent
+#              exfiltration of anything reachable inside the container over the
+#              permitted egress. Only run this on a repo you trust.
 
 set -euo pipefail
 
 IMAGE=manars-kitchen-claude
 STATE_VOLUME=manars-kitchen-claude-state
 
-# Absolute host paths. The container deliberately mirrors them so Stack's cached
-# absolute paths and worktrunk's repo_path templates keep working.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER_USER="$(id -un)"
 CONTAINER_UID="$(id -u)"
 CONTAINER_GID="$(id -g)"
-CONTAINER_HOME="$HOME"
+
+# Container paths, which are NOT the host's. This used to mirror the host
+# ($CONTAINER_HOME="$HOME", repo mounted at its own path) so that absolute paths
+# baked into the mounted ~/.stack stayed valid. That mount is gone -- the image
+# owns the toolchain -- so mirroring buys nothing, and on macOS it actively
+# breaks: $HOME is /Users/<user> there while the image's HOME is /home/<user>,
+# and Docker Desktop *silently drops* a bind mount whose target equals a /Users
+# source path, leaving an empty directory and no error. See
+# dev/docker/README.md 5.8.
+#
+# So use the image's own layout unconditionally. It matches the Dockerfile's HOME
+# and WORKDIR, and is identical to the old behaviour on a Linux host whose home is
+# /home/<user>.
+CONTAINER_HOME="/home/$CONTAINER_USER"
+CONTAINER_REPO="$CONTAINER_HOME/fun/$(basename "$REPO_DIR")"
 
 HOOK_SRC="$HOME/.claude/hooks/block-dangerous-git.sh"
 STATUSLINE_SRC="$HOME/.claude/statusline.sh"
 SETTINGS_SRC="$REPO_DIR/dev/docker/claude-settings.json"
-STACK_ROOT="$HOME/.stack"
-WT_BIN="$(command -v wt || true)"
+# worktrunk is no longer taken from the host -- the image installs it. See the
+# mount list below.
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 build() {
+    # Context is the repo root, not dev/docker: the image pre-builds the
+    # project's Haskell dependencies and so needs stack.yaml, stack.yaml.lock
+    # and manars-kitchen.cabal. .dockerignore keeps the context small by
+    # excluding build output -- without it the context is ~863 MB.
     docker build \
         --build-arg "USERNAME=$CONTAINER_USER" \
         --build-arg "USER_UID=$CONTAINER_UID" \
         --build-arg "USER_GID=$CONTAINER_GID" \
         -t "$IMAGE" \
-        "$REPO_DIR/dev/docker"
+        -f "$REPO_DIR/dev/docker/Dockerfile" \
+        "$REPO_DIR"
 }
 
 preflight() {
@@ -56,8 +73,6 @@ has no protection against destructive git commands."
 
     [ -x "$HOOK_SRC" ] || die "$HOOK_SRC is not executable (chmod +x it).
 A non-executable hook fails open: the tool call proceeds."
-
-    [ -d "$STACK_ROOT" ] || die "$STACK_ROOT not found; nothing to mount."
 
     # Cosmetic, so a warning rather than a hard failure. claude-settings.json
     # names the mount path unconditionally; without the file the status line
@@ -150,12 +165,16 @@ run() {
     preflight
 
     local -a mounts=(
-        # The project. Read-write: this is the work.
-        -v "$REPO_DIR:$REPO_DIR:rw"
+        # The project. Read-write: this is the work. Mounted at the image's
+        # path, not the host's -- see CONTAINER_REPO above.
+        -v "$REPO_DIR:$CONTAINER_REPO:rw"
 
-        # 116G of prebuilt GHC toolchains and compiled snapshots. Read-write
-        # because Stack writes pantry and stack.sqlite3 during a build.
-        -v "$STACK_ROOT:$CONTAINER_HOME/.stack:rw"
+        # The host's ~/.stack is deliberately NOT mounted. The image owns the
+        # Haskell toolchain -- GHC plus every dependency, built at image build
+        # time -- and mounting the host's over it would shadow all of that. The
+        # old mount also assumed a Linux host of matching architecture with GHC
+        # actually in ~/.stack/programs; on macOS none of those hold. See
+        # dev/docker/README.md 5.4.
 
         # Claude Code state (auth, history, sessions) persisted across runs, but
         # container-local -- deliberately NOT the host's ~/.claude, so a YOLO
@@ -179,8 +198,21 @@ run() {
     # Commit authorship inside the container.
     [ -f "$HOME/.gitconfig" ] && mounts+=(-v "$HOME/.gitconfig:$CONTAINER_HOME/.gitconfig:ro")
 
-    # worktrunk, if installed on the host. Saves a Rust toolchain in the image.
-    [ -n "$WT_BIN" ] && mounts+=(-v "$WT_BIN:/usr/local/bin/wt:ro")
+    # worktrunk is installed in the image now (prebuilt static musl, ~8 MB, no
+    # Rust toolchain). It used to be bind-mounted from the host, which only
+    # worked when host and container shared OS and architecture -- on a macOS
+    # host it was Mach-O in a Linux container and every call died with
+    # "exec format error". See dev/docker/README.md 5.7. Requires a rebuild:
+    # ./dev/claude-container.sh build
+
+    # Worktrunk's project-hook approvals, read-only. Without this the container
+    # has no approval, so the [[pre-merge]] test gate in .config/wt.toml is
+    # silently skipped -- and an agent inside cannot grant it, because
+    # `wt config approvals add` cannot prompt non-interactively. Read-only so a
+    # YOLO session cannot approve new commands for itself; the parent directory
+    # stays writable, so worktrunk can still take its approvals.toml.lock.
+    [ -f "$HOME/.config/worktrunk/approvals.toml" ] && mounts+=(
+        -v "$HOME/.config/worktrunk/approvals.toml:$CONTAINER_HOME/.config/worktrunk/approvals.toml:ro")
 
     local -a caps=()
     if [ "${SKIP_FIREWALL:-0}" = "1" ]; then
@@ -225,7 +257,7 @@ run() {
         -e "CONTAINER_USER=$CONTAINER_USER" \
         -e "SKIP_FIREWALL=${SKIP_FIREWALL:-0}" \
         -e "ALLOWED_DOMAINS_EXTRA=${ALLOWED_DOMAINS_EXTRA:-}" \
-        -w "$REPO_DIR" \
+        -w "$CONTAINER_REPO" \
         "$IMAGE" "$@"
 }
 

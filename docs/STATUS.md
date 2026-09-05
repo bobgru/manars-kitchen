@@ -1,6 +1,9 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-24 · at commit `a4a2d30` on `docs/draft-page-decisions`
+**Last updated:** 2026-09-05 · on branch `draft-validation-split-and-problem-view`
+at commit `af85f08`, six commits ahead of `master` at `eae0084` and not yet merged.
+Item 1 step 3 (the validation split) and the problem-view design are committed here,
+not on `master`.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -18,6 +21,14 @@ The admin web UI has pages for skills, stations, workers, shifts, and a
 read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
+
+**The project no longer uses OpenSpec.** Switched 2026-08-30 to `grill-with-docs`:
+grill the design first, then capture what was settled as glossary entries in
+`CONTEXT.md` and, where a decision is hard to reverse, an ADR in `docs/adr/`. See
+`CLAUDE.md`. Do not create new `openspec/changes/` entries — `openspec/specs/` and
+`openspec/changes/archive/` stay as the record of what shipped and are still worth
+reading, they are just no longer extended. This file remains the authoritative
+next-steps record.
 
 **Named schedules no longer exist.** Removed 2026-08-24 in `08a2d6d`. Every
 schedule is built inside a draft and reaches the calendar by committing that
@@ -70,15 +81,16 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at the service-layer move** — everything above, plus the
-optimizer move, the structured-rename and SSE role-filtering work, and the
-named-schedule removal. All of this was green, with `LANG` unset:
+**Verification baseline at the draft-validation split** — everything above, plus the
+service-layer and optimizer moves, the structured-rename and SSE role-filtering work,
+and the named-schedule removal. All of this was green, with `LANG` unset:
 
 - `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
   stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
-- 258 integration + 373 unit examples, 0 failures, 1 pending (the weekend
-  divergence in item 4). The integration count fell to 255 with the named-schedule
-  tests removed, then rose again with the freeze-line and active-worker coverage.
+- 258 integration + 379 unit examples, 0 failures, 1 pending (the weekend
+  divergence in item 6). The integration count fell to 255 with the named-schedule
+  tests removed, then rose again with the freeze-line and active-worker coverage; the
+  unit count rose from 373 to 379 with the step 3 coverage.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
 - demo runs end to end, exit 0
@@ -125,7 +137,8 @@ so nobody re-derives them:
   — see the service-layer paragraph above — and the two draft handlers now call
   `logRest`, so create and generate finally reach the audit log, the terminal pane
   and the SSE feed. What remains in the CLI is **validation before viewing**: `draft
-  open` prunes as a side effect of reading (`App.hs:558`), which is step 3 below.
+  open` prunes as a side effect of reading (`App.hs:324`), which was step 3, now
+  shipped.
 
 #### Decisions
 
@@ -141,7 +154,8 @@ so nobody re-derives them:
 
 #### Steps, in order
 
-Each is independently shippable. Two preliminaries are done, and so are steps 1 and 2:
+Each is independently shippable. Two preliminaries are done, and so are steps 1, 2
+and 3:
 
 - ~~**Expose ids on `/api/workers` and `/api/stations`**~~ — shipped as `a9c4d28`.
   `GET /api/stations` returns a new `StationResp` with `id`; `GET /api/workers` returns
@@ -155,7 +169,7 @@ Each is independently shippable. Two preliminaries are done, and so are steps 1 
   `generateDraft` now takes a `TopicBus ProgressEvent` and calls `optimizeSchedule`;
   the CLI's `[opt]` printer moved into a `withProgressPrinting` helper in
   `src/CLI/App.hs`. No behaviour change at the default `opt-enabled` of `0`. **This
-  surfaced a pre-existing defect — see item 4.**
+  surfaced a pre-existing defect — see item 6.**
 
 1. ~~**Remove the named-schedule surface.**~~ — shipped as `08a2d6d`, and pure removal
    as intended once the optimizer had moved. Worth carrying forward: the demo now
@@ -171,11 +185,24 @@ Each is independently shippable. Two preliminaries are done, and so are steps 1 
    details worth carrying forward are in the service-layer paragraph near the top of
    this file. This was originally the first half of a larger step; the validation split
    is now step 3 on its own, per `CLAUDE.md`'s independently-shippable rule.
-3. **Split `validateDraftAgainstCalendar`** into `computeDraftViolations` (no writes,
-   no staleness gate) and `pruneDraftViolations` (staleness gate plus writes), with an
-   `isDraftStale` predicate between them. Behaviour is unchanged for existing callers
-   — `src/CLI/App.hs:323` is the only one — but the split is what lets step 5 expose a
-   read that does not mutate.
+3. ~~**Split `validateDraftAgainstCalendar`.**~~ — shipped 2026-08-30.
+   `Service.DraftValidation` now exports `isDraftStale` (takes a loaded `DraftInfo`,
+   not an id), `computeDraftViolations` (no writes, **no staleness gate**) and
+   `pruneDraftViolations` (the gate, then the computation, then the removal — exactly
+   what the old function did). `validateDraftAgainstCalendar` is gone rather than kept
+   as an alias; `src/CLI/App.hs` was its only production caller and now calls
+   `pruneDraftViolations`. A private `validateDraft` holds the shared body and returns
+   the draft's schedule alongside the violations, so the pruning path does not load the
+   assignments twice.
+
+   **The gate hides real violations, and now there is a test that says so.** Only a
+   *calendar commit* makes a draft stale, so anything else that invalidates an
+   assignment — an approved absence, a revoked skill, a changed hour limit — is invisible
+   to `pruneDraftViolations` for as long as the calendar sits still. `test/DraftValidationSpec.hs`
+   pins this down with an approved absence over a draft assignment: `pruneDraftViolations`
+   returns `[]` while `computeDraftViolations` reports the conflict. Step 5's endpoint
+   must use the latter, and the deferred draft-workflow question below should treat the
+   staleness trigger as too narrow, not just wrongly-responding.
 4. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
    deltas removing the `Non-overlapping date ranges` requirement from `draft-session`
    and the matching scenarios from `draft-shortcuts` — plus the commit 409 and
@@ -183,7 +210,10 @@ Each is independently shippable. Two preliminaries are done, and so are steps 1 
    dates was replaced by draft #N*.
 5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
    GET must not mutate** — it reports violations without deleting them or bumping
-   `last_validated_at`. Pruning gets an explicit `POST /api/drafts/:id/revalidate`.
+   `last_validated_at`, which is what `computeDraftViolations` is for (step 3). Pruning
+   gets an explicit `POST /api/drafts/:id/revalidate`, which calls
+   `pruneDraftViolations`. `isDraftStale` is there if the response should also say
+   whether the calendar has moved.
 6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
    discard. No assignment grid.
 7. **Draft detail page** — the assignment grid, violations alongside assignments.
@@ -192,9 +222,56 @@ For both page steps, follow `WorkersListPage.tsx` — the most recent and comple
 the skills/stations pages where they differ. The three existing list/detail pairs are
 inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
 key naming); prefer the worker page's choices. **Exercise them against a live server**,
-not just `tsc` — see the last bullet of item 5.
+not just `tsc` — see the last bullet of item 7.
 
-### 2. Shift delete orphans worker preferences
+### 2. The problem view — designed 2026-08-30, not started
+
+The `/` dashboard becomes a visualization of **problems** across workers, stations and
+slots. The full design and the rejected alternatives are in **ADR 0004**; the vocabulary
+is in `CONTEXT.md` under "Problems". Read both before starting — the shape is not
+obvious from the code, and three of the pieces do not exist yet.
+
+What this needs, roughly in dependency order:
+
+1. **Generalise the validation core.** `Service.DraftValidation.validateDraft` is private
+   and takes a `DraftInfo`; it needs to take a `Schedule` plus a `(Day, Day)` range so
+   the calendar slice can be fed through it. This is the "virtual default draft" — there
+   is deliberately no default draft *row*, see the ADR. Today's step 3 split already
+   isolated the body, so this is close to mechanical.
+2. **Compromise has no implementation at all.** The soft score lives only inside the
+   optimizer's hill climbing (`Domain.Scheduler.scoreSlotWorker`, seven components, some
+   of them penalties) and reaches no client. Deriving per-assignment compromises from the
+   penalty components is new work, and each one owes the detail pane a sentence — "Ana
+   got the same station three days running", not "score 0.31".
+3. **A nullable zone label on `Station`**, for grouping the station view. Not
+   coordinates; the floor plan is deferred in the ADR.
+4. **An auto-approve flag on `AbsenceType`**, same shape as the existing `atYearlyLimit`,
+   so a sick call submitted from a mobile client takes effect immediately instead of
+   waiting for approval. **This lets a worker grant themselves an absence**, because
+   `handleRequestAbsence` is `requireSelfOrAdmin` — intended for sick leave, but it is an
+   authorization change, so do not slip it in silently.
+5. **The three visualizations plus the horizon control.** Projections of one problem set;
+   cells aggregate to most-severe plus earliest affected date.
+
+Two things to carry forward. The horizon is a **required input**, not a filter applied
+afterwards — a problem set without a date range is meaningless. And the reason this is
+not built on persisted violations is the sick-call case: an approved absence invalidates
+calendar assignments *without changing the calendar*, so anything recomputed on write
+misses it. That is the same blind spot as the staleness gate in item 1 step 3.
+
+### 3. The demo is not representative of a working restaurant
+
+`make fast-demo` reports **199 assignments, 159 unfilled**. A real restaurant is mostly
+staffed, so a demo that is 80% holes gives a false picture of what the problem view will
+show and makes it impossible to tell a real regression from the fixture. Either fix the
+fixture so it fills, or — better — split it into a few named scenarios (fully staffed;
+one worker calls in sick; a station reopens understaffed) so each surface can be
+exercised against the state it is meant to display.
+
+Note if you edit `demo/restaurant-setup.txt`: **every draft id in it is positional**, so
+inserting or removing a `draft create` shifts the rest.
+
+### 4. Shift delete orphans worker preferences
 
 `worker_shift_prefs.shift_name` is a plain string with no foreign key or cascade,
 and `sqlDeleteShift` in `src/Repo/SQLite.hs` is a bare
@@ -206,7 +283,7 @@ The Shifts page's confirm modal currently *warns the user* about this; the schem
 gap is unfixed. Consider the safe-delete / force-delete pattern already
 established for skills, stations and workers.
 
-### 3. Make the integration-test DB path unique per run
+### 5. Make the integration-test DB path unique per run
 
 **Agreed with the user, and still open.** Do not be misled by commit `455e48b`, whose
 message reads "Fix integration test coupling by path" — that commit actually carried the
@@ -231,7 +308,7 @@ the `-wal` and `-shm` sidecars too, not just the `.db`.**
 If you hit broad unrelated test failures, suspect this before suspecting a
 regression.
 
-### 4. The optimizer diverges on any date range containing a Saturday
+### 6. The optimizer diverges on any date range containing a Saturday
 
 **Found 2026-08-23 while moving the optimizer into `draft generate`.** Pre-existing,
 and unreachable at the default `opt-enabled` of `0` — which is the only reason nobody
@@ -269,7 +346,7 @@ Whoever picks this up: a clock check *inside* the rebuild, or an iteration cap, 
 turn an OOM into a slow response — worth having regardless of the root cause, because a
 `POST /api/drafts/:id/generate` that OOMs takes the server down with it.
 
-### 5. Smaller backlog
+### 7. Smaller backlog
 
 - **Station safe-delete ignores assignments.** `safeDeleteStation` checks worker
   station preferences and station required skills only. Assignment checking was
@@ -290,6 +367,32 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
   trusting them.**
+- **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
+  natively, not under emulation). Every claim the previous entry listed as expected
+  held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk
+  to the same URLs that used to be hardcoded, the conditional `groupadd` took the
+  create branch, `CONTAINER_HOME` = `$HOME` = `/home/bobgru`, `CONTAINER_REPO` =
+  the host path, and `safe.directory` was inert. Measured:
+    - cold image build 15m20s (the Haskell layer alone is 483s), image **4.77 GB**
+      — smaller than macOS's 5.98 GB.
+    - in-container: non-root uid 1000, no `sudo`, both firewall self-tests pass
+      against the Bedrock endpoint, hook and `settings.json` refuse writes with
+      `Read-only file system`, `wt` v0.75.0 runs with `pre-merge test` **APPROVED**,
+      `stack build --dry-run` wants only `manars-kitchen` itself.
+    - `stack build --pedantic` clean, `stack test` unit suite **379 examples, 0
+      failures, 1 pending** — identical to the macOS run.
+  **The `~/.stack` regression is smaller than feared on this host**: only the
+  project's own `.stack-work` is shared through the bind mount, and after one
+  build on each side, host and container builds are mutual no-ops — they reuse
+  each other's artifacts rather than thrashing. The one-off cost is that the
+  first container build **unregisters** the local package, because the host's
+  last build had recorded `--extra-lib-dirs=$HOME/.local/lib/gmp-shim` (the
+  obsolete `libgmp.so` workaround below; the host now has `libgmp-dev`, and that
+  directory no longer exists). Once neither side passes that flag, the caches
+  agree. Do not reintroduce a host-only `extra-lib-dirs`: it makes every
+  host↔container alternation a full local rebuild.
+  Not re-run here: the §3 `git branch -D` YOLO guardrail probe (the read-only
+  mounts were checked instead).
 
 ---
 
@@ -310,14 +413,14 @@ things occupy that space and neither does the job:
   every assignment that no longer validates —
   `repoSaveDraftAssignments repo draftId cleanedSched` — and leaves the holes for the
   admin to refill by re-running `draft generate`
-  (`src/Service/DraftValidation.hs:141-152`).
+  (`src/Service/DraftValidation.hs:131-152`, `pruneDraftViolations`).
 
 The specific concerns:
 
 1. **Pruning is not rebasing.** A moved calendar should arguably produce a *proposed*
    updated draft the admin can accept or reject, not silent deletion.
 2. **Reading mutates.** Pruning fires as a side effect of `draft open`
-   (`App.hs:558`), so viewing a draft changes it. Item 1's steps 4 and 6 contain that
+   (`App.hs:324`), so viewing a draft changes it. Item 1's steps 4 and 6 contain that
    damage — they stop the browser inheriting it — but do not fix it.
 3. **Violations are not durable.** They are returned once and never persisted, so the
    record of what was removed and why exists only in whatever output happened to see
@@ -326,7 +429,7 @@ The specific concerns:
    prunes its siblings the next time they are opened — the right trigger, the wrong
    response, per (1).
 5. **The look-back window is narrow.** Validation examines the seven days *before* the
-   draft's start (`DraftValidation.hs:105-107`), so calendar assignments inside the
+   draft's start (`DraftValidation.hs:165-166`), so calendar assignments inside the
    draft's own range are never compared against it. That is why "the calendar for my
    dates was just replaced" reports nothing today, and why item 1 step 4 has to add
    that message separately.
@@ -398,22 +501,88 @@ analysis, assumptions and limits are in `dev/docker/README.md` — read it befor
 relying on the setup, particularly §3 (the undocumented behaviour it depends on)
 and §6 (what it does not protect).
 
-**Git guardrails are active** and block destructive git commands via a
-`PreToolUse` hook. Two consequences worth knowing up front:
+**The container image now owns the Haskell toolchain.** Changed 2026-08-30. GHC and
+every dependency are built into the image (`stack setup` + `stack build
+--only-dependencies` over just `stack.yaml`, `stack.yaml.lock`,
+`manars-kitchen.cabal` and `Setup.hs`, so Docker's layer cache reuses the lot when
+those are unchanged). **The host's `~/.stack` is no longer mounted** — it would
+shadow all of it, and the old arrangement assumed a Linux host of matching
+architecture with GHC in `~/.stack/programs`, none of which holds on macOS. The
+build context is now the repo root, with a new `.dockerignore`. Cold build ~196s
+plus GHC download, warm rebuild 1.3s, image 5.98 GB. Details and measurements in
+`dev/docker/README.md` §5.4.
 
-- `wt merge` is allowed — it is local-only. `wt step push` is blocked.
+**The container now works end to end on a macOS host.** Verified 2026-08-30:
+`stack build --pedantic` clean and `stack test` green inside it (258 + 379
+examples, 0 failures, 1 pending), with only `manars-kitchen` itself left to
+compile. Two things had to change beyond the image:
+
+- **Container paths no longer mirror the host.** `CONTAINER_HOME` is
+  `/home/$(id -un)`, matching the Dockerfile, and the repo mounts at
+  `$CONTAINER_HOME/fun/manars-kitchen`. Mirroring only ever existed to keep the
+  mounted `~/.stack`'s absolute paths valid, and on macOS it silently failed:
+  Docker Desktop **drops a bind mount whose target is the same `/Users` path as
+  its source**, with no error and an empty directory. `dev/docker/README.md` §5.8.
+- **`safe.directory` for the repo.** Docker Desktop reports the bind-mount *root*
+  as `0:0` even though the files inside are the container user's, so git refused
+  the repo with "detected dubious ownership" and nothing git-shaped worked. The
+  image marks that one path trusted. §5.9.
+
+There is a coupling to know about: the Dockerfile hardcodes
+`/home/${USERNAME}/fun/manars-kitchen` while the launcher derives the last segment
+with `basename`. Renaming the checkout directory breaks the pair.
+
+**Git guardrails** block destructive git commands via a `PreToolUse` hook at
+`~/.claude/hooks/block-dangerous-git.sh`, wired from `~/.claude/settings.json`.
+**They are per-machine, and this file used to claim they were active when they
+were not installed at all** — the setup had only ever been done inside the
+container. Installed on the macOS host and re-verified on 2026-08-30. On a new
+machine, **check before trusting it**: the hook file must exist and be
+executable, and `~/.claude/settings.json` must have a `hooks.PreToolUse` entry.
+There is one copy — `dev/claude-container.sh` bind-mounts the *host's* script
+into the container read-only, and `preflight()` refuses to launch without it.
+
+Four consequences worth knowing up front:
+
+- `wt merge` is allowed; `wt step push` and `wt merge --no-hooks` are blocked.
+  **The reason is not local-vs-remote** — worktrunk has no remote surface at all,
+  and `wt step push` only fast-forwards a local branch. It is that `wt merge`
+  runs the `[[pre-merge]]` test gate and the other two bypass it. Full reasoning
+  in `dev/docker/README.md` §5.2; do not "fix" the apparent inconsistency by
+  blocking `wt merge`, which was tried and reverted because it breaks the
+  container workflow.
+- **That gate needs a per-machine approval.** Granted on the macOS host on
+  2026-08-30 with `wt config approvals add --yes` — plain `add` cannot prompt in a
+  non-interactive session and just fails. It is stored in
+  `~/.config/worktrunk/approvals.toml`, **machine-local and not in the repo**, so a
+  new machine starts ungated. `dev/claude-container.sh` now bind-mounts that file
+  read-only, which was verified safe: a read-only file mount leaves the parent
+  directory writable, so worktrunk can still take its `.lock`. Check with
+  `wt config approvals list`; reasoning in `dev/docker/README.md` §5.2.
 - **The hook inspects the entire command line, so it false-positives on prose.**
   A commit message or test fixture that merely mentions a blocked command gets
   blocked. Workaround: put the text in a file — `git commit -F <file>`, prompts
-  via stdin. **Do not obfuscate a command to get around the hook**; move the text
-  or amend the pattern list deliberately.
+  via stdin, and the `Write` tool rather than a shell heredoc. **Do not obfuscate
+  a command to get around the hook**; move the text or amend the pattern list
+  deliberately.
+- **Re-installing from the `git-guardrails-claude-code` skill silently downgrades
+  it.** The bundled script is a naive literal grep with no normalisation, no
+  worktrunk patterns, and a `jq` call that fails *open*. See
+  `dev/docker/README.md` §5.1.
 
 **Parallel agents in worktrees.** `.worktreeinclude` and `.config/wt.toml` are
 committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 §5.6. Operationally:
 
-- Worktrunk project config needs a one-time interactive `wt config approvals add`
-  that an agent cannot grant. Agents should use
+- **`wt` is installed in the image now**, from upstream's prebuilt static musl
+  binary, arch-selected and checksummed. It used to be bind-mounted from the host,
+  which only worked when host and container shared OS and arch — on macOS it was
+  Mach-O against a Linux container and every call died with `exec format error`.
+  Fixed 2026-08-30; see `dev/docker/README.md` §5.7. Requires
+  `./dev/claude-container.sh build`.
+- Worktrunk project config needs a one-time `wt config approvals add --yes` that
+  an agent cannot do interactively; granted on this host 2026-08-30 and now mounted
+  into the container. Agents should use
   `wt switch -c <branch> --no-cd --no-hooks` plus an explicit
   `wt step copy-ignored`.
 - `wt list`'s would-conflict pre-flight needs git ≥ 2.38; a host on 2.34 reports
@@ -422,7 +591,7 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
   (routes, CSS, cross-cutting types), *then* fan agents out onto leaf files, each
   with an explicit list of files it owns and files it must not touch. Four agents
   worked concurrently this way with zero merge conflicts. Note that worktrees
-  isolate source but **not** `/tmp` — see item 3.
+  isolate source but **not** `/tmp` — see item 5.
 
 ---
 

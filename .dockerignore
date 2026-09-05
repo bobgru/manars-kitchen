@@ -1,0 +1,41 @@
+# Build context for dev/docker/Dockerfile.
+#
+# The context is the repo root, because the image pre-builds the project's
+# Haskell dependencies and therefore needs stack.yaml, stack.yaml.lock and
+# manars-kitchen.cabal -- which live here, not in dev/docker/.
+#
+# Without this file the context is ~863 MB, almost all of it build output that
+# the image must not inherit: a host .stack-work holds Mach-O objects on macOS,
+# and web/node_modules holds prebuilt native binaries for the host platform.
+# Excluding them takes the context to a few MB.
+
+# Build output and caches
+.stack-work/
+dist-newstyle/
+web/node_modules/
+web/dist/
+*.hi
+*.o
+
+# Databases and generated data
+demo-db/
+run-db/
+export.json
+demo-export.json
+
+# Worktrees created by worktrunk
+.worktrees/
+
+# Agent and tooling state, deliberately untracked (see docs/STATUS.md)
+.agents/
+.memsearch/
+skills-lock.json
+
+# Version control and editor noise
+.git/
+.gitignore
+.DS_Store
+
+# Logs
+*.log
+prompts.log
