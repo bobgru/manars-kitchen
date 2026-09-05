@@ -1,7 +1,9 @@
 # Project status and next steps
 
-**Last updated:** 2026-08-30 · on `master` at commit `eae0084`, plus the
-uncommitted item 1 step 3 split described below
+**Last updated:** 2026-09-05 · on branch `draft-validation-split-and-problem-view`
+at commit `af85f08`, six commits ahead of `master` at `eae0084` and not yet merged.
+Item 1 step 3 (the validation split) and the problem-view design are committed here,
+not on `master`.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it

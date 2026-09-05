@@ -11,3 +11,5 @@ web/node_modules/
 web/dist/
 web/*.db
 .worktrees/
+skills-lock.json
+.agents/
