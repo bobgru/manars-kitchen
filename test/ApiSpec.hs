@@ -9,7 +9,7 @@ import Data.Aeson (FromJSON, decode)
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time (Day, fromGregorian, addDays)
+import Data.Time (Day, TimeOfDay(..), fromGregorian, addDays)
 import Data.Time.Clock (getCurrentTime, utctDay)
 import Data.Proxy (Proxy(..))
 import qualified Data.ByteString.Char8 as BS8
@@ -32,7 +32,10 @@ import System.Directory (removeFile, doesFileExist)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Auth.Types (Role(..), User(..))
-import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..), Schedule(..))
+import Domain.Types
+    ( WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..)
+    , Schedule(..), Assignment(..), Slot(..)
+    )
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
@@ -40,9 +43,11 @@ import Domain.Pin (PinnedAssignment)
 import Domain.Absence (AbsenceType(..), AbsenceContext(..), AbsenceRequest, emptyAbsenceContext)
 import Domain.Scheduler (ScheduleResult(..))
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..), DraftInfo(..), CalendarCommit, AuditEntry(..))
+import Repo.Types (Repository(..), DraftInfo(..), CalendarCommit(..), AuditEntry(..))
+import Service.DraftValidation (DraftViolation(..))
 import Service.Auth (register)
 import qualified Service.Worker as SW
+import qualified Service.Calendar as Cal
 import Servant.API (NoContent)
 import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
@@ -75,6 +80,8 @@ listShiftsC      :: ClientM [ShiftDef]
 listDraftsC      :: ClientM [DraftInfo]
 createDraftC     :: CreateDraftReq -> ClientM DraftCreatedResp
 getDraftC        :: Int -> ClientM DraftInfo
+getDraftAssignmentsC :: Int -> ClientM DraftAssignmentsResp
+revalidateDraftC :: Int -> ClientM RevalidateDraftResp
 generateDraftC   :: Int -> GenerateDraftReq -> ClientM ScheduleResult
 commitDraftC     :: Int -> CommitDraftReq -> ClientM NoContent
 commitDraftForceC :: Int -> CommitDraftReq -> ClientM NoContent
@@ -190,6 +197,8 @@ logoutC
     :<|> listDraftsC
     :<|> createDraftC
     :<|> getDraftC
+    :<|> getDraftAssignmentsC
+    :<|> revalidateDraftC
     :<|> generateDraftC
     :<|> commitDraftC
     :<|> commitDraftForceC
@@ -528,6 +537,26 @@ shouldFailWith (Right val) expected =
     expectationFailure $ "Expected status " ++ show expected
                       ++ " but got success: " ++ show val
 
+-- | A draft over the given range holding one assignment its worker is not
+-- qualified for, so validation reports exactly one violation with a known
+-- constraint. Worker 1 is deliberately never granted the station's skill.
+draftWithUnqualifiedAssignment :: Repository -> ClientEnv -> Day -> Day -> IO Int
+draftWithUnqualifiedAssignment repo env from to = do
+    _ <- SW.addSkill repo "grill" ""
+    sid <- SW.addStation repo "grill" 1 1
+    SW.setStationRequiredSkills repo sid (Set.singleton (SkillId 1))
+    resp <- runClientM (createDraftC (CreateDraftReq from to)) env
+    case resp of
+        Left err -> error ("draft create failed in test: " ++ show err)
+        Right r  -> do
+            let did = dcrId r
+            -- Overwrite the seeded (empty) schedule with the one bad assignment.
+            repoSaveDraftAssignments repo did
+                (Schedule (Set.singleton
+                    (Assignment (WorkerId 1) sid
+                        (Slot from (TimeOfDay 9 0 0) 3600))))
+            pure did
+
 -- | Decode the JSON body a failed request came back with.
 --
 -- 'Nothing' for anything that is not a failure response carrying a body of the
@@ -736,6 +765,100 @@ spec = do
             gone `shouldFailWith` 404
             Right drafts <- runClientM listDraftsC env
             map diId drafts `shouldBe` [dcrId other]
+
+    -- GET reports, POST revalidate prunes. Keeping those apart is the point of
+    -- the step 3 split: a browser refresh must not delete a draft's assignments.
+    describe "Draft assignments and revalidate" $ do
+        it "returns 404 for a draft that does not exist" $ withSeededApp $ \_ env -> do
+            missing <- runClientM (getDraftAssignmentsC 999) env
+            missing `shouldFailWith` 404
+            -- computeDraftViolations answers [] for a missing draft, so without
+            -- an explicit existence check this would have been 200 and empty.
+            revalidated <- runClientM (revalidateDraftC 999) env
+            revalidated `shouldFailWith` 404
+
+        it "reports a violation without removing it" $
+            withSeededApp $ \repo env -> do
+                (from, to) <- futureWeek
+                did <- draftWithUnqualifiedAssignment repo env from to
+                Right resp <- runClientM (getDraftAssignmentsC did) env
+                map dvConstraint (darViolations resp)
+                    `shouldBe` ["skill qualification"]
+                -- The offending assignment is still there: a report, not a diff.
+                Set.size (unSchedule (darAssignments resp)) `shouldBe` 1
+                -- And still there on a second read, so the GET did not prune and
+                -- did not bump last_validated_at.
+                Right again <- runClientM (getDraftAssignmentsC did) env
+                map dvConstraint (darViolations again)
+                    `shouldBe` ["skill qualification"]
+                Set.size (unSchedule (darAssignments again)) `shouldBe` 1
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        -- Documents the staleness gate at the REST boundary rather than hiding
+        -- it: pruning only happens once the calendar has moved. STATUS item 1
+        -- step 3 records why that trigger is too narrow.
+        it "revalidate removes nothing while the calendar has not moved" $
+            withSeededApp $ \repo env -> do
+                (from, to) <- futureWeek
+                did <- draftWithUnqualifiedAssignment repo env from to
+                Right resp <- runClientM (revalidateDraftC did) env
+                rvrRemoved resp `shouldBe` []
+                Right reread <- runClientM (getDraftAssignmentsC did) env
+                Set.size (unSchedule (darAssignments reread)) `shouldBe` 1
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        it "revalidate removes the violating assignment once the calendar moves" $
+            withSeededApp $ \repo env -> do
+                (from, to) <- futureWeek
+                did <- draftWithUnqualifiedAssignment repo env from to
+                -- 20ms: committed_at must sort after the draft's
+                -- last_validated_at, which is millisecond-precision text.
+                threadDelay 20000
+                Cal.commitToCalendar repo (apr 6) (apr 12) "unrelated" Nothing
+                    (Schedule Set.empty)
+                Right resp <- runClientM (revalidateDraftC did) env
+                map dvConstraint (rvrRemoved resp)
+                    `shouldBe` ["skill qualification"]
+                Right reread <- runClientM (getDraftAssignmentsC did) env
+                Set.size (unSchedule (darAssignments reread)) `shouldBe` 0
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        -- The blind spot step 4 closed for the CLI, closed for REST too.
+        it "reports the draft that replaced the calendar under this one" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                Right keep <- runClientM (createDraftC (CreateDraftReq from to)) env
+                threadDelay 20000
+                Right sibling <- runClientM
+                    (createDraftC (CreateDraftReq from to)) env
+                Right _ <- runClientM
+                    (commitDraftForceC (dcrId sibling) (CommitDraftReq "sibling")) env
+                Right resp <- runClientM (getDraftAssignmentsC (dcrId keep)) env
+                map ccDraftId (darReplacedUnder resp)
+                    `shouldBe` [Just (dcrId sibling)]
+
+        it "revalidate is admin-only" $ withServer $ \repo port -> do
+            _ <- register repo "admin" "password" Admin False
+            _ <- register repo "worker1" "pass" Normal False
+            pEnv <- mkPlainEnv port
+            aToken <- loginAs pEnv "admin" "password"
+            aEnv <- mkAuthEnv aToken port
+            (from, to) <- futureWeek
+            Right resp <- runClientM (createDraftC (CreateDraftReq from to)) aEnv
+            wToken <- loginAs pEnv "worker1" "pass"
+            wEnv <- mkAuthEnv wToken port
+            result <- runClientM (revalidateDraftC (dcrId resp)) wEnv
+            result `shouldFailWith` 403
+            -- The read beside it is not admin-gated, matching GET /api/drafts/:id.
+            readBack <- runClientM (getDraftAssignmentsC (dcrId resp)) wEnv
+            case readBack of
+                Left err -> expectationFailure
+                    ("Expected a normal user to read draft assignments, got "
+                        ++ show err)
+                Right _ -> pure ()
 
     describe "Calendar" $ do
         it "returns assignments for a date range" $ withTestApp $ \env -> do

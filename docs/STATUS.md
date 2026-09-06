@@ -1,8 +1,9 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-05 · item 1 steps 1–4 are on `master`. Step 4 is on branch
-`allow-overlapping-drafts`, three commits ahead of `master` at `4cd11a1` and not yet
-merged. Item 1 step 5 is the next unstarted piece.
+**Last updated:** 2026-09-05 · item 1 steps 1–5 are done. Steps 4 and 5 are on branch
+`allow-overlapping-drafts`, four commits ahead of `master` at `4cd11a1` and not yet
+merged. Item 1 step 6 — the `/drafts` list page — is the next unstarted piece, and the
+first that touches the web client.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -227,13 +228,38 @@ and 3:
      kept because it is what the admin recognises. `CalendarCommit` gained
      `ccDraftId :: Maybe Int` and `/api/calendar/history` gained `draftId`, which is
      additive. NULL for old rows and for any commit that did not come from a draft.
-5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
-   GET must not mutate** — it reports violations without deleting them or bumping
-   `last_validated_at`, which is what `computeDraftViolations` is for (step 3). Pruning
-   gets an explicit `POST /api/drafts/:id/revalidate`, which calls
-   `pruneDraftViolations`. `isDraftStale` is there if the response should also say
-   whether the calendar has moved — and `calendarReplacedUnder` (step 4) if it should say
-   *what* moved it, which is the more useful answer now that drafts overlap.
+5. ~~**`GET /api/drafts/:id/assignments`**~~ — shipped 2026-09-05. Returns
+   `{assignments, violations, replacedUnder}` and does not mutate;
+   `POST /api/drafts/:id/revalidate` returns `{removed}` and does. Four things to carry
+   forward:
+
+   - **The response carries `replacedUnder`, which the original wording left optional.**
+     It is `calendarReplacedUnder` from step 4 — the commits that overwrote part of this
+     draft's own range. Included because a read that reports violations while staying
+     silent about the baseline moving misleads in exactly the case ADR 0003 made common,
+     and because adding it later would have been a response-shape change. `isDraftStale`
+     is still not exposed: a bare bool is strictly less useful than the commit list.
+   - **`violations` is a report, not a diff.** The assignments it names are still present
+     in `assignments`. `removed` on the revalidate response is named differently on
+     purpose — those are gone.
+   - **Revalidate inherits the staleness gate, and a test pins that down.**
+     `pruneDraftViolations` removes nothing unless the calendar has moved, so the GET can
+     report a violation the POST refuses to prune — an approved absence, for instance.
+     `ApiSpec`'s "revalidate removes nothing while the calendar has not moved" documents
+     it rather than papering over it. Fixing the trigger is still the deferred
+     draft-workflow question.
+   - **`draft revalidate [id]` was added to the CLI, which step 5 did not ask for.** The
+     REST handler logs `draft revalidate <id>` through `logRest`, and `replayCommands`
+     silently drops any audit entry `parseCommand` cannot read (`Unknown _ -> pure ()`).
+     Without the verb, every REST revalidate would have written an entry that replay
+     discards, quietly diverging a replayed database from the real one.
+     `Audit.CommandMeta` classifies it as **mutating** — the `classifyDraft` fallback
+     would have called it non-mutating and kept it out of the mutation-only feeds. There
+     is no `rpc/draft/revalidate`, so the remote CLI prints "not yet supported in remote
+     mode"; the web terminal gets it for free through `Server.Execute`.
+
+   No web client work: `web/src/api/` has no draft module yet, and speculative fetchers
+   would be dead code until step 6.
 6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
    discard. No assignment grid.
 7. **Draft detail page** — the assignment grid, violations alongside assignments.

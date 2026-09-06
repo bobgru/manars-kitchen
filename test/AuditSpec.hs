@@ -159,6 +159,21 @@ spec = do
                 cmDateTo m `shouldBe` Just "2026-04-19"
                 cmIsMutation m `shouldBe` True
 
+            -- The classifyDraft fallback treats unknown draft ops as
+            -- non-mutating, which would be wrong here: revalidate prunes.
+            it "classifies draft revalidate as a mutation with its id" $ do
+                let m = classify "draft revalidate 3"
+                cmEntityType m `shouldBe` Just "draft"
+                cmOperation m `shouldBe` Just "revalidate"
+                cmEntityId m `shouldBe` Just 3
+                cmIsMutation m `shouldBe` True
+
+            -- The REST revalidate endpoint logs this string, so replay has to be
+            -- able to parse what render produces from the stored entry.
+            it "round-trips draft revalidate through render" $
+                render (classify "draft revalidate 3")
+                    `shouldBe` "draft revalidate 3"
+
         describe "calendar commands" $ do
             it "classifies calendar view with dates" $ do
                 let m = classify "calendar view 2026-04-06 2026-04-12"
@@ -293,6 +308,7 @@ spec = do
         testConsistency "draft generate"
         testConsistency "draft commit"
         testConsistency "draft discard"
+        testConsistency "draft revalidate"
         testConsistency "what-if apply"
         testConsistency "import data.json"
         testConsistency "calendar unfreeze 2026-04-10"
@@ -367,6 +383,7 @@ spec = do
                 , "draft generate"
                 , "draft commit"
                 , "draft discard"
+                , "draft revalidate 3"
                 , "calendar unfreeze 2026-04-10"
                 , "what-if apply"
                 ]

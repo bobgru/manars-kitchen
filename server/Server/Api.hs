@@ -52,6 +52,12 @@ type RawAPI =
     :<|> "api" :> "drafts" :> Get '[JSON] [DraftInfo]
     :<|> "api" :> "drafts" :> ReqBody '[JSON] CreateDraftReq :> Post '[JSON] DraftCreatedResp
     :<|> "api" :> "drafts" :> Capture "id" Int :> Get '[JSON] DraftInfo
+    -- A pure read: reports violations without pruning them. Revalidate below is
+    -- the mutating counterpart.
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "assignments"
+         :> Get '[JSON] DraftAssignmentsResp
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "revalidate"
+         :> Post '[JSON] RevalidateDraftResp
     :<|> "api" :> "drafts" :> Capture "id" Int :> "generate"
          :> ReqBody '[JSON] GenerateDraftReq :> Post '[JSON] ScheduleResult
     :<|> "api" :> "drafts" :> Capture "id" Int :> "commit"

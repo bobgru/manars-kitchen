@@ -133,6 +133,7 @@ data Command
     | DraftGenerate (Maybe String)      -- ^ optional draft-id
     | DraftCommit (Maybe String) (Maybe String) Bool
         -- ^ optional draft-id, optional note, force past overlapping drafts?
+    | DraftRevalidate (Maybe String)    -- ^ optional draft-id
     | DraftDiscard (Maybe String)       -- ^ optional draft-id
     | DraftHours (Maybe String)         -- ^ optional draft-id
     | DraftDiagnose (Maybe String)      -- ^ optional draft-id
@@ -320,6 +321,9 @@ parseCommand input = case shellWords input of
     ["draft", "generate", did]
         | isDigit' did                   -> DraftGenerate (Just did)
     ("draft" : "commit" : rest)          -> parseDraftCommit rest
+    ["draft", "revalidate"]              -> DraftRevalidate Nothing
+    ["draft", "revalidate", did]
+        | isDigit' did                   -> DraftRevalidate (Just did)
     ["draft", "discard"]                 -> DraftDiscard Nothing
     ["draft", "discard", did]
         | isDigit' did                   -> DraftDiscard (Just did)

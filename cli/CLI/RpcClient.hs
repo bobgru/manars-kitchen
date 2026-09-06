@@ -492,6 +492,11 @@ dispatchCommand env cmd = case cmd of
                 Left err -> putStrLn err
         Nothing -> putStrLn "Specify a draft ID."
 
+    -- Reachable over REST as POST /api/drafts/:id/revalidate, but there is no
+    -- rpc/draft/revalidate route yet, and the remote CLI only speaks rpc.
+    DraftRevalidate _ ->
+        putStrLn "draft revalidate is not yet supported in remote mode."
+
     DraftDiscard mDid -> case mDid of
         Just didStr -> do
             result <- run env (cDiscardDraft (RpcDraftId (read didStr)))

@@ -31,6 +31,7 @@ import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), Se
 import qualified Service.Worker as SW
 import qualified Service.User as SU
 import qualified Service.Draft as SD
+import qualified Service.DraftValidation as SDV
 import qualified Service.Calendar as SC
 import qualified Service.Absence as SA
 import qualified Service.Config as SCfg
@@ -117,6 +118,8 @@ server execEnv cmdBus repo user =
     :<|> handleListDrafts repo
     :<|> handleCreateDraft cmdBus repo user
     :<|> handleGetDraft repo
+    :<|> handleGetDraftAssignments repo
+    :<|> handleRevalidateDraft cmdBus repo user
     :<|> handleGenerateDraft cmdBus repo user
     :<|> handleCommitDraft cmdBus repo user False
     :<|> handleCommitDraft cmdBus repo user True
@@ -278,6 +281,53 @@ handleGetDraft repo did = do
     case mDraft of
         Nothing -> throwApiError (NotFound "Draft not found")
         Just d  -> pure d
+
+-- | A draft's assignments, what is wrong with them, and whether the calendar
+-- underneath them has been replaced.
+--
+-- **This must not mutate.** It reports violations without deleting them and
+-- without bumping @last_validated_at@, which is what 'SDV.computeDraftViolations'
+-- is for; 'SDV.pruneDraftViolations' is reached only through
+-- 'handleRevalidateDraft'. A GET that pruned would mean a browser refresh could
+-- silently delete a draft's assignments.
+--
+-- Not admin-gated: reading a draft is a read, and 'handleGetDraft' beside it is
+-- open too.
+handleGetDraftAssignments :: Repository -> Int -> Handler DraftAssignmentsResp
+handleGetDraftAssignments repo did = do
+    mDraft <- liftIO $ SD.loadDraft repo did
+    case mDraft of
+        -- computeDraftViolations answers [] for a missing draft, so the
+        -- existence check has to happen here or a bad id would look empty.
+        Nothing -> throwApiError (NotFound "Draft not found")
+        Just draft -> liftIO $ do
+            sched      <- repoLoadDraftAssignments repo did
+            violations <- SDV.computeDraftViolations repo did
+            replaced   <- SDV.calendarReplacedUnder repo draft
+            pure DraftAssignmentsResp
+                { darAssignments   = sched
+                , darViolations    = violations
+                , darReplacedUnder = replaced
+                }
+
+-- | Prune the assignments that no longer hold, and report what went.
+--
+-- The mutating counterpart to 'handleGetDraftAssignments'. Note that
+-- 'SDV.pruneDraftViolations' is gated on staleness, so a draft the calendar has
+-- not moved under returns @[]@ here even when the GET reports violations — an
+-- approved absence invalidates assignments without touching the calendar. That
+-- gap is recorded in @docs/STATUS.md@; it is not introduced by this endpoint.
+handleRevalidateDraft :: TopicBus CommandEvent -> Repository -> User -> Int
+                      -> Handler RevalidateDraftResp
+handleRevalidateDraft cmdBus repo user did = do
+    requireAdmin user
+    mDraft <- liftIO $ SD.loadDraft repo did
+    case mDraft of
+        Nothing -> throwApiError (NotFound "Draft not found")
+        Just _  -> do
+            removed <- liftIO $ SDV.pruneDraftViolations repo did
+            logRest cmdBus user ("draft revalidate " ++ show did)
+            pure (RevalidateDraftResp removed)
 
 -- | Generate within a draft. An absent @workerIds@ means the active workers,
 -- resolved by the service layer; an empty list means nobody, and is honoured.

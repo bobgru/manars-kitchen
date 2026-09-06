@@ -11,6 +11,8 @@ module Server.Json
     , DraftCreatedResp(..)
     , FrozenDatesResp(..)
     , OverlappingDraftsResp(..)
+    , DraftAssignmentsResp(..)
+    , RevalidateDraftResp(..)
     , AbsenceCreatedResp(..)
       -- * Skill / Station / Shift CRUD
     , CreateSkillReq(..)
@@ -95,6 +97,7 @@ import Domain.Worker (OvertimeModel(..), PayPeriodTracking(..))
 import Domain.PayPeriod (PayPeriodConfig(..), PayPeriodType(..), parsePayPeriodType, showPayPeriodType)
 import Export.JSON (ExportData)
 import Repo.Types (DraftInfo(..), CalendarCommit(..), AuditEntry(..))
+import Service.DraftValidation (DraftViolation(..))
 import qualified Service.Worker as SW
 
 -- -----------------------------------------------------------------
@@ -485,6 +488,65 @@ instance ToJSON OverlappingDraftsResp where
 instance FromJSON OverlappingDraftsResp where
     parseJSON = withObject "OverlappingDraftsResp" $ \v ->
         OverlappingDraftsResp <$> v .: "error" <*> v .: "drafts"
+
+-- | A constraint violation, as reported to a reader.
+--
+-- @constraint@ is the short label the CLI groups by ("absence conflict") and
+-- @reason@ the sentence explaining it. Both are already user-facing strings, so
+-- neither is a code a client should switch on.
+instance ToJSON DraftViolation where
+    toJSON v = object
+        [ "assignment" .= dvAssignment v
+        , "constraint" .= dvConstraint v
+        , "reason"     .= dvReason v
+        ]
+
+instance FromJSON DraftViolation where
+    parseJSON = withObject "DraftViolation" $ \v ->
+        DraftViolation <$> v .: "assignment" <*> v .: "constraint"
+                       <*> v .: "reason"
+
+-- | What a draft holds and what is wrong with it, without changing either.
+--
+-- @violations@ comes from 'Service.DraftValidation.computeDraftViolations', so
+-- the assignments it names are still present in @assignments@ — this is a report,
+-- not a diff. @replacedUnder@ is the calendar commits that overwrote part of this
+-- draft's own date range since it was last validated; it is here because a read
+-- that reported violations while staying silent about the baseline moving would
+-- mislead in exactly the case ADR 0003 made common.
+data DraftAssignmentsResp = DraftAssignmentsResp
+    { darAssignments   :: !Schedule
+    , darViolations    :: ![DraftViolation]
+    , darReplacedUnder :: ![CalendarCommit]
+    } deriving (Show)
+
+instance ToJSON DraftAssignmentsResp where
+    toJSON r = object
+        [ "assignments"   .= darAssignments r
+        , "violations"    .= darViolations r
+        , "replacedUnder" .= darReplacedUnder r
+        ]
+
+instance FromJSON DraftAssignmentsResp where
+    parseJSON = withObject "DraftAssignmentsResp" $ \v ->
+        DraftAssignmentsResp
+            <$> v .: "assignments"
+            <*> v .: "violations"
+            <*> v .: "replacedUnder"
+
+-- | What an explicit revalidate removed. Named @removed@ rather than
+-- @violations@ because these assignments are gone from the draft, which is the
+-- whole difference between this and the GET.
+data RevalidateDraftResp = RevalidateDraftResp
+    { rvrRemoved :: ![DraftViolation]
+    } deriving (Show)
+
+instance ToJSON RevalidateDraftResp where
+    toJSON r = object ["removed" .= rvrRemoved r]
+
+instance FromJSON RevalidateDraftResp where
+    parseJSON = withObject "RevalidateDraftResp" $ \v ->
+        RevalidateDraftResp <$> v .: "removed"
 
 data AbsenceCreatedResp = AbsenceCreatedResp
     { acrId :: !Int

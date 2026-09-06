@@ -378,6 +378,11 @@ classifyDraft op rest = case op of
     "discard" -> case rest of
         (did : _) -> (mutating etDraft "discard") { cmEntityId = readMaybe did }
         _         -> mutating etDraft "discard"
+    -- Mutating: pruning removes assignments. The fallback below would call it
+    -- non-mutating, which would keep it out of the mutation-only feeds.
+    "revalidate" -> case rest of
+        (did : _) -> (mutating etDraft "revalidate") { cmEntityId = readMaybe did }
+        _         -> mutating etDraft "revalidate"
     "list"         -> nonMutating etDraft "list"
     "open"         -> nonMutating etDraft "open"
     "view"         -> nonMutating etDraft "view"

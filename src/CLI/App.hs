@@ -337,13 +337,7 @@ handleCommand st cmd = case cmd of
                 if null violations
                     then return ()
                     else do
-                        users <- repoListUsers (asRepo st)
-                        stations <- SW.listStations (asRepo st)
-                        let workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList [(s, T.unpack (stationName station)) | (s, station) <- stations]
-                        displayViolationReport d workerNames stationNames violations
+                        reportViolations st d violations
                         putStrLn ""
                 -- Load (possibly updated) draft assignments
                 sched <- repoLoadDraftAssignments (asRepo st) did
@@ -473,6 +467,23 @@ handleCommand st cmd = case cmd of
                                 writeIORef (asUnfreezes st) Set.empty
                                 putStrLn "Historical dates refrozen. All temporary unfreezes cleared."
                             else return ()
+
+    -- The explicit form of the pruning `draft open` does as a side effect. It
+    -- exists so the REST revalidate endpoint has a command string that replays.
+    DraftRevalidate mDidStr -> requireAdmin st $ do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                mDraft <- Draft.loadDraft (asRepo st) did
+                case mDraft of
+                    Nothing -> putStrLn "Draft not found."
+                    Just d  -> do
+                        violations <- pruneDraftViolations (asRepo st) did
+                        if null violations
+                            then putStrLn ("Draft #" ++ show did
+                                          ++ ": nothing removed.")
+                            else reportViolations st d violations
 
     DraftDiscard mDidStr -> requireAdmin st $ do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -2230,6 +2241,7 @@ helpRegistry =
     , ("draft",    False, "draft view-compact [id]",                 "View draft assignments (compact)")
     , ("draft",    True,  "draft generate [id]",                     "Run scheduler within draft")
     , ("draft",    True,  "draft commit [id] [note] [--force]",      "Commit draft to calendar")
+    , ("draft",    True,  "draft revalidate [id]",                   "Re-check draft against calendar, dropping what no longer holds")
     , ("draft",    True,  "draft discard [id]",                      "Discard draft")
     , ("draft",    False, "draft hours [id]",                        "Worker hours summary for draft")
     , ("draft",    False, "draft diagnose [id]",                     "Diagnose draft")
@@ -2498,6 +2510,20 @@ absenceNameMaps repo = do
 -- -----------------------------------------------------------------
 -- Draft validation display
 -- -----------------------------------------------------------------
+
+-- | Print a violation report, resolving the worker and station ids to names
+-- first. Shared by @draft open@, which prunes as a side effect of reading, and
+-- @draft revalidate@, which prunes because that is what it is for.
+reportViolations :: AppState -> DraftInfo -> [DraftViolation] -> IO ()
+reportViolations st d violations = do
+    users <- repoListUsers (asRepo st)
+    stations <- SW.listStations (asRepo st)
+    let workerNames = Map.fromList
+            [ (userIdToWorkerId (userId u), T.unpack uname)
+            | u <- users, let Username uname = userName u ]
+        stationNames = Map.fromList
+            [ (s, T.unpack (stationName station)) | (s, station) <- stations ]
+    displayViolationReport d workerNames stationNames violations
 
 -- | Report that the calendar under this draft's dates was replaced since it was
 -- last looked at, and by what.
