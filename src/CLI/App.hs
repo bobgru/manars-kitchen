@@ -847,7 +847,11 @@ handleCommand st cmd = case cmd of
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
-    WhatIfGrantSkill wid sid -> requireAdmin st $ requireDraft st $ do
+    -- Guarded here rather than at `what-if apply`: a hint naming a skill that
+    -- does not exist has nowhere useful to go, and refusing it at the point of
+    -- entry beats crashing several commands later when the session is applied.
+    WhatIfGrantSkill wid sid -> requireAdmin st $ requireDraft st $
+        withSkillIds st [sid] $ do
         result <- getOrInitSession st
         case result of
             Left err -> putStrLn err
@@ -1037,12 +1041,13 @@ handleCommand st cmd = case cmd of
                 SW.closeStationDay (asRepo st) sid dow
                 putStrLn ("Station closed on " ++ dayStr)
 
-    StationRequireSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid -> do
-        ctx <- repoLoadSkillCtx (asRepo st)
-        let current = Map.findWithDefault Set.empty sid (scStationRequires ctx)
-        SW.setStationRequiredSkills (asRepo st) sid (Set.insert skid current)
-        sname <- lookupSkillName (asRepo st) skid
-        putStrLn ("Station now requires skill " ++ sname)
+    StationRequireSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid ->
+        withSkillIds st [skid] $ do
+            ctx <- repoLoadSkillCtx (asRepo st)
+            let current = Map.findWithDefault Set.empty sid (scStationRequires ctx)
+            SW.setStationRequiredSkills (asRepo st) sid (Set.insert skid current)
+            sname <- lookupSkillName (asRepo st) skid
+            putStrLn ("Station now requires skill " ++ sname)
 
     StationRemoveRequiredSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid -> do
         ctx <- repoLoadSkillCtx (asRepo st)
@@ -1096,7 +1101,7 @@ handleCommand st cmd = case cmd of
                 putStrLn ("  " ++ T.unpack (skillName sk))
                 ) skills
 
-    SkillImplication a b -> requireAdmin st $ do
+    SkillImplication a b -> requireAdmin st $ withSkillIds st [a, b] $ do
         SW.addSkillImplication (asRepo st) a b
         aname <- lookupSkillName (asRepo st) a
         bname <- lookupSkillName (asRepo st) b
@@ -1129,7 +1134,7 @@ handleCommand st cmd = case cmd of
         putStr (displaySkillCtx ctx)
 
     -- Worker skills (admin)
-    WorkerGrantSkill wid sid -> requireAdmin st $ do
+    WorkerGrantSkill wid sid -> requireAdmin st $ withSkillIds st [sid] $ do
         SW.grantWorkerSkill (asRepo st) (WorkerId wid) sid
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
         sname <- lookupSkillName (asRepo st) sid
@@ -1184,7 +1189,7 @@ handleCommand st cmd = case cmd of
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
         putStrLn ("Set " ++ wname ++ " seniority level: " ++ show lvl)
 
-    WorkerSetCrossTraining wid sid -> requireAdmin st $ do
+    WorkerSetCrossTraining wid sid -> requireAdmin st $ withSkillIds st [sid] $ do
         SW.addCrossTraining (asRepo st) (WorkerId wid) sid
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
         sname <- lookupSkillName (asRepo st) sid
@@ -2478,6 +2483,25 @@ resolveStationArg repo arg
             [sid] -> return (Right sid)
             []    -> return (Left ("Unknown station: " ++ arg))
             _     -> return (Left ("Ambiguous station: " ++ arg))
+
+-- | Run an action only when every skill id given exists; report the ones that
+-- do not.
+--
+-- The relational tables carry @REFERENCES skills(id)@ and 'repoSaveSkillCtx'
+-- rewrites them wholesale, so saving a context that mentions a skill nobody
+-- created aborts the transaction with a SQLite foreign-key error. Nothing caught
+-- it, so it killed the process — in a replay or a demo script that abandons the
+-- run partway through.
+--
+-- Only the CLI needs this. REST resolves skill *names* and answers 404 for an
+-- unknown one, so a raw unchecked id cannot get in that way.
+withSkillIds :: AppState -> [SkillId] -> IO () -> IO ()
+withSkillIds st skids action = do
+    known <- Set.fromList . map fst <$> repoListSkills (asRepo st)
+    case [ n | skid@(SkillId n) <- skids, not (Set.member skid known) ] of
+        []      -> action
+        missing -> putStrLn ("Unknown skill: "
+                            ++ unwords (map show missing))
 
 -- | Resolve a station name argument and run the action; print error otherwise.
 withStationArg :: AppState -> String -> (StationId -> IO ()) -> IO ()

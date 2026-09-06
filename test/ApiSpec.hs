@@ -1541,6 +1541,33 @@ spec = do
             result <- runClientM (rpcExecuteC (ExecuteReq "help" Nothing)) env
             result `shouldFailWith` 401
 
+        -- Regression: the relational skill tables carry REFERENCES skills(id),
+        -- and repoSaveSkillCtx rewrites them wholesale, so a command naming a
+        -- skill id nobody created used to abort the transaction with an uncaught
+        -- SQLite foreign-key error — killing the process rather than answering.
+        -- Every one of these commands took a raw id straight from the user.
+        it "reports an unknown skill id instead of dying" $
+            withSeededApp $ \repo env -> do
+                sid <- SW.addStation repo "grill" 1 1
+                let StationId stationNum = sid
+                    commands =
+                        [ "station require-skill " ++ show stationNum ++ " 99"
+                        , "worker grant-skill 1 99"
+                        , "worker set-cross-training 1 99"
+                        , "skill implication 99 98"
+                        ]
+                mapM_ (\cmd -> do
+                    result <- runClientM (rpcExecuteC (ExecuteReq cmd Nothing)) env
+                    case result of
+                        Left err -> expectationFailure
+                            (cmd ++ " failed instead of reporting: " ++ show err)
+                        Right output -> output `shouldSatisfy`
+                            \s -> "Unknown skill" `isInfixOf` s
+                    ) commands
+                -- The server is still answering, which is the actual regression.
+                Right skills <- runClientM listSkillsC env
+                skills `shouldBe` []
+
     -- -----------------------------------------------------------------
     -- SSE Event Stream endpoint
     -- -----------------------------------------------------------------

@@ -394,6 +394,12 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
 
 ### 7. Smaller backlog
 
+- **`station_required_skills.station_id` has no foreign key**, unlike its
+  `skill_id` beside it. `station require-skill 999 1` therefore writes a row for a
+  station that does not exist and reports success, silently. Found 2026-09-05
+  while fixing the unknown-*skill*-id crash next to it, which is now guarded by
+  `withSkillIds` in `src/CLI/App.hs`. Same shape as item 4's
+  `worker_shift_prefs.shift_name` gap, and worth fixing with it.
 - **Station safe-delete ignores assignments.** `safeDeleteStation` checks worker
   station preferences and station required skills only. Assignment checking was
   deferred because "active schedule" needed defining; now that drafts are the only
