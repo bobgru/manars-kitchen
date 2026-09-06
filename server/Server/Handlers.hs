@@ -259,8 +259,6 @@ handleCreateDraft cmdBus repo user req = do
     result <- liftIO $ SD.createDraft repo SD.defaultCreateDraftOpts
                             (cdrDateFrom req) (cdrDateTo req)
     case result of
-        Left SD.DraftOverlapsExisting ->
-            throwApiError (Conflict "Date range overlaps an existing draft.")
         Left (SD.DraftCoversFrozenDates fr) ->
             throwConflictWithBody FrozenDatesResp
                 { fdrError      = "Date range covers frozen dates."

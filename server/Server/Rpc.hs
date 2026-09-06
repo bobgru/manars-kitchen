@@ -718,8 +718,6 @@ rpcCreateDraft repo req = do
     result <- liftIO $ SD.createDraft repo SD.defaultCreateDraftOpts
                             (cdrDateFrom req) (cdrDateTo req)
     case result of
-        Left SD.DraftOverlapsExisting ->
-            throwApiError (Conflict "Date range overlaps an existing draft.")
         Left (SD.DraftCoversFrozenDates fr) ->
             throwApiError (Conflict
                 ("Date range covers frozen dates " ++ show (SD.frFrom fr)

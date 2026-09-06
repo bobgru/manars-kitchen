@@ -28,8 +28,10 @@ time and not divided into named periods. The only artefact workers see.
 
 **Draft**:
 A working copy of assignments over a date range, seeded from the calendar and
-pins, edited privately, and either committed to the calendar or discarded.
-Drafts do not overlap each other.
+pins, edited privately, and either committed to the calendar or discarded. Any
+number of drafts may cover the same dates — competing experiments over one week
+are the point, and are *meant* to disagree, so creating one is never refused for
+overlap. The disagreement only becomes real at commit time. See ADR 0003.
 
 **Commit**:
 The act of replacing a date range of the calendar with a draft's assignments,

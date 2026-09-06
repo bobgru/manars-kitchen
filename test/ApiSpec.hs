@@ -611,14 +611,22 @@ spec = do
             result <- runClientM (getDraftC did) env
             result `shouldFailWith` 404
 
-        it "overlapping draft returns 409" $ withTestApp $ \env -> do
+        -- Creating an overlapping draft is allowed: a draft is an experiment
+        -- sandbox, and the overlap is adjudicated at commit time. ADR 0003.
+        it "overlapping draft is created rather than refused" $ withTestApp $ \env -> do
             (from, to) <- futureWeek
             overlapFrom <- fromToday 34
             overlapTo <- fromToday 40
-            Right _ <- runClientM (createDraftC (CreateDraftReq from to)) env
+            Right first <- runClientM (createDraftC (CreateDraftReq from to)) env
             result <- runClientM
                 (createDraftC (CreateDraftReq overlapFrom overlapTo)) env
-            result `shouldFailWith` 409
+            case result of
+                Left err -> expectationFailure
+                    ("Expected the overlapping create to succeed, got " ++ show err)
+                Right second -> do
+                    dcrId second `shouldNotBe` dcrId first
+                    Right drafts <- runClientM listDraftsC env
+                    length drafts `shouldBe` 2
 
         -- REST has no force flag and no way to unfreeze, so a past range is a
         -- dead end rather than a prompt.

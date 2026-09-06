@@ -172,6 +172,35 @@ spec = do
                     drafts' <- Draft.listDrafts repo
                     length drafts' `shouldBe` 0
 
+    -- A draft is an experiment sandbox, so creating one is never refused for
+    -- overlapping another's dates — see ADR 0003. The conflict is adjudicated at
+    -- commit time instead.
+    describe "Overlapping drafts on create" $ do
+        it "creates a draft whose range overlaps an existing draft" $
+            withTestRepo $ \repo -> do
+                first <- createForced repo (apr 6) (apr 12)
+                second <- createForced repo (apr 10) (apr 17)
+                case (first, second) of
+                    (Right a, Right b) -> do
+                        a `shouldNotBe` b
+                        drafts <- Draft.listDrafts repo
+                        length drafts `shouldBe` 2
+                    _ -> expectationFailure
+                            ("Expected both creates to succeed, got "
+                                ++ show (first, second))
+
+        it "creates a draft over the identical range twice" $
+            withTestRepo $ \repo -> do
+                first <- createForced repo (apr 6) (apr 12)
+                second <- createForced repo (apr 6) (apr 12)
+                case (first, second) of
+                    (Right _, Right _) -> do
+                        drafts <- Draft.listDrafts repo
+                        length drafts `shouldBe` 2
+                    _ -> expectationFailure
+                            ("Expected both creates to succeed, got "
+                                ++ show (first, second))
+
     describe "Freeze line on create" $ do
         -- Without force, the fixture dates are in the past and refused. The
         -- refusal names the frozen sub-range so a caller can report it.
@@ -181,8 +210,6 @@ spec = do
                             (apr 1) (apr 30)
             case result of
                 Right _ -> expectationFailure "Expected a frozen-dates refusal"
-                Left Draft.DraftOverlapsExisting ->
-                    expectationFailure "Expected frozen dates, got an overlap"
                 Left (Draft.DraftCoversFrozenDates fr) -> do
                     Draft.frFreezeLine fr `shouldBe` freezeLine
                     Draft.frFrom fr `shouldBe` apr 1
@@ -214,30 +241,6 @@ spec = do
                     Right _  -> do
                         drafts <- Draft.listDrafts repo
                         length drafts `shouldBe` 1
-
-    describe "Non-overlapping constraint" $ do
-        it "rejects overlapping date ranges" $ withTestRepo $ \repo -> do
-            result1 <- createForced repo (apr 1) (apr 30)
-            case result1 of
-                Left err -> expectationFailure err
-                Right _ -> do
-                    -- Try to create an overlapping draft
-                    result2 <- createForced repo (apr 15) (may 15)
-                    case result2 of
-                        Left _  -> return ()  -- expected
-                        Right _ -> expectationFailure "Expected overlap rejection"
-
-        it "allows non-overlapping date ranges" $ withTestRepo $ \repo -> do
-            result1 <- createForced repo (apr 1) (apr 30)
-            case result1 of
-                Left err -> expectationFailure err
-                Right _ -> do
-                    result2 <- createForced repo (may 1) (may 31)
-                    case result2 of
-                        Left err -> expectationFailure ("Should allow non-overlapping: " ++ err)
-                        Right _  -> do
-                            drafts <- Draft.listDrafts repo
-                            length drafts `shouldBe` 2
 
     describe "activeWorkerIds" $ do
         it "returns every seeded worker" $ withTestRepo $ \repo -> do

@@ -233,8 +233,6 @@ data Repository = Repository
       -- ^ List all active drafts
     , repoGetDraft       :: Int -> IO (Maybe DraftInfo)
       -- ^ Get draft metadata by id
-    , repoCheckDraftOverlap :: Day -> Day -> IO Bool
-      -- ^ Check if a date range overlaps any existing draft
     , repoSaveDraftAssignments :: Int -> Schedule -> IO ()
       -- ^ Save assignments for a draft (replace existing)
     , repoLoadDraftAssignments :: Int -> IO Schedule

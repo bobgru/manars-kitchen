@@ -2164,8 +2164,6 @@ createDraftWithFreezeCheck st dateFrom dateTo force = do
     case result of
         Right did -> putStrLn ("Created draft #" ++ show did
                               ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
-        Left Draft.DraftOverlapsExisting ->
-            putStrLn "Error: Date range overlaps an existing draft."
         Left (Draft.DraftCoversFrozenDates fr) -> do
             let firstFrozen = Draft.frFrom fr
                 lastFrozen  = Draft.frTo fr

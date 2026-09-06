@@ -73,9 +73,12 @@ data FrozenRange = FrozenRange
     } deriving (Eq, Show)
 
 -- | Why 'createDraft' refused.
+--
+-- The frozen range is the only refusal left. A draft is an experiment sandbox,
+-- so overlapping an existing draft's dates is allowed — see ADR 0003, and
+-- 'commitDraft' for where the overlap is actually adjudicated.
 data CreateDraftError
-    = DraftOverlapsExisting
-    | DraftCoversFrozenDates !FrozenRange
+    = DraftCoversFrozenDates !FrozenRange
     deriving (Eq, Show)
 
 -- | What a caller needs to know after a successful 'commitDraft'.
@@ -85,12 +88,13 @@ data CommitOutcome = CommitOutcome
       -- caller holding temporary unfreezes should clear them.
     } deriving (Eq, Show)
 
--- | Create a draft for a date range: refuse frozen dates unless forced, check
--- non-overlap, seed from calendar + pins, save draft assignments, return
--- draft_id.
+-- | Create a draft for a date range: refuse frozen dates unless forced, seed
+-- from calendar + pins, save draft assignments, return draft_id.
 --
--- The freeze check comes first so that a range which is both frozen and
--- overlapping reports the frozen dates — the more surprising of the two.
+-- The date range may overlap any number of existing drafts. Two admins trying
+-- competing schedules for the same week is the point of a draft, so creation is
+-- never refused for overlap; the conflict is only real at commit time, which is
+-- where 'commitDraft' reports it.
 createDraft :: Repository -> CreateDraftOpts -> Day -> Day
             -> IO (Either CreateDraftError Int)
 createDraft repo opts dateFrom dateTo = do
@@ -100,14 +104,10 @@ createDraft repo opts dateFrom dateTo = do
         Just (from, to) | not (cdoForce opts) ->
             return (Left (DraftCoversFrozenDates (FrozenRange freezeLine from to)))
         _ -> do
-            overlap <- repoCheckDraftOverlap repo dateFrom dateTo
-            if overlap
-                then return (Left DraftOverlapsExisting)
-                else do
-                    draftId <- repoCreateDraft repo dateFrom dateTo
-                    seed <- seedDraft repo dateFrom dateTo
-                    repoSaveDraftAssignments repo draftId seed
-                    return (Right draftId)
+            draftId <- repoCreateDraft repo dateFrom dateTo
+            seed <- seedDraft repo dateFrom dateTo
+            repoSaveDraftAssignments repo draftId seed
+            return (Right draftId)
 
 -- | The default candidate worker set: every user whose worker status is active.
 -- Inactive workers and non-worker accounts are excluded, which is the point of

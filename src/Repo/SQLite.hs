@@ -104,7 +104,6 @@ mkSQLiteRepo path = do
         , repoDeleteDraft    = sqlDeleteDraft conn
         , repoListDrafts     = sqlListDrafts conn
         , repoGetDraft       = sqlGetDraft conn
-        , repoCheckDraftOverlap = sqlCheckDraftOverlap conn
         , repoSaveDraftAssignments = sqlSaveDraftAssignments conn
         , repoLoadDraftAssignments = sqlLoadDraftAssignments conn
         , repoCalendarCommitsAfter = sqlCalendarCommitsAfter conn
@@ -1114,15 +1113,6 @@ sqlGetDraft conn draftId = do
     return $ case rows of
         [(did, df, dt, ts, lv)] -> Just (DraftInfo did (textToDay df) (textToDay dt) ts lv)
         _                       -> Nothing
-
--- | Check if a date range overlaps any existing draft.
-sqlCheckDraftOverlap :: Connection -> Day -> Day -> IO Bool
-sqlCheckDraftOverlap conn dateFrom dateTo = do
-    rows <- query conn
-        "SELECT 1 FROM drafts WHERE date_from <= ? AND date_to >= ?"
-        (dayToText dateTo, dayToText dateFrom)
-        :: IO [Only Int]
-    return (not (null rows))
 
 -- | Save assignments for a draft (delete existing, insert new).
 sqlSaveDraftAssignments :: Connection -> Int -> Schedule -> IO ()
