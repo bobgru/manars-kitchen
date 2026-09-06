@@ -351,9 +351,9 @@ spec = do
                     let draftSched = mkSchedule [ mkAssignment 2 1 (apr 6) 9 ]
                     repoSaveDraftAssignments repo did draftSched
                     -- Commit
-                    commitResult <- Draft.commitDraft repo did "test commit"
+                    commitResult <- Draft.commitDraft repo did "test commit" False
                     case commitResult of
-                        Left err  -> expectationFailure err
+                        Left err  -> expectationFailure (show err)
                         Right _ -> do
                             -- Calendar should have draft's assignments
                             current <- Cal.loadCalendarSlice repo (apr 6) (apr 12)
@@ -364,6 +364,54 @@ spec = do
                             -- Draft should be gone
                             drafts <- Draft.listDrafts repo
                             length drafts `shouldBe` 0
+
+    -- Overlap is allowed on create and adjudicated here, because commit is a
+    -- whole-range overwrite: committing the second of two overlapping drafts
+    -- erases the first's work from the calendar. ADR 0003.
+    describe "Draft commit with overlapping siblings" $ do
+        it "refuses, naming the sibling drafts" $ withTestRepo $ \repo -> do
+            Right keep <- createForced repo (apr 6) (apr 12)
+            Right other <- createForced repo (apr 10) (apr 17)
+            result <- Draft.commitDraft repo keep "overlapping" False
+            case result of
+                Right _ -> expectationFailure "Expected an overlap refusal"
+                Left Draft.CommitDraftNotFound ->
+                    expectationFailure "Expected an overlap refusal, got not-found"
+                Left (Draft.CommitOverlapsDrafts siblings) ->
+                    map diId siblings `shouldBe` [other]
+            -- The refusal wrote nothing: both drafts survive, and the calendar
+            -- was not touched.
+            drafts <- Draft.listDrafts repo
+            map diId drafts `shouldBe` [keep, other]
+            commits <- Cal.listCalendarHistory repo
+            length commits `shouldBe` 0
+
+        it "does not name a draft whose range only abuts this one" $
+            withTestRepo $ \repo -> do
+                Right keep <- createForced repo (apr 6) (apr 12)
+                _ <- createForced repo (apr 13) (apr 19)
+                result <- Draft.commitDraft repo keep "adjacent" False
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right _  -> do
+                        drafts <- Draft.listDrafts repo
+                        length drafts `shouldBe` 1
+
+        it "commits past the refusal with force, leaving the sibling alone" $
+            withTestRepo $ \repo -> do
+                Right keep <- createForced repo (apr 6) (apr 12)
+                Right other <- createForced repo (apr 10) (apr 17)
+                let draftSched = mkSchedule [ mkAssignment 2 1 (apr 6) 9 ]
+                repoSaveDraftAssignments repo keep draftSched
+                result <- Draft.commitDraft repo keep "forced" True
+                case result of
+                    Left err -> expectationFailure (show err)
+                    Right _  -> do
+                        current <- Cal.loadCalendarSlice repo (apr 6) (apr 12)
+                        current `shouldBe` draftSched
+                        -- The sibling is not discarded: it may still be wanted.
+                        drafts <- Draft.listDrafts repo
+                        map diId drafts `shouldBe` [other]
 
     describe "Draft discard" $ do
         it "leaves calendar unchanged" $ withTestRepo $ \repo -> do

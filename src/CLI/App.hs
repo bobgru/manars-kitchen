@@ -433,15 +433,18 @@ handleCommand st cmd = case cmd of
                                  ++ show truly ++ " unfilled, "
                                  ++ show under ++ " understaffed positions.")
 
-    DraftCommit mDidStr mNote -> requireAdmin st $ do
+    DraftCommit mDidStr mNote force -> requireAdmin st $ do
         resolved <- resolveDraftId (asRepo st) mDidStr
         case resolved of
             Left err -> putStrLn err
             Right did -> do
                 let note = T.pack (maybe "" id mNote)
-                result <- Draft.commitDraft (asRepo st) did note
+                result <- Draft.commitDraft (asRepo st) did note force
                 case result of
-                    Left err  -> putStrLn ("Error: " ++ err)
+                    Left Draft.CommitDraftNotFound ->
+                        putStrLn "Error: Draft not found."
+                    Left (Draft.CommitOverlapsDrafts siblings) ->
+                        printCommitOverlapRefusal did mNote siblings
                     Right outcome -> do
                         putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
                         -- The persisted hints went with the draft; the
@@ -2176,6 +2179,27 @@ createDraftWithFreezeCheck st dateFrom dateTo force = do
             putStrLn ("  To override: draft create "
                      ++ show dateFrom ++ " " ++ show dateTo ++ " --force")
 
+-- | Print the refusal from a commit that would overwrite dates another draft
+-- also covers, and the exact command that proceeds anyway.
+--
+-- Naming the siblings matters more than the count: the admin has to decide
+-- whether the other draft is the one they meant to keep, and cannot do that from
+-- a number.
+printCommitOverlapRefusal :: Int -> Maybe String -> [DraftInfo] -> IO ()
+printCommitOverlapRefusal did mNote siblings = do
+    putStrLn ("Draft #" ++ show did ++ " covers dates that "
+             ++ (if length siblings == 1 then "another draft covers"
+                                        else "other drafts cover")
+             ++ " too:")
+    mapM_ (\d -> putStrLn ("  - draft #" ++ show (diId d)
+                          ++ " " ++ show (diDateFrom d)
+                          ++ " to " ++ show (diDateTo d))) siblings
+    putStrLn "Committing replaces the whole date range, so their assignments"
+    putStrLn "would be dropped from the calendar. The previous assignments are"
+    putStrLn "snapshotted in calendar history first, so this is recoverable."
+    putStrLn ("  To proceed: draft commit " ++ show did
+             ++ maybe "" (" " ++) mNote ++ " --force")
+
 -- -----------------------------------------------------------------
 -- Help registry
 -- -----------------------------------------------------------------
@@ -2194,7 +2218,7 @@ helpRegistry =
     , ("draft",    False, "draft view [id]",                         "View draft assignments (table)")
     , ("draft",    False, "draft view-compact [id]",                 "View draft assignments (compact)")
     , ("draft",    True,  "draft generate [id]",                     "Run scheduler within draft")
-    , ("draft",    True,  "draft commit [id] [note]",                "Commit draft to calendar")
+    , ("draft",    True,  "draft commit [id] [note] [--force]",      "Commit draft to calendar")
     , ("draft",    True,  "draft discard [id]",                      "Discard draft")
     , ("draft",    False, "draft hours [id]",                        "Worker hours summary for draft")
     , ("draft",    False, "draft diagnose [id]",                     "Diagnose draft")

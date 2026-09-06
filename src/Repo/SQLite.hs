@@ -104,6 +104,7 @@ mkSQLiteRepo path = do
         , repoDeleteDraft    = sqlDeleteDraft conn
         , repoListDrafts     = sqlListDrafts conn
         , repoGetDraft       = sqlGetDraft conn
+        , repoDraftsOverlapping = sqlDraftsOverlapping conn
         , repoSaveDraftAssignments = sqlSaveDraftAssignments conn
         , repoLoadDraftAssignments = sqlLoadDraftAssignments conn
         , repoCalendarCommitsAfter = sqlCalendarCommitsAfter conn
@@ -1099,6 +1100,19 @@ sqlListDrafts conn = do
     rows <- query_ conn
         "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
         \FROM drafts ORDER BY created_at"
+        :: IO [(Int, Text, Text, Text, Text)]
+    return [DraftInfo did (textToDay df) (textToDay dt) ts lv
+           | (did, df, dt, ts, lv) <- rows]
+
+-- | Every draft whose date range intersects the given one, including a draft
+-- with the identical range. Excluding the draft being committed is the caller's
+-- job, since only the caller knows which one that is.
+sqlDraftsOverlapping :: Connection -> Day -> Day -> IO [DraftInfo]
+sqlDraftsOverlapping conn dateFrom dateTo = do
+    rows <- query conn
+        "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
+        \FROM drafts WHERE date_from <= ? AND date_to >= ? ORDER BY draft_id"
+        (dayToText dateTo, dayToText dateFrom)
         :: IO [(Int, Text, Text, Text, Text)]
     return [DraftInfo did (textToDay df) (textToDay dt) ts lv
            | (did, df, dt, ts, lv) <- rows]

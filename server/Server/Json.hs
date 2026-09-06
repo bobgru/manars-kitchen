@@ -10,6 +10,7 @@ module Server.Json
       -- * Response types (existing)
     , DraftCreatedResp(..)
     , FrozenDatesResp(..)
+    , OverlappingDraftsResp(..)
     , AbsenceCreatedResp(..)
       -- * Skill / Station / Shift CRUD
     , CreateSkillReq(..)
@@ -460,6 +461,26 @@ instance FromJSON FrozenDatesResp where
             <*> v .: "freezeLine"
             <*> v .: "frozenFrom"
             <*> v .: "frozenTo"
+
+-- | 409 body for a commit refused because another draft covers the same dates.
+--
+-- Carries @error@ for a client that reads only that key, and the sibling drafts
+-- in full so a client can list them and offer the force affordance —
+-- @POST \/api\/drafts\/:id\/commit\/force@ — without a second round trip.
+data OverlappingDraftsResp = OverlappingDraftsResp
+    { odrError  :: !T.Text
+    , odrDrafts :: ![DraftInfo]
+    } deriving (Show, Eq)
+
+instance ToJSON OverlappingDraftsResp where
+    toJSON r = object
+        [ "error"  .= odrError r
+        , "drafts" .= odrDrafts r
+        ]
+
+instance FromJSON OverlappingDraftsResp where
+    parseJSON = withObject "OverlappingDraftsResp" $ \v ->
+        OverlappingDraftsResp <$> v .: "error" <*> v .: "drafts"
 
 data AbsenceCreatedResp = AbsenceCreatedResp
     { acrId :: !Int

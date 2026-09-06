@@ -46,8 +46,9 @@ module Server.Rpc
     ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (ToJSON(..), FromJSON(..), (.=), (.:), (.:?), object, withObject)
+import Data.Aeson (ToJSON(..), FromJSON(..), (.=), (.:), (.:?), (.!=), object, withObject)
 import qualified Data.ByteString.Char8 as BS8
+import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import qualified Data.Set as Set
@@ -67,7 +68,7 @@ import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
 import Domain.Scheduler (ScheduleResult)
 import Domain.Worker (OvertimeModel, PayPeriodTracking)
 import Repo.Types
-    ( Repository(..), DraftInfo, CalendarCommit, AuditEntry(..)
+    ( Repository(..), DraftInfo(..), CalendarCommit, AuditEntry(..)
     , SessionId(..), HintSessionRecord(..)
     )
 import qualified Service.Worker as SW
@@ -294,9 +295,11 @@ data RpcDraftGenerate = RpcDraftGenerate { rdgDraftId :: !Int, rdgWorkerIds :: !
 instance ToJSON RpcDraftGenerate where toJSON r = object ["draftId" .= rdgDraftId r, "workerIds" .= rdgWorkerIds r]
 instance FromJSON RpcDraftGenerate where parseJSON = withObject "RpcDraftGenerate" $ \v -> RpcDraftGenerate <$> v .: "draftId" <*> v .:? "workerIds"
 
-data RpcDraftCommit = RpcDraftCommit { rdcDraftId :: !Int, rdcNote :: !T.Text } deriving (Show)
-instance ToJSON RpcDraftCommit where toJSON r = object ["draftId" .= rdcDraftId r, "note" .= rdcNote r]
-instance FromJSON RpcDraftCommit where parseJSON = withObject "RpcDraftCommit" $ \v -> RpcDraftCommit <$> v .: "draftId" <*> v .: "note"
+-- | @force@ overrides the overlapping-drafts refusal. Absent means False, so a
+-- client built before the flag existed still parses and still gets the guard.
+data RpcDraftCommit = RpcDraftCommit { rdcDraftId :: !Int, rdcNote :: !T.Text, rdcForce :: !Bool } deriving (Show)
+instance ToJSON RpcDraftCommit where toJSON r = object ["draftId" .= rdcDraftId r, "note" .= rdcNote r, "force" .= rdcForce r]
+instance FromJSON RpcDraftCommit where parseJSON = withObject "RpcDraftCommit" $ \v -> RpcDraftCommit <$> v .: "draftId" <*> v .: "note" <*> v .:? "force" .!= False
 
 
 data RpcDateRange = RpcDateRange { rdrFrom :: !Day, rdrTo :: !Day } deriving (Show)
@@ -748,13 +751,23 @@ rpcGenerateDraft repo req = do
 
 rpcCommitDraft :: TopicBus CommandEvent -> Repository -> RpcDraftCommit -> Handler RpcOk
 rpcCommitDraft cmdBus repo req = do
-    result <- liftIO $ SD.commitDraft repo (rdcDraftId req) (rdcNote req)
+    result <- liftIO $ SD.commitDraft repo (rdcDraftId req) (rdcNote req) (rdcForce req)
     case result of
-        Left msg -> throwApiError (NotFound msg)
+        Left SD.CommitDraftNotFound -> throwApiError (NotFound "Draft not found.")
+        -- The remote client prints this as-is, so it has to name the drafts
+        -- rather than assume a second call can go and look them up.
+        Left (SD.CommitOverlapsDrafts siblings) ->
+            throwApiError (Conflict
+                ("Draft #" ++ show (rdcDraftId req)
+                    ++ " covers dates also covered by "
+                    ++ intercalate ", "
+                        [ "draft #" ++ show (diId d) | d <- siblings ]
+                    ++ ". Re-run with --force to replace them."))
         -- The frozen-coverage flag is dropped: unfreezes live in the remote
         -- client's session, and this handler cannot reach into it.
         Right _  -> do
-            logRpcBus cmdBus ("draft commit " ++ show (rdcDraftId req))
+            logRpcBus cmdBus ("draft commit " ++ show (rdcDraftId req)
+                             ++ (if rdcForce req then " --force" else ""))
             pure RpcOk
 
 rpcDiscardDraft :: TopicBus CommandEvent -> Repository -> RpcDraftId -> Handler RpcOk

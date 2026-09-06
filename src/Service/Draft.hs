@@ -11,6 +11,7 @@ module Service.Draft
     , defaultCreateDraftOpts
     , CreateDraftError(..)
     , FrozenRange(..)
+    , CommitDraftError(..)
     , CommitOutcome(..)
     , activeWorkerIds
       -- * Seeding
@@ -79,6 +80,15 @@ data FrozenRange = FrozenRange
 -- 'commitDraft' for where the overlap is actually adjudicated.
 data CreateDraftError
     = DraftCoversFrozenDates !FrozenRange
+    deriving (Eq, Show)
+
+-- | Why 'commitDraft' refused.
+--
+-- The overlap case carries the sibling drafts rather than a message, so that
+-- each caller can name them in its own idiom — a CLI line, a 409 body, a modal.
+data CommitDraftError
+    = CommitDraftNotFound
+    | CommitOverlapsDrafts ![DraftInfo]
     deriving (Eq, Show)
 
 -- | What a caller needs to know after a successful 'commitDraft'.
@@ -219,24 +229,47 @@ generateDraft repo draftId mWorkers progressBus = do
 -- | Commit a draft to the calendar: load draft assignments, call
 -- commitToCalendar, delete the draft and every what-if session saved against it.
 --
+-- Refuses when another draft covers any of the same dates, unless @force@.
+-- Commit is a whole-range overwrite — the date range is the claim, not the
+-- assignments — so committing two overlapping drafts in turn erases the first
+-- one's work from the calendar entirely. That is recoverable from the history
+-- snapshot 'Cal.commitToCalendar' takes, which is why this is a warning to
+-- override rather than a block; ADR 0003 rejected blocking outright.
+--
+-- Overlapping siblings are left alone: auto-discarding them would destroy work
+-- the admin may still want.
+--
 -- The outcome reports whether the committed range reached back past the freeze
 -- line. Clearing temporary unfreezes is the caller's job — they are session
 -- state, and this function has no access to them — but deciding that they should
 -- be cleared is not.
-commitDraft :: Repository -> Int -> Text -> IO (Either String CommitOutcome)
-commitDraft repo draftId note = do
+commitDraft :: Repository -> Int -> Text -> Bool
+            -> IO (Either CommitDraftError CommitOutcome)
+commitDraft repo draftId note force = do
     mDraft <- repoGetDraft repo draftId
     case mDraft of
-        Nothing -> return (Left "Draft not found.")
+        Nothing -> return (Left CommitDraftNotFound)
         Just draft -> do
-            sched <- repoLoadDraftAssignments repo draftId
-            Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft) note sched
-            repoDeleteDraft repo draftId
-            repoDeleteDraftHintSessions repo draftId
-            freezeLine <- Freeze.computeFreezeLine
-            let frozen = Freeze.frozenDatesInRange freezeLine
-                            (diDateFrom draft) (diDateTo draft)
-            return (Right (CommitOutcome { coCoveredFrozenDates = not (null frozen) }))
+            siblings <- overlappingSiblings repo draft
+            if not force && not (null siblings)
+                then return (Left (CommitOverlapsDrafts siblings))
+                else do
+                    sched <- repoLoadDraftAssignments repo draftId
+                    Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft) note sched
+                    repoDeleteDraft repo draftId
+                    repoDeleteDraftHintSessions repo draftId
+                    freezeLine <- Freeze.computeFreezeLine
+                    let frozen = Freeze.frozenDatesInRange freezeLine
+                                    (diDateFrom draft) (diDateTo draft)
+                    return (Right (CommitOutcome
+                        { coCoveredFrozenDates = not (null frozen) }))
+
+-- | The other drafts covering any of this draft's dates. The repository answers
+-- with every overlapping draft, which includes this one, so it is dropped here.
+overlappingSiblings :: Repository -> DraftInfo -> IO [DraftInfo]
+overlappingSiblings repo draft =
+    filter ((/= diId draft) . diId)
+        <$> repoDraftsOverlapping repo (diDateFrom draft) (diDateTo draft)
 
 -- | Discard a draft: delete it, its assignments, and every what-if session
 -- saved against it.

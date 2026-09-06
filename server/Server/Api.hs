@@ -56,6 +56,10 @@ type RawAPI =
          :> ReqBody '[JSON] GenerateDraftReq :> Post '[JSON] ScheduleResult
     :<|> "api" :> "drafts" :> Capture "id" Int :> "commit"
          :> ReqBody '[JSON] CommitDraftReq :> PostNoContent
+    -- Commit past the overlapping-drafts refusal. A separate route rather than a
+    -- flag in the body, so that overriding is a distinct thing a client asks for.
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "commit" :> "force"
+         :> ReqBody '[JSON] CommitDraftReq :> PostNoContent
     :<|> "api" :> "drafts" :> Capture "id" Int :> DeleteNoContent
     -- Calendar (read)
     :<|> "api" :> "calendar" :> QueryParam "from" Day :> QueryParam "to" Day

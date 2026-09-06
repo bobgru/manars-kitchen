@@ -5,6 +5,7 @@ module ApiSpec (spec) where
 import Test.Hspec
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, tryTakeMVar)
+import Data.Aeson (FromJSON, decode)
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -22,6 +23,9 @@ import Servant.Client
     ( ClientM, ClientEnv, mkClientEnv, runClientM, client, baseUrlPort
     , parseBaseUrl, ClientError(..), responseStatusCode
     )
+-- Qualified only to reach 'responseBody' on a Servant response: the unqualified
+-- name in this module is Network.HTTP.Client's, used by the SSE tests below.
+import qualified Servant.Client as SCl
 import Network.HTTP.Types.Status (statusCode)
 import System.Directory (removeFile, doesFileExist)
 
@@ -36,7 +40,7 @@ import Domain.Pin (PinnedAssignment)
 import Domain.Absence (AbsenceType(..), AbsenceContext(..), AbsenceRequest, emptyAbsenceContext)
 import Domain.Scheduler (ScheduleResult(..))
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..))
+import Repo.Types (Repository(..), DraftInfo(..), CalendarCommit, AuditEntry(..))
 import Service.Auth (register)
 import qualified Service.Worker as SW
 import Servant.API (NoContent)
@@ -73,6 +77,7 @@ createDraftC     :: CreateDraftReq -> ClientM DraftCreatedResp
 getDraftC        :: Int -> ClientM DraftInfo
 generateDraftC   :: Int -> GenerateDraftReq -> ClientM ScheduleResult
 commitDraftC     :: Int -> CommitDraftReq -> ClientM NoContent
+commitDraftForceC :: Int -> CommitDraftReq -> ClientM NoContent
 discardDraftC    :: Int -> ClientM NoContent
 getCalendarC     :: Maybe Day -> Maybe Day -> ClientM Schedule
 listCalendarHistoryC :: ClientM [CalendarCommit]
@@ -187,6 +192,7 @@ logoutC
     :<|> getDraftC
     :<|> generateDraftC
     :<|> commitDraftC
+    :<|> commitDraftForceC
     :<|> discardDraftC
     :<|> getCalendarC
     :<|> listCalendarHistoryC
@@ -522,6 +528,16 @@ shouldFailWith (Right val) expected =
     expectationFailure $ "Expected status " ++ show expected
                       ++ " but got success: " ++ show val
 
+-- | Decode the JSON body a failed request came back with.
+--
+-- 'Nothing' for anything that is not a failure response carrying a body of the
+-- expected shape, so a test that asserts on the body still reports a useful
+-- mismatch rather than an exception.
+conflictBody :: FromJSON b => Either ClientError a -> IO (Maybe b)
+conflictBody (Left (FailureResponse _ resp)) =
+    pure (decode (SCl.responseBody resp))
+conflictBody _ = pure Nothing
+
 -- | Fetch the audit log and return the recorded command strings.
 auditCommands :: ClientEnv -> IO [String]
 auditCommands env = do
@@ -687,6 +703,39 @@ spec = do
             -- Calendar history should have an entry
             Right history <- runClientM listCalendarHistoryC env
             length history `shouldSatisfy` (> 0)
+
+        -- Overlap is refused at commit, not at create, and the 409 body names
+        -- the siblings so a client can list them. ADR 0003.
+        it "commit over an overlapping draft returns 409 naming it" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                overlapTo <- fromToday 40
+                Right keep <- runClientM (createDraftC (CreateDraftReq from to)) env
+                Right other <- runClientM
+                    (createDraftC (CreateDraftReq to overlapTo)) env
+                result <- runClientM
+                    (commitDraftC (dcrId keep) (CommitDraftReq "overlapping")) env
+                result `shouldFailWith` 409
+                overlapping <- conflictBody result
+                fmap (map diId . odrDrafts) overlapping
+                    `shouldBe` Just [dcrId other]
+                -- Nothing was committed.
+                Right history <- runClientM listCalendarHistoryC env
+                length history `shouldBe` 0
+
+        it "commit/force proceeds past the overlap" $ withSeededApp $ \_ env -> do
+            (from, to) <- futureWeek
+            overlapTo <- fromToday 40
+            Right keep <- runClientM (createDraftC (CreateDraftReq from to)) env
+            Right other <- runClientM
+                (createDraftC (CreateDraftReq to overlapTo)) env
+            Right _ <- runClientM
+                (commitDraftForceC (dcrId keep) (CommitDraftReq "forced")) env
+            -- The committed draft is gone and the sibling is untouched.
+            gone <- runClientM (getDraftC (dcrId keep)) env
+            gone `shouldFailWith` 404
+            Right drafts <- runClientM listDraftsC env
+            map diId drafts `shouldBe` [dcrId other]
 
     describe "Calendar" $ do
         it "returns assignments for a date range" $ withTestApp $ \env -> do

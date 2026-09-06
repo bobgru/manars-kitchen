@@ -169,7 +169,7 @@ spec = do
                 loaded <- repoLoadHintSession repo sid did
                 loaded `shouldBe` Just (HintSessionRecord hints cp)
                 -- The service layer does the cleanup; no caller help needed.
-                _ <- Draft.commitDraft repo did "test commit"
+                _ <- Draft.commitDraft repo did "test commit" False
                 afterCommit <- repoLoadHintSession repo sid did
                 afterCommit `shouldBe` Nothing
 
@@ -206,7 +206,7 @@ spec = do
                 let cp = aeId (last entries)
                 repoSaveHintSession repo sidA did [WaiveOvertime (WorkerId 1)] cp
                 repoSaveHintSession repo sidB did [WaiveOvertime (WorkerId 2)] cp
-                _ <- Draft.commitDraft repo did "test commit"
+                _ <- Draft.commitDraft repo did "test commit" False
                 afterA <- repoLoadHintSession repo sidA did
                 afterB <- repoLoadHintSession repo sidB did
                 afterA `shouldBe` Nothing

@@ -118,7 +118,8 @@ server execEnv cmdBus repo user =
     :<|> handleCreateDraft cmdBus repo user
     :<|> handleGetDraft repo
     :<|> handleGenerateDraft cmdBus repo user
-    :<|> handleCommitDraft cmdBus repo user
+    :<|> handleCommitDraft cmdBus repo user False
+    :<|> handleCommitDraft cmdBus repo user True
     :<|> handleDiscardDraft cmdBus repo user
     :<|> handleGetCalendar repo
     :<|> handleListCalendarHistory repo
@@ -299,14 +300,24 @@ handleGenerateDraft cmdBus repo user did req = do
 -- | Commit a draft. The outcome's frozen-coverage flag is ignored here: a REST
 -- caller holds no temporary unfreezes to clear, and cannot clear a CLI
 -- session's.
-handleCommitDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> CommitDraftReq -> Handler NoContent
-handleCommitDraft cmdBus repo user did req = do
+--
+-- Serves both @\/commit@ and @\/commit\/force@; @force@ says which. Overlapping
+-- siblings are a 409 naming them on the first, and no obstacle on the second.
+handleCommitDraft :: TopicBus CommandEvent -> Repository -> User -> Bool -> Int
+                  -> CommitDraftReq -> Handler NoContent
+handleCommitDraft cmdBus repo user force did req = do
     requireAdmin user
-    result <- liftIO $ SD.commitDraft repo did (cmrNote req)
+    result <- liftIO $ SD.commitDraft repo did (cmrNote req) force
     case result of
-        Left msg -> throwApiError (NotFound msg)
+        Left SD.CommitDraftNotFound -> throwApiError (NotFound "Draft not found.")
+        Left (SD.CommitOverlapsDrafts siblings) ->
+            throwConflictWithBody OverlappingDraftsResp
+                { odrError  = "Other drafts cover the same dates."
+                , odrDrafts = siblings
+                }
         Right _  -> do
-            logRest cmdBus user ("draft commit " ++ show did)
+            logRest cmdBus user
+                ("draft commit " ++ show did ++ (if force then " --force" else ""))
             pure NoContent
 
 handleDiscardDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent
