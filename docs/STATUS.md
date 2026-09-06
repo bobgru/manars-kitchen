@@ -1,7 +1,6 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-05 · item 1 steps 1–6 are done. Steps 4, 5 and 6 are on branch
-`allow-overlapping-drafts`, ahead of `master` at `4cd11a1` and not yet merged. Item 1
+**Last updated:** 2026-09-05 · item 1 steps 1–6 are done and merged to `master`. Item 1
 step 7 — the draft detail page with the assignment grid — is the only piece of item 1
 left, after which item 2 (the problem view) is the next real body of work.
 
@@ -17,10 +16,15 @@ leaving a stale claim behind.
 
 ## Where things stand
 
-The admin web UI has pages for skills, stations, workers, shifts, and a
+The admin web UI has pages for skills, stations, workers, shifts, drafts, and a
 read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
+
+**To run any of it, use `.claude/skills/run-manars-kitchen/`** rather than
+rediscovering the launch mechanics. It covers the build, both test suites, the
+scripted-CLI harness (`--demo <file>`), and driving the web UI in headless
+Chromium.
 
 **The project no longer uses OpenSpec.** Switched 2026-08-30 to `grill-with-docs`:
 grill the design first, then capture what was settled as glossary entries in
@@ -438,10 +442,11 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
   trusting them.** There is now a tool for it: `playwright` is a `web/`
-  devDependency and `web/e2e/drafts-page.mjs` is a worked driver — copy it, and
-  read its header for the prerequisites it does not manage (a *fresh* database,
-  `manars-server` on 8080, `npm run dev` on 5173). The launch mechanics are not
-  captured as a project skill yet; `/run-skill-generator` would do that.
+  devDependency, `web/e2e/drafts-page.mjs` is a worked driver to copy, and
+  **`.claude/skills/run-manars-kitchen/`** holds the launch mechanics — server on
+  8080, Vite on 5173, the fresh-database requirement, and the Playwright and zsh
+  traps that cost time here. Verified on macOS only; the browser driver has never
+  been run in the Linux container.
 - **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
   natively, not under emulation). Every claim the previous entry listed as expected
   held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk
