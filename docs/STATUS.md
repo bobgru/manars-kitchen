@@ -1,9 +1,9 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-05 · item 1 steps 1–5 are done. Steps 4 and 5 are on branch
-`allow-overlapping-drafts`, four commits ahead of `master` at `4cd11a1` and not yet
-merged. Item 1 step 6 — the `/drafts` list page — is the next unstarted piece, and the
-first that touches the web client.
+**Last updated:** 2026-09-05 · item 1 steps 1–6 are done. Steps 4, 5 and 6 are on branch
+`allow-overlapping-drafts`, ahead of `master` at `4cd11a1` and not yet merged. Item 1
+step 7 — the draft detail page with the assignment grid — is the only piece of item 1
+left, after which item 2 (the problem view) is the next real body of work.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -260,15 +260,34 @@ and 3:
 
    No web client work: `web/src/api/` has no draft module yet, and speculative fetchers
    would be dead code until step 6.
-6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
-   discard. No assignment grid.
+6. ~~**`/drafts` list page.**~~ — shipped 2026-09-05 as `web/src/components/DraftsListPage.tsx`
+   and `web/src/api/drafts.ts`, following `WorkersListPage.tsx`. Create (with the frozen
+   refusal), generate, commit, the overlapping 409 and its force override, discard. Four
+   things to carry forward:
+
+   - **The rows carry per-draft state, at one extra request each.** `/api/drafts` reports
+     no counts, so each row reads `/api/drafts/:id/assignments` for its assignment count,
+     violations, and the "calendar replaced by draft #N" warning. A row whose detail
+     request fails degrades to metadata plus "not loaded" rather than taking the page
+     down. Drafts are few and short-lived, so the N+1 is deliberate; if that stops being
+     true, the counts belong on the list endpoint.
+   - **The replaced-calendar warning is on the list, not held back for the detail page.**
+     Pressing Commit without knowing the baseline moved is the trap ADR 0003 describes,
+     and the force override lives on this page, so the information that makes forcing
+     safe-or-not has to be here too.
+   - **The frozen 409 is terminal and says so.** REST has neither force nor unfreeze, so
+     the modal prints the `calendar unfreeze` command to run in the CLI instead of
+     offering a button that cannot exist.
+   - **Revalidate is not on the page.** Step 5 built `POST /api/drafts/:id/revalidate`,
+     but the response to a moved baseline is Generate or Discard, both of which are here.
+     Add it if the detail page turns out to want it.
 7. **Draft detail page** — the assignment grid, violations alongside assignments.
 
-For both page steps, follow `WorkersListPage.tsx` — the most recent and complete — over
-the skills/stations pages where they differ. The three existing list/detail pairs are
-inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
-key naming); prefer the worker page's choices. **Exercise them against a live server**,
-not just `tsc` — see the last bullet of item 7.
+For the remaining page step, follow `WorkersListPage.tsx` — the most recent and complete
+— over the skills/stations pages where they differ. The three existing list/detail pairs
+are inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
+key naming); prefer the worker page's choices. **Exercise it against a live server**, not
+just `tsc` — `npm run e2e:drafts` in `web/` is a worked example to copy.
 
 ### 2. The problem view — designed 2026-08-30, not started
 
@@ -418,7 +437,11 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   Both were type-checked and reasoned about, not exercised. The demo DB has zero
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
-  trusting them.**
+  trusting them.** There is now a tool for it: `playwright` is a `web/`
+  devDependency and `web/e2e/drafts-page.mjs` is a worked driver — copy it, and
+  read its header for the prerequisites it does not manage (a *fresh* database,
+  `manars-server` on 8080, `npm run dev` on 5173). The launch mechanics are not
+  captured as a project skill yet; `/run-skill-generator` would do that.
 - **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
   natively, not under emulation). Every claim the previous entry listed as expected
   held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk

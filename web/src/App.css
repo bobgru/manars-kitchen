@@ -422,6 +422,20 @@
   font-size: 0.85rem;
 }
 
+/*
+ * A warning is neither an error nor a success, so it gets its own colour rather
+ * than borrowing one that means something else.
+ *
+ * Bright yellow against the #1a1a2e background: high luminance contrast, and on
+ * the blue-yellow axis, which stays distinguishable under red-green colour
+ * blindness. Every message using this class still names the condition in words —
+ * the colour is never the only thing carrying the meaning.
+ */
+.msg-warn {
+  color: #ffd75f;
+  font-size: 0.85rem;
+}
+
 .loading {
   color: #888;
   font-size: 0.9rem;
@@ -491,6 +505,17 @@
 .modal ul {
   margin: 0.5rem 0;
   padding-left: 1.2rem;
+}
+
+/* A command the reader is meant to copy out into a terminal. */
+.modal pre {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  border-radius: 4px;
+  background: #0a0a1a;
+  color: #e0e0e0;
+  font-size: 0.85rem;
+  overflow-x: auto;
 }
 
 .modal-actions {

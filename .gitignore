@@ -10,6 +10,7 @@ dist-newstyle/
 web/node_modules/
 web/dist/
 web/*.db
+web/e2e/screenshots/
 .worktrees/
 skills-lock.json
 .agents/
