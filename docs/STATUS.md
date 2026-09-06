@@ -1,8 +1,9 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-05 · item 1 steps 1–6 are done and merged to `master`. Item 1
-step 7 — the draft detail page with the assignment grid — is the only piece of item 1
-left, after which item 2 (the problem view) is the next real body of work.
+**Last updated:** 2026-09-06 · the drafts surface is complete. The `/drafts/:id` detail
+page shipped, and with it the `ScheduleGrid` and `CommitDraftDialog` extractions, so the
+old item 1 is gone from this file entirely. **Item 2, the problem view, is the next real
+body of work**; item 1 is now the three pieces deliberately left out of the detail page.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -16,10 +17,21 @@ leaving a stale claim behind.
 
 ## Where things stand
 
-The admin web UI has pages for skills, stations, workers, shifts, drafts, and a
-read-only calendar. The CLI remains a first-class client. See
+The admin web UI has pages for skills, stations, workers, shifts, drafts (list and
+detail), and a read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
+
+**The grid is shared, and it owns its own limits.** `web/src/components/ScheduleGrid.tsx`
+renders a schedule as hours × days for both `/calendar` and `/drafts/:id`; its pure parts
+(day arithmetic, opening hours, the `MAX_DAYS = 92` guard, cell indexing) are in
+`web/src/lib/grid.ts`, apart from the component because
+`react-refresh/only-export-components` forbids one file exporting both. The range guard
+lives there rather than in a caller because a draft's dates are whatever was typed at
+`draft create`, unbounded. `layout` is a prop from day one — a named preset, deliberately
+not a generic axis pair; see item 1 and ADR 0005. `CommitDraftDialog.tsx` is shared the
+same way, because the note prompt plus the overlap 409 plus the force override is a
+two-step refusal and having it twice is how the older pages drifted apart.
 
 **To run any of it, use `.claude/skills/run-manars-kitchen/`** rather than
 rediscovering the launch mechanics. It covers the build, both test suites, the
@@ -85,18 +97,21 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at the draft-validation split** — everything above, plus the
+**Verification baseline at the draft detail page** — everything above, plus the
 service-layer and optimizer moves, the structured-rename and SSE role-filtering work,
-and the named-schedule removal. All of this was green, with `LANG` unset:
+the named-schedule removal, and the whole drafts surface. All of this was green, with
+`LANG` unset:
 
-- `stack clean && stack build --test` — zero GHC warnings (`-Wall` is set on every
-  stanza in `manars-kitchen.cabal`, so no extra flag is needed to surface them)
-- 258 integration + 379 unit examples, 0 failures, 1 pending (the weekend
-  divergence in item 6). The integration count fell to 255 with the named-schedule
-  tests removed, then rose again with the freeze-line and active-worker coverage; the
-  unit count rose from 373 to 379 with the step 3 coverage.
+- `stack build --pedantic` — clean. **This run did not `stack clean` first**, because it
+  changed no `.hs` file: the detail page is frontend-only, every endpoint it needs already
+  existed. A clean rebuild could not have said anything about TSX. Any change that does
+  touch Haskell owes the full clean gate `CLAUDE.md` describes.
+- 271 integration + 386 unit examples, 0 failures, 1 pending (the weekend divergence in
+  item 6), run sequentially — never two `stack test` invocations at once, see item 5.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
+- `npm run e2e:drafts` (fresh DB), `npm run e2e:draft-detail` and `npm run e2e:calendar`
+  (both demo-seeded) — all pass, no unexpected console errors
 - demo runs end to end, exit 0
 
 **`npm run lint` is now clean — keep it that way.** The 5 errors that used to live
@@ -117,181 +132,33 @@ One standing gotcha when you verify:
 
 ## Next steps
 
-### 1. `/drafts` page — decided 2026-08-23, ready to implement
+### 1. Draft-page follow-ons — decided 2026-09-06, not started
 
-**No longer blocked.** The page targets **drafts and the calendar**; the
-named-schedule path is removed. See ADR 0001, 0002 and 0003 for the reasoning.
+The `/drafts/:id` detail page shipped, which completed the drafts surface. Three pieces
+were deliberately deferred out of it, each independently shippable. The reasoning for all
+three is in **ADR 0005**.
 
-Four premises in the earlier version of this item were wrong, and are worth stating
-so nobody re-derives them:
+- **The commit diff.** Per cell, *added* / *unchanged* / *about to be dropped*, comparing
+  the draft against the calendar over the draft's own range. This is the question an admin
+  actually has before pressing Commit, and it is the trap ADR 0003 makes common. It needs a
+  second data source (`fetchCalendar(draft.dateFrom, draft.dateTo)`, which already exists),
+  a three-state cell vocabulary, and a legend. Deferred only to keep the first page small.
+- **The remaining grid layouts and the pivot control.** `ScheduleGrid` takes a `layout`
+  prop whose type is `GridLayout`, today a single `"hours-days"`. The agreed direction is
+  *named presets*, not a generic `(rowAxis, colAxis)` pair — empty-cell meaning is
+  axis-dependent and is most of what the component knows, so a generic version would hand
+  that decision back to every caller. Candidates: `workers-days`, `stations-days`. When the
+  second one lands, add the control and put the choice in the URL (`?layout=workers-days`),
+  the way `CalendarPage` already keeps `from`/`to` in `useSearchParams`.
+- **A draft's what-if sessions are not readable over REST.** `GET /api/hints` requires
+  *both* `sessionId` and `draftId` and 400s otherwise; the browser has no session id, and
+  nothing lists sessions. The web terminal's hardcoded `SessionId 0` (`Execute.hs:63`) would
+  report its own what-ifs while a CLI session's — the ones `draft open` resumes — stayed
+  invisible, so the detail page says nothing about them rather than saying something wrong.
+  **This is a design question before it is an endpoint**: decide whose session a browser
+  means. Until then the Discard modal promises to destroy a what-if session the UI never
+  shows.
 
-- **The draft REST surface already exists and works** — list, create, get, generate,
-  commit, discard (`server/Server/Api.hs:55-63`, handlers `Handlers.hs:274-311`).
-  There was never a need for `POST /api/schedules`.
-- **The one missing read is a draft's assignments.** `GET /api/drafts/:id` returns
-  metadata only. Nothing exposes `repoLoadDraftAssignments`, so a browser can see a
-  draft only by re-running `generate`, which mutates it.
-- **There was never a `/schedules` route.** `web/src/App.tsx` has none and
-  `path="*"` redirects to `/`, so the sidebar link silently bounced to the dashboard.
-  The claim that "routes are already in place" was false. The sidebar link now reads
-  "Drafts" → `/drafts` and bounces the same way until step 6 lands; the CSS
-  vocabulary in `App.css` is the only other thing that exists.
-- **The REST draft endpoints skipped rules the CLI enforces**, because those rules
-  lived in `src/CLI/App.hs` rather than the service layer. Mostly fixed on 2026-08-24
-  — see the service-layer paragraph above — and the two draft handlers now call
-  `logRest`, so create and generate finally reach the audit log, the terminal pane
-  and the SSE feed. What remains in the CLI is **validation before viewing**: `draft
-  open` prunes as a side effect of reading (`App.hs:324`), which was step 3, now
-  shipped.
-
-#### Decisions
-
-| Decision | Answer |
-|---|---|
-| Force / unfreeze over REST | Not built. Creating a draft over frozen dates returns 409. Unfreeze stays CLI-only. |
-| Route and label | "Drafts" → `/drafts`. No redirect from `/schedules` — nothing ever served it. |
-| Overlapping drafts | Allowed freely. A draft is an experiment sandbox; creating one must never be refused. Shipped, step 4. |
-| Overlapping commits | 409 naming the overlapping drafts; `POST /api/drafts/:id/commit/force` proceeds. Shipped, step 4. |
-| Cross-draft conflict detection | Out of scope. Competing experiments are meant to disagree. |
-| Candidate workers for generate | `workerIds` becomes optional, defaulting server-side to active workers. |
-| Manual per-slot editing | Out of scope, and when it comes it goes through what-ifs — never a draft-level assign endpoint, which would bypass rebase and validation. |
-
-#### Steps, in order
-
-Each is independently shippable. Two preliminaries are done, and so are steps 1, 2
-and 3:
-
-- ~~**Expose ids on `/api/workers` and `/api/stations`**~~ — shipped as `a9c4d28`.
-  `GET /api/stations` returns a new `StationResp` with `id`; `GET /api/workers` returns
-  `id` on each summary; `web/src/api/calendar.ts` no longer fetches `/api/export` to
-  build its id→name maps.
-- ~~**Move the optimizer into `draft generate`**~~ — not in the original list, and a
-  prerequisite for the step below. `schedule create` was the *only* caller of
-  `Service.Optimize.optimizeSchedule` and the only publisher of a `ProgressEvent`, so
-  removing the named-schedule surface would have orphaned `Service.Optimize`,
-  `Domain.Optimizer` and every requirement in the `progress-events` capability.
-  `generateDraft` now takes a `TopicBus ProgressEvent` and calls `optimizeSchedule`;
-  the CLI's `[opt]` printer moved into a `withProgressPrinting` helper in
-  `src/CLI/App.hs`. No behaviour change at the default `opt-enabled` of `0`. **This
-  surfaced a pre-existing defect — see item 6.**
-
-1. ~~**Remove the named-schedule surface.**~~ — shipped as `08a2d6d`, and pure removal
-   as intended once the optimizer had moved. Worth carrying forward: the demo now
-   builds week 1 inside a draft, so **every draft id in `demo/restaurant-setup.txt`
-   shifted by one** — a later edit that inserts or removes a `draft create` has to
-   shift them again. `export.json` and `demo-export.json` are gitignored, so the demo
-   regenerates them and no fixture is committed. `etSchedule` survives in
-   `src/Audit/CommandMeta.hs` as the entity type for the group-less commands (`help`,
-   `quit`, `audit`, `replay`, `demo`, `use`, `context`) — it is not dead code.
-2. ~~**Push the draft lifecycle rules into the service layer.**~~ — shipped as
-   `a4a2d30`: freeze check into `createDraft`, what-if-session cleanup and auto-refreeze
-   into `commitDraft`, `logRest` on create and generate, `workerIds` optional. The
-   details worth carrying forward are in the service-layer paragraph near the top of
-   this file. This was originally the first half of a larger step; the validation split
-   is now step 3 on its own, per `CLAUDE.md`'s independently-shippable rule.
-3. ~~**Split `validateDraftAgainstCalendar`.**~~ — shipped 2026-08-30.
-   `Service.DraftValidation` now exports `isDraftStale` (takes a loaded `DraftInfo`,
-   not an id), `computeDraftViolations` (no writes, **no staleness gate**) and
-   `pruneDraftViolations` (the gate, then the computation, then the removal — exactly
-   what the old function did). `validateDraftAgainstCalendar` is gone rather than kept
-   as an alias; `src/CLI/App.hs` was its only production caller and now calls
-   `pruneDraftViolations`. A private `validateDraft` holds the shared body and returns
-   the draft's schedule alongside the violations, so the pruning path does not load the
-   assignments twice.
-
-   **The gate hides real violations, and now there is a test that says so.** Only a
-   *calendar commit* makes a draft stale, so anything else that invalidates an
-   assignment — an approved absence, a revoked skill, a changed hour limit — is invisible
-   to `pruneDraftViolations` for as long as the calendar sits still. `test/DraftValidationSpec.hs`
-   pins this down with an approved absence over a draft assignment: `pruneDraftViolations`
-   returns `[]` while `computeDraftViolations` reports the conflict. Step 5's endpoint
-   must use the latter, and the deferred draft-workflow question below should treat the
-   staleness trigger as too narrow, not just wrongly-responding.
-4. ~~**Allow overlapping drafts.**~~ — shipped 2026-09-05 as three commits: the create
-   guard removed, the commit-time refusal, and the replaced-calendar report. Four things
-   to carry forward:
-
-   - **The spec deltas in the original wording were not written, deliberately.**
-     `openspec/specs/draft-session` still carries the `Non-overlapping date ranges`
-     requirement and `draft-shortcuts` its scenarios. Those specs are the frozen record
-     of what shipped, per `CLAUDE.md`, so the live vocabulary moved to `CONTEXT.md`
-     (**Draft** and **Commit**) instead. Anyone reading the old specs will find a rule
-     the code no longer has.
-   - **The overlap query came back, returning rows.** `repoCheckDraftOverlap` is gone but
-     `repoDraftsOverlapping :: Day -> Day -> IO [DraftInfo]` replaces it, because a
-     caller that has to *name* the drafts cannot work from a `Bool`. It returns the draft
-     being committed too; `Service.Draft.overlappingSiblings` drops it.
-   - **`commitDraft` gained a force flag and a structured error.** Its `Either String`
-     became `Either CommitDraftError`, so `CommitDraftNotFound` and
-     `CommitOverlapsDrafts [DraftInfo]` are separable at every call site. REST exposes
-     the override as `POST /api/drafts/:id/commit/force` — a route rather than a body
-     flag, so overriding is a distinct thing a client asks for. Both routes are served by
-     one handler taking a `Bool`.
-   - **`calendar_commits` has a nullable `draft_id`, and it is a label, not a reference.**
-     Committing deletes the draft, so the id names a row that no longer exists — it is
-     kept because it is what the admin recognises. `CalendarCommit` gained
-     `ccDraftId :: Maybe Int` and `/api/calendar/history` gained `draftId`, which is
-     additive. NULL for old rows and for any commit that did not come from a draft.
-5. ~~**`GET /api/drafts/:id/assignments`**~~ — shipped 2026-09-05. Returns
-   `{assignments, violations, replacedUnder}` and does not mutate;
-   `POST /api/drafts/:id/revalidate` returns `{removed}` and does. Four things to carry
-   forward:
-
-   - **The response carries `replacedUnder`, which the original wording left optional.**
-     It is `calendarReplacedUnder` from step 4 — the commits that overwrote part of this
-     draft's own range. Included because a read that reports violations while staying
-     silent about the baseline moving misleads in exactly the case ADR 0003 made common,
-     and because adding it later would have been a response-shape change. `isDraftStale`
-     is still not exposed: a bare bool is strictly less useful than the commit list.
-   - **`violations` is a report, not a diff.** The assignments it names are still present
-     in `assignments`. `removed` on the revalidate response is named differently on
-     purpose — those are gone.
-   - **Revalidate inherits the staleness gate, and a test pins that down.**
-     `pruneDraftViolations` removes nothing unless the calendar has moved, so the GET can
-     report a violation the POST refuses to prune — an approved absence, for instance.
-     `ApiSpec`'s "revalidate removes nothing while the calendar has not moved" documents
-     it rather than papering over it. Fixing the trigger is still the deferred
-     draft-workflow question.
-   - **`draft revalidate [id]` was added to the CLI, which step 5 did not ask for.** The
-     REST handler logs `draft revalidate <id>` through `logRest`, and `replayCommands`
-     silently drops any audit entry `parseCommand` cannot read (`Unknown _ -> pure ()`).
-     Without the verb, every REST revalidate would have written an entry that replay
-     discards, quietly diverging a replayed database from the real one.
-     `Audit.CommandMeta` classifies it as **mutating** — the `classifyDraft` fallback
-     would have called it non-mutating and kept it out of the mutation-only feeds. There
-     is no `rpc/draft/revalidate`, so the remote CLI prints "not yet supported in remote
-     mode"; the web terminal gets it for free through `Server.Execute`.
-
-   No web client work: `web/src/api/` has no draft module yet, and speculative fetchers
-   would be dead code until step 6.
-6. ~~**`/drafts` list page.**~~ — shipped 2026-09-05 as `web/src/components/DraftsListPage.tsx`
-   and `web/src/api/drafts.ts`, following `WorkersListPage.tsx`. Create (with the frozen
-   refusal), generate, commit, the overlapping 409 and its force override, discard. Four
-   things to carry forward:
-
-   - **The rows carry per-draft state, at one extra request each.** `/api/drafts` reports
-     no counts, so each row reads `/api/drafts/:id/assignments` for its assignment count,
-     violations, and the "calendar replaced by draft #N" warning. A row whose detail
-     request fails degrades to metadata plus "not loaded" rather than taking the page
-     down. Drafts are few and short-lived, so the N+1 is deliberate; if that stops being
-     true, the counts belong on the list endpoint.
-   - **The replaced-calendar warning is on the list, not held back for the detail page.**
-     Pressing Commit without knowing the baseline moved is the trap ADR 0003 describes,
-     and the force override lives on this page, so the information that makes forcing
-     safe-or-not has to be here too.
-   - **The frozen 409 is terminal and says so.** REST has neither force nor unfreeze, so
-     the modal prints the `calendar unfreeze` command to run in the CLI instead of
-     offering a button that cannot exist.
-   - **Revalidate is not on the page.** Step 5 built `POST /api/drafts/:id/revalidate`,
-     but the response to a moved baseline is Generate or Discard, both of which are here.
-     Add it if the detail page turns out to want it.
-7. **Draft detail page** — the assignment grid, violations alongside assignments.
-
-For the remaining page step, follow `WorkersListPage.tsx` — the most recent and complete
-— over the skills/stations pages where they differ. The three existing list/detail pairs
-are inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
-key naming); prefer the worker page's choices. **Exercise it against a live server**, not
-just `tsc` — `npm run e2e:drafts` in `web/` is a worked example to copy.
 
 ### 2. The problem view — designed 2026-08-30, not started
 
@@ -326,7 +193,8 @@ Two things to carry forward. The horizon is a **required input**, not a filter a
 afterwards — a problem set without a date range is meaningless. And the reason this is
 not built on persisted violations is the sick-call case: an approved absence invalidates
 calendar assignments *without changing the calendar*, so anything recomputed on write
-misses it. That is the same blind spot as the staleness gate in item 1 step 3.
+misses it. That is the same blind spot as the staleness gate inside
+`pruneDraftViolations`, which only fires on a calendar commit.
 
 ### 3. The demo is not representative of a working restaurant
 
@@ -428,7 +296,7 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   deferred because "active schedule" needed defining; now that drafts are the only
   answer, the two tables to check are `calendar_assignments` and
   `draft_assignments` — the same pair `safeDeleteWorker` already counts. Revisit
-  alongside item 1.
+  alongside the draft-page follow-ons in item 1.
 - **The `demo` command is wrong for the web terminal.** It wipes the database and
   replays the audit log, which is useless on a fresh DB. The `--demo` CLI flag
   reading `demo/restaurant-setup.txt` is what actually populates sample data. A
@@ -437,16 +305,33 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
 - **Import does not refresh the GUI.** `Handlers.hs` publishes `import data`,
   which classifies as entityType `import-export`; no web component subscribes to
   it. See `notes.txt` for the original observation.
-- **The `/shifts` and `/calendar` pages have never run against a live server.**
-  Both were type-checked and reasoned about, not exercised. The demo DB has zero
-  rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
-  seeding before it shows anything. **Verify these in the real app before
-  trusting them.** There is now a tool for it: `playwright` is a `web/`
-  devDependency, `web/e2e/drafts-page.mjs` is a worked driver to copy, and
+- **The `/shifts` page has never run against a live server.** It was type-checked
+  and reasoned about, not exercised. **Verify it in the real app before trusting
+  it.** `/calendar` came off this list on 2026-09-06: `npm run e2e:calendar`
+  drives it, and the claim that the demo DB has zero calendar rows was wrong —
+  it has 1020 assignments and 5 commits, they were just still sitting in the
+  `-wal` sidecar. There are three worked drivers in `web/e2e/` to copy, and
   **`.claude/skills/run-manars-kitchen/`** holds the launch mechanics — server on
-  8080, Vite on 5173, the fresh-database requirement, and the Playwright and zsh
-  traps that cost time here. Verified on macOS only; the browser driver has never
-  been run in the Linux container.
+  8080, Vite on 5173, which drivers want a fresh database and which want a
+  demo-seeded one, and the Playwright and zsh traps that cost time here. Verified
+  on macOS only; the browser driver has never been run in the Linux container.
+- **A freshly generated draft already violates hard rules.** On the demo fixture,
+  `draft generate` over a clean future week produces 410 assignments and **7
+  `period hours` violations** the moment `computeDraftViolations` looks at them —
+  all belonging to `admin`. So `Domain.Scheduler` and
+  `Service.DraftValidation.validateAssignment` disagree about the per-period hour
+  limit, and the scheduler is the one that is wrong, since it had every chance not
+  to make the assignment. Found 2026-09-06 while writing `e2e/draft-detail.mjs`,
+  which now asserts on a violation-count *delta* rather than a clean start because
+  of it. Worth chasing before the problem view lands: item 2 projects exactly these
+  violations onto the dashboard, so every generated draft would arrive pre-broken.
+- **An unresolvable entity name in a CLI command fails silently.** `worker
+  grant-skill marco nonexistent-skill` echoes the command and prints *nothing* —
+  no error, no "unknown skill", and the exit status is unaffected. Name-to-id
+  resolution happens in `resolveInput` (`src/CLI/App.hs:147`) before
+  `parseCommand`, and an unresolved name takes a path that reports nothing. This
+  means a typo in `demo/restaurant-setup.txt` is invisible: the line is skipped and
+  the replay still ends with `Replay complete.` Found 2026-09-06.
 - **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
   natively, not under emulation). Every claim the previous entry listed as expected
   held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk
@@ -478,8 +363,10 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
 
 ## Deferred: revisit the admin draft workflow
 
-**Agreed 2026-08-23.** Assume the current behaviour is correct while item 1 is carried
-out, then take this up. Written down so the question is not lost.
+**Agreed 2026-08-23, and now unblocked.** The drafts surface it was told to wait for is
+finished, so this is takeable. ADR 0005 leaned on it: the browser has no pruning path
+precisely because pruning is the wrong response, which makes fixing that response the
+thing standing between the draft workflow and a UI that can act on a moved baseline.
 
 **There is no function that rebases a draft onto a moved baseline calendar.** Two
 things occupy that space and neither does the job:
@@ -510,7 +397,7 @@ The specific concerns:
    response, per (1).
 5. **The look-back window is narrow.** Validation examines the seven days *before* the
    draft's start, so calendar assignments inside the draft's own range are never compared
-   against it. Item 1 step 4 worked around this rather than fixing it:
+   against it. The overlapping-drafts work went around this rather than fixing it:
    `Service.DraftValidation.calendarReplacedUnder` answers "was the calendar under my own
    dates replaced, and by what draft?" from the commit log, and `draft open` prints it
    whether or not any single assignment became invalid. The underlying asymmetry stands —
@@ -680,5 +567,5 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 ## Open questions
 
 None blocking. The named-schedules-vs-drafts question that used to sit here was settled
-on 2026-08-23 in favour of drafts — see item 1 and ADR 0001. The one deliberately
-deferred question is the draft workflow, above; it does not block item 1.
+on 2026-08-23 in favour of drafts — see ADR 0001. The one deliberately deferred question
+is the draft workflow above, which is now unblocked rather than deferred.

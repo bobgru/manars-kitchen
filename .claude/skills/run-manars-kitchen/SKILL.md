@@ -3,12 +3,18 @@ name: run-manars-kitchen
 description: Build, run, and drive Manar's Kitchen — the Haskell server and CLI plus the React admin UI. Use when asked to start the app or server, run the web UI, screenshot or click through a page, drive the CLI non-interactively, run the demo, or run the test suites.
 ---
 
-Two surfaces, two handles. The **web UI** is driven by
-`web/e2e/drafts-page.mjs` — a Playwright script against headless Chromium, run
-as `npm run e2e:drafts` from `web/`. The **CLI** is driven by
-`stack exec manars-cli -- --demo <script>`, which replays a file of commands
-non-interactively; that is the only way to exercise CLI behaviour without a
-human at a prompt.
+Two surfaces, two handles. The **web UI** is driven by Playwright scripts against
+headless Chromium in `web/e2e/`, run from `web/`:
+
+| script | drives | database it needs |
+|---|---|---|
+| `npm run e2e:drafts` | `/drafts` | **fresh** — asserts on draft #1 and the empty list |
+| `npm run e2e:draft-detail` | `/drafts/:id` | **demo-seeded**, and a fresh copy per run |
+| `npm run e2e:calendar` | `/calendar` | **demo-seeded** |
+
+The **CLI** is driven by `stack exec manars-cli -- --demo <script>`, which replays
+a file of commands non-interactively; that is the only way to exercise CLI
+behaviour without a human at a prompt.
 
 All paths below are relative to the repo root.
 
@@ -88,7 +94,26 @@ and exits non-zero on an unexpected console error. **Look at the screenshots.** 
 blank frame means the app never rendered and the assertions would not
 necessarily have caught it.
 
-To drive a different page, copy `web/e2e/drafts-page.mjs` — its header lists the
+`npm run e2e:draft-detail` and `npm run e2e:calendar` need a **demo-seeded**
+database instead, which is a different recipe — and one with a trap in it:
+
+```bash
+stack exec manars-cli -- --demo demo/restaurant-setup.txt --no-delay
+sqlite3 demo-db/demo.db "PRAGMA wal_checkpoint(TRUNCATE);"   # <-- do not skip
+rm -f /tmp/mk-detail.db /tmp/mk-detail.db-wal /tmp/mk-detail.db-shm
+cp demo-db/demo.db /tmp/mk-detail.db
+(stack exec manars-server -- /tmp/mk-detail.db > /tmp/mk-server.log 2>&1 &)
+```
+
+`e2e:draft-detail` walks seven states — the pin-seeded draft, the generated grid,
+manufactured violations with a flagged chip, a sibling draft committed over the same
+week, the resulting replaced-calendar warning, committing from the detail page and
+the confirmation handed to the list, and the terminal state for a draft id that does
+not exist. It mutates the database, so **re-run it against a fresh copy**.
+`e2e:calendar` walks four — the live month, a history snapshot, and both branches of
+the range guard.
+
+To drive a different page, copy the closest of the three — each header lists the
 prerequisites it does not manage.
 
 ## Run (agent path): the CLI
@@ -154,6 +179,18 @@ lines from the macOS linker.
 - **`npm run e2e:drafts` needs a fresh database every time.** Rerunning against a
   database that already holds drafts fails at the first `No drafts` assertion.
   Delete the `.db` and restart the server, not just the driver.
+- **Checkpoint the demo's WAL before copying its database.** `--demo` leaves most
+  of what it wrote in `demo-db/demo.db-wal`, so `cp demo-db/demo.db …` followed by
+  deleting the sidecars yields a database with **zero** calendar rows — 1020
+  assignments and 5 commits silently gone. Every assertion in a demo-seeded driver
+  then fails for a reason that has nothing to do with the page under test. Run
+  `sqlite3 demo-db/demo.db "PRAGMA wal_checkpoint(TRUNCATE);"` first. This is also
+  why `docs/STATUS.md` claimed for months that the demo DB had an empty calendar.
+- **`fullPage: true` does not capture these pages.** The app shell scrolls its
+  content pane internally, so a full-page screenshot stops at the terminal and
+  anything below the fold — a whole violations table, for instance — is missing.
+  Screenshot the element instead: `locator.screenshot({ path })`.
+  `e2e/draft-detail.mjs` has a `shotOf` helper.
 - **Name the three database files rather than globbing them.** Under zsh an
   unmatched `rm -f /tmp/mk-run.db*` is a fatal `no matches found` and the `rm`
   never runs, so a cleanup line that looks fine on a dirty machine breaks on a

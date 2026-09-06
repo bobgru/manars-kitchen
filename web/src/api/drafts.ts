@@ -56,9 +56,32 @@ export interface GenerateResult {
   unfilled: unknown[];
 }
 
+/**
+ * How a calendar commit is named in prose, for the "calendar replaced by ..."
+ * warning. Lives here rather than in a page because both the drafts list and a
+ * draft's own page show it and the wording must not drift.
+ *
+ * A commit's `draftId` names a draft the commit itself deleted, so it is a label
+ * the admin recognises rather than something fetchable.
+ */
+export function describeCommit(c: CalendarCommit): string {
+  if (c.draftId !== null) return `draft #${c.draftId}`;
+  return c.note ? `commit #${c.id} (${c.note})` : `commit #${c.id}`;
+}
+
 export async function fetchDrafts(): Promise<DraftInfo[]> {
   const resp = await apiFetch("/api/drafts");
   if (!resp.ok) throw new Error(`Failed to fetch drafts: ${resp.status}`);
+  return resp.json();
+}
+
+/**
+ * One draft's metadata. Needed alongside the assignments read, which does not
+ * report the date range the grid has to be drawn over.
+ */
+export async function fetchDraft(id: number): Promise<DraftInfo> {
+  const resp = await apiFetch(`/api/drafts/${id}`);
+  if (!resp.ok) throw new Error(`Failed to fetch draft ${id}: ${resp.status}`);
   return resp.json();
 }
 

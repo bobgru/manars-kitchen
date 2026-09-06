@@ -11,6 +11,7 @@ import WorkersListPage from "./components/WorkersListPage";
 import WorkerDetailPage from "./components/WorkerDetailPage";
 import ShiftsListPage from "./components/ShiftsListPage";
 import DraftsListPage from "./components/DraftsListPage";
+import DraftDetailPage from "./components/DraftDetailPage";
 import CalendarPage from "./components/CalendarPage";
 import SSEProvider from "./components/SSEProvider";
 import "./App.css";
@@ -78,6 +79,7 @@ function App() {
             <Route path="workers/:name" element={<WorkerDetailPage />} />
             <Route path="shifts" element={<ShiftsListPage />} />
             <Route path="drafts" element={<DraftsListPage />} />
+            <Route path="drafts/:id" element={<DraftDetailPage />} />
             <Route path="calendar" element={<CalendarPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

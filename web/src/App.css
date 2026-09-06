@@ -630,6 +630,19 @@
   color: #888;
 }
 
+/*
+ * An assignment that violates a hard rule. Bright yellow on the blue-yellow
+ * axis, like .msg-warn, plus bold weight and a thicker left border -- three
+ * cues, none of which is colour alone. The chip's text also carries a literal
+ * "!" and its title names the constraint.
+ */
+.calendar-chip-flagged {
+  border-left-width: 4px;
+  border-left-color: #ffd75f;
+  color: #ffd75f;
+  font-weight: 700;
+}
+
 /* Weekend day columns, and dates at or behind the freeze line. */
 .calendar-col-weekend {
   background: #191926;

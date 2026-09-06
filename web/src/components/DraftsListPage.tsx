@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
 import {
   fetchDrafts,
   fetchDraftAssignments,
   createDraft,
   generateDraft,
-  commitDraft,
-  forceCommitDraft,
   discardDraft,
+  describeCommit,
   type DraftInfo,
   type DraftAssignments,
   type FrozenDates,
-  type OverlappingDrafts,
 } from "../api/drafts";
 import { useEntityEvents } from "../hooks/useSSE";
+import CommitDraftDialog from "./CommitDraftDialog";
 
 /**
  * A draft plus the summary read from `/api/drafts/:id/assignments`.
@@ -27,12 +27,10 @@ interface DraftRow {
   detail: DraftAssignments | null;
 }
 
-function describeCommit(c: { draftId: number | null; id: number; note: string }): string {
-  if (c.draftId !== null) return `draft #${c.draftId}`;
-  return c.note ? `commit #${c.id} (${c.note})` : `commit #${c.id}`;
-}
-
 export default function DraftsListPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -47,13 +45,7 @@ export default function DraftsListPage() {
   /** The draft whose id is here has a request in flight; its buttons are off. */
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  const [commitPrompt, setCommitPrompt] = useState<null | { draft: DraftInfo }>(null);
-  const [commitNote, setCommitNote] = useState("");
-  const [commitConflict, setCommitConflict] = useState<null | {
-    draft: DraftInfo;
-    note: string;
-    overlapping: OverlappingDrafts;
-  }>(null);
+  const [commitFor, setCommitFor] = useState<null | DraftInfo>(null);
 
   const [deleteConfirm, setDeleteConfirm] = useState<null | { draft: DraftInfo }>(null);
 
@@ -87,6 +79,18 @@ export default function DraftsListPage() {
     setToast(msg);
     setTimeout(() => setToast(""), 3000);
   }
+
+  // Committing from a draft's own page deletes the draft, so that page navigates
+  // here and hands its confirmation over in router state -- there is no component
+  // left there to show it. Cleared immediately so a refresh does not repeat it.
+  const handoff = (location.state as { message?: string } | null)?.message;
+  useEffect(() => {
+    if (!handoff) return;
+    setToast(handoff);
+    const timer = setTimeout(() => setToast(""), 3000);
+    navigate(location.pathname, { replace: true, state: null });
+    return () => clearTimeout(timer);
+  }, [handoff, navigate, location.pathname]);
 
   function openCreate() {
     setShowCreate(true);
@@ -127,48 +131,6 @@ export default function DraftsListPage() {
         `Generated draft #${draft.id}: ${result.schedule.length} assignment(s), ` +
           `${result.unfilled.length} unfilled.`
       );
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  function openCommit(draft: DraftInfo) {
-    setCommitPrompt({ draft });
-    setCommitNote("");
-  }
-
-  async function handleCommit() {
-    if (!commitPrompt) return;
-    const { draft } = commitPrompt;
-    const note = commitNote;
-    setBusyId(draft.id);
-    try {
-      const result = await commitDraft(draft.id, note);
-      setCommitPrompt(null);
-      if (result.ok) {
-        showToast(`Committed draft #${draft.id} to the calendar.`);
-        load();
-      } else {
-        setCommitConflict({ draft, note, overlapping: result.overlapping });
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function handleForceCommit() {
-    if (!commitConflict) return;
-    const { draft, note } = commitConflict;
-    setBusyId(draft.id);
-    try {
-      await forceCommitDraft(draft.id, note);
-      setCommitConflict(null);
-      showToast(`Committed draft #${draft.id}, replacing the overlapping dates.`);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -258,7 +220,9 @@ export default function DraftsListPage() {
           <tbody>
             {rows.map(({ draft, detail }) => (
               <tr key={draft.id}>
-                <td>#{draft.id}</td>
+                <td>
+                  <Link to={`/drafts/${draft.id}`}>#{draft.id}</Link>
+                </td>
                 <td>
                   {draft.dateFrom} to {draft.dateTo}
                 </td>
@@ -297,7 +261,7 @@ export default function DraftsListPage() {
                   <button
                     className="btn btn-sm"
                     disabled={busyId === draft.id}
-                    onClick={() => openCommit(draft)}
+                    onClick={() => setCommitFor(draft)}
                   >
                     Commit
                   </button>
@@ -339,72 +303,16 @@ export default function DraftsListPage() {
         </div>
       )}
 
-      {commitPrompt && (
-        <div className="modal-overlay" onClick={() => setCommitPrompt(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Commit draft #{commitPrompt.draft.id}?</h3>
-            <p>
-              This replaces the calendar for {commitPrompt.draft.dateFrom} to{" "}
-              {commitPrompt.draft.dateTo}. The whole range is the claim: dates in
-              range with no assignment are cleared, not skipped. What is there now
-              is snapshotted into calendar history first.
-            </p>
-            <label>
-              Note{" "}
-              <input
-                type="text"
-                placeholder="What this commit is for"
-                value={commitNote}
-                onChange={(e) => setCommitNote(e.target.value)}
-              />
-            </label>
-            <div className="modal-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setCommitPrompt(null)}
-              >
-                Cancel
-              </button>
-              <button className="btn" onClick={handleCommit}>
-                Commit
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {commitConflict && (
-        <div className="modal-overlay" onClick={() => setCommitConflict(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Other drafts cover these dates</h3>
-            <p>
-              Committing draft #{commitConflict.draft.id} would overwrite the
-              calendar for dates these drafts also claim:
-            </p>
-            <ul>
-              {commitConflict.overlapping.drafts.map((d) => (
-                <li key={d.id}>
-                  draft #{d.id}, {d.dateFrom} to {d.dateTo}
-                </li>
-              ))}
-            </ul>
-            <p>
-              They are not discarded, and the assignments being replaced are
-              snapshotted into calendar history, so this is recoverable.
-            </p>
-            <div className="modal-actions">
-              <button
-                className="btn btn-secondary"
-                onClick={() => setCommitConflict(null)}
-              >
-                Cancel
-              </button>
-              <button className="btn btn-danger" onClick={handleForceCommit}>
-                Commit Anyway
-              </button>
-            </div>
-          </div>
-        </div>
+      {commitFor && (
+        <CommitDraftDialog
+          draft={commitFor}
+          onClose={() => setCommitFor(null)}
+          onCommitted={(message) => {
+            setCommitFor(null);
+            showToast(message);
+            load();
+          }}
+        />
       )}
 
       {deleteConfirm && (
