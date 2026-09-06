@@ -5,10 +5,11 @@ module ApiSpec (spec) where
 import Test.Hspec
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, tryTakeMVar)
+import Data.Aeson (FromJSON, decode)
 import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time (Day, fromGregorian, addDays)
+import Data.Time (Day, TimeOfDay(..), fromGregorian, addDays)
 import Data.Time.Clock (getCurrentTime, utctDay)
 import Data.Proxy (Proxy(..))
 import qualified Data.ByteString.Char8 as BS8
@@ -22,13 +23,19 @@ import Servant.Client
     ( ClientM, ClientEnv, mkClientEnv, runClientM, client, baseUrlPort
     , parseBaseUrl, ClientError(..), responseStatusCode
     )
+-- Qualified only to reach 'responseBody' on a Servant response: the unqualified
+-- name in this module is Network.HTTP.Client's, used by the SSE tests below.
+import qualified Servant.Client as SCl
 import Network.HTTP.Types.Status (statusCode)
 import System.Directory (removeFile, doesFileExist)
 
 import Data.Text (Text)
 import qualified Data.Text as T
 import Auth.Types (Role(..), User(..))
-import Domain.Types (WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..), Schedule(..))
+import Domain.Types
+    ( WorkerId(..), SkillId(..), StationId(..), AbsenceTypeId(..)
+    , Schedule(..), Assignment(..), Slot(..)
+    )
 import Domain.Skill (Skill(..))
 import Domain.Shift (ShiftDef)
 import Domain.Hint (Hint(..))
@@ -36,9 +43,11 @@ import Domain.Pin (PinnedAssignment)
 import Domain.Absence (AbsenceType(..), AbsenceContext(..), AbsenceRequest, emptyAbsenceContext)
 import Domain.Scheduler (ScheduleResult(..))
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..))
+import Repo.Types (Repository(..), DraftInfo(..), CalendarCommit(..), AuditEntry(..))
+import Service.DraftValidation (DraftViolation(..))
 import Service.Auth (register)
 import qualified Service.Worker as SW
+import qualified Service.Calendar as Cal
 import Servant.API (NoContent)
 import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
@@ -71,8 +80,11 @@ listShiftsC      :: ClientM [ShiftDef]
 listDraftsC      :: ClientM [DraftInfo]
 createDraftC     :: CreateDraftReq -> ClientM DraftCreatedResp
 getDraftC        :: Int -> ClientM DraftInfo
+getDraftAssignmentsC :: Int -> ClientM DraftAssignmentsResp
+revalidateDraftC :: Int -> ClientM RevalidateDraftResp
 generateDraftC   :: Int -> GenerateDraftReq -> ClientM ScheduleResult
 commitDraftC     :: Int -> CommitDraftReq -> ClientM NoContent
+commitDraftForceC :: Int -> CommitDraftReq -> ClientM NoContent
 discardDraftC    :: Int -> ClientM NoContent
 getCalendarC     :: Maybe Day -> Maybe Day -> ClientM Schedule
 listCalendarHistoryC :: ClientM [CalendarCommit]
@@ -185,8 +197,11 @@ logoutC
     :<|> listDraftsC
     :<|> createDraftC
     :<|> getDraftC
+    :<|> getDraftAssignmentsC
+    :<|> revalidateDraftC
     :<|> generateDraftC
     :<|> commitDraftC
+    :<|> commitDraftForceC
     :<|> discardDraftC
     :<|> getCalendarC
     :<|> listCalendarHistoryC
@@ -522,6 +537,36 @@ shouldFailWith (Right val) expected =
     expectationFailure $ "Expected status " ++ show expected
                       ++ " but got success: " ++ show val
 
+-- | A draft over the given range holding one assignment its worker is not
+-- qualified for, so validation reports exactly one violation with a known
+-- constraint. Worker 1 is deliberately never granted the station's skill.
+draftWithUnqualifiedAssignment :: Repository -> ClientEnv -> Day -> Day -> IO Int
+draftWithUnqualifiedAssignment repo env from to = do
+    _ <- SW.addSkill repo "grill" ""
+    sid <- SW.addStation repo "grill" 1 1
+    SW.setStationRequiredSkills repo sid (Set.singleton (SkillId 1))
+    resp <- runClientM (createDraftC (CreateDraftReq from to)) env
+    case resp of
+        Left err -> error ("draft create failed in test: " ++ show err)
+        Right r  -> do
+            let did = dcrId r
+            -- Overwrite the seeded (empty) schedule with the one bad assignment.
+            repoSaveDraftAssignments repo did
+                (Schedule (Set.singleton
+                    (Assignment (WorkerId 1) sid
+                        (Slot from (TimeOfDay 9 0 0) 3600))))
+            pure did
+
+-- | Decode the JSON body a failed request came back with.
+--
+-- 'Nothing' for anything that is not a failure response carrying a body of the
+-- expected shape, so a test that asserts on the body still reports a useful
+-- mismatch rather than an exception.
+conflictBody :: FromJSON b => Either ClientError a -> IO (Maybe b)
+conflictBody (Left (FailureResponse _ resp)) =
+    pure (decode (SCl.responseBody resp))
+conflictBody _ = pure Nothing
+
 -- | Fetch the audit log and return the recorded command strings.
 auditCommands :: ClientEnv -> IO [String]
 auditCommands env = do
@@ -611,14 +656,22 @@ spec = do
             result <- runClientM (getDraftC did) env
             result `shouldFailWith` 404
 
-        it "overlapping draft returns 409" $ withTestApp $ \env -> do
+        -- Creating an overlapping draft is allowed: a draft is an experiment
+        -- sandbox, and the overlap is adjudicated at commit time. ADR 0003.
+        it "overlapping draft is created rather than refused" $ withTestApp $ \env -> do
             (from, to) <- futureWeek
             overlapFrom <- fromToday 34
             overlapTo <- fromToday 40
-            Right _ <- runClientM (createDraftC (CreateDraftReq from to)) env
+            Right first <- runClientM (createDraftC (CreateDraftReq from to)) env
             result <- runClientM
                 (createDraftC (CreateDraftReq overlapFrom overlapTo)) env
-            result `shouldFailWith` 409
+            case result of
+                Left err -> expectationFailure
+                    ("Expected the overlapping create to succeed, got " ++ show err)
+                Right second -> do
+                    dcrId second `shouldNotBe` dcrId first
+                    Right drafts <- runClientM listDraftsC env
+                    length drafts `shouldBe` 2
 
         -- REST has no force flag and no way to unfreeze, so a past range is a
         -- dead end rather than a prompt.
@@ -679,6 +732,133 @@ spec = do
             -- Calendar history should have an entry
             Right history <- runClientM listCalendarHistoryC env
             length history `shouldSatisfy` (> 0)
+
+        -- Overlap is refused at commit, not at create, and the 409 body names
+        -- the siblings so a client can list them. ADR 0003.
+        it "commit over an overlapping draft returns 409 naming it" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                overlapTo <- fromToday 40
+                Right keep <- runClientM (createDraftC (CreateDraftReq from to)) env
+                Right other <- runClientM
+                    (createDraftC (CreateDraftReq to overlapTo)) env
+                result <- runClientM
+                    (commitDraftC (dcrId keep) (CommitDraftReq "overlapping")) env
+                result `shouldFailWith` 409
+                overlapping <- conflictBody result
+                fmap (map diId . odrDrafts) overlapping
+                    `shouldBe` Just [dcrId other]
+                -- Nothing was committed.
+                Right history <- runClientM listCalendarHistoryC env
+                length history `shouldBe` 0
+
+        it "commit/force proceeds past the overlap" $ withSeededApp $ \_ env -> do
+            (from, to) <- futureWeek
+            overlapTo <- fromToday 40
+            Right keep <- runClientM (createDraftC (CreateDraftReq from to)) env
+            Right other <- runClientM
+                (createDraftC (CreateDraftReq to overlapTo)) env
+            Right _ <- runClientM
+                (commitDraftForceC (dcrId keep) (CommitDraftReq "forced")) env
+            -- The committed draft is gone and the sibling is untouched.
+            gone <- runClientM (getDraftC (dcrId keep)) env
+            gone `shouldFailWith` 404
+            Right drafts <- runClientM listDraftsC env
+            map diId drafts `shouldBe` [dcrId other]
+
+    -- GET reports, POST revalidate prunes. Keeping those apart is the point of
+    -- the step 3 split: a browser refresh must not delete a draft's assignments.
+    describe "Draft assignments and revalidate" $ do
+        it "returns 404 for a draft that does not exist" $ withSeededApp $ \_ env -> do
+            missing <- runClientM (getDraftAssignmentsC 999) env
+            missing `shouldFailWith` 404
+            -- computeDraftViolations answers [] for a missing draft, so without
+            -- an explicit existence check this would have been 200 and empty.
+            revalidated <- runClientM (revalidateDraftC 999) env
+            revalidated `shouldFailWith` 404
+
+        it "reports a violation without removing it" $
+            withSeededApp $ \repo env -> do
+                (from, to) <- futureWeek
+                did <- draftWithUnqualifiedAssignment repo env from to
+                Right resp <- runClientM (getDraftAssignmentsC did) env
+                map dvConstraint (darViolations resp)
+                    `shouldBe` ["skill qualification"]
+                -- The offending assignment is still there: a report, not a diff.
+                Set.size (unSchedule (darAssignments resp)) `shouldBe` 1
+                -- And still there on a second read, so the GET did not prune and
+                -- did not bump last_validated_at.
+                Right again <- runClientM (getDraftAssignmentsC did) env
+                map dvConstraint (darViolations again)
+                    `shouldBe` ["skill qualification"]
+                Set.size (unSchedule (darAssignments again)) `shouldBe` 1
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        -- Documents the staleness gate at the REST boundary rather than hiding
+        -- it: pruning only happens once the calendar has moved. STATUS item 1
+        -- step 3 records why that trigger is too narrow.
+        it "revalidate removes nothing while the calendar has not moved" $
+            withSeededApp $ \repo env -> do
+                (from, to) <- futureWeek
+                did <- draftWithUnqualifiedAssignment repo env from to
+                Right resp <- runClientM (revalidateDraftC did) env
+                rvrRemoved resp `shouldBe` []
+                Right reread <- runClientM (getDraftAssignmentsC did) env
+                Set.size (unSchedule (darAssignments reread)) `shouldBe` 1
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        it "revalidate removes the violating assignment once the calendar moves" $
+            withSeededApp $ \repo env -> do
+                (from, to) <- futureWeek
+                did <- draftWithUnqualifiedAssignment repo env from to
+                -- 20ms: committed_at must sort after the draft's
+                -- last_validated_at, which is millisecond-precision text.
+                threadDelay 20000
+                Cal.commitToCalendar repo (apr 6) (apr 12) "unrelated" Nothing
+                    (Schedule Set.empty)
+                Right resp <- runClientM (revalidateDraftC did) env
+                map dvConstraint (rvrRemoved resp)
+                    `shouldBe` ["skill qualification"]
+                Right reread <- runClientM (getDraftAssignmentsC did) env
+                Set.size (unSchedule (darAssignments reread)) `shouldBe` 0
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        -- The blind spot step 4 closed for the CLI, closed for REST too.
+        it "reports the draft that replaced the calendar under this one" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                Right keep <- runClientM (createDraftC (CreateDraftReq from to)) env
+                threadDelay 20000
+                Right sibling <- runClientM
+                    (createDraftC (CreateDraftReq from to)) env
+                Right _ <- runClientM
+                    (commitDraftForceC (dcrId sibling) (CommitDraftReq "sibling")) env
+                Right resp <- runClientM (getDraftAssignmentsC (dcrId keep)) env
+                map ccDraftId (darReplacedUnder resp)
+                    `shouldBe` [Just (dcrId sibling)]
+
+        it "revalidate is admin-only" $ withServer $ \repo port -> do
+            _ <- register repo "admin" "password" Admin False
+            _ <- register repo "worker1" "pass" Normal False
+            pEnv <- mkPlainEnv port
+            aToken <- loginAs pEnv "admin" "password"
+            aEnv <- mkAuthEnv aToken port
+            (from, to) <- futureWeek
+            Right resp <- runClientM (createDraftC (CreateDraftReq from to)) aEnv
+            wToken <- loginAs pEnv "worker1" "pass"
+            wEnv <- mkAuthEnv wToken port
+            result <- runClientM (revalidateDraftC (dcrId resp)) wEnv
+            result `shouldFailWith` 403
+            -- The read beside it is not admin-gated, matching GET /api/drafts/:id.
+            readBack <- runClientM (getDraftAssignmentsC (dcrId resp)) wEnv
+            case readBack of
+                Left err -> expectationFailure
+                    ("Expected a normal user to read draft assignments, got "
+                        ++ show err)
+                Right _ -> pure ()
 
     describe "Calendar" $ do
         it "returns assignments for a date range" $ withTestApp $ \env -> do
@@ -1360,6 +1540,33 @@ spec = do
             env <- mkPlainEnv port
             result <- runClientM (rpcExecuteC (ExecuteReq "help" Nothing)) env
             result `shouldFailWith` 401
+
+        -- Regression: the relational skill tables carry REFERENCES skills(id),
+        -- and repoSaveSkillCtx rewrites them wholesale, so a command naming a
+        -- skill id nobody created used to abort the transaction with an uncaught
+        -- SQLite foreign-key error — killing the process rather than answering.
+        -- Every one of these commands took a raw id straight from the user.
+        it "reports an unknown skill id instead of dying" $
+            withSeededApp $ \repo env -> do
+                sid <- SW.addStation repo "grill" 1 1
+                let StationId stationNum = sid
+                    commands =
+                        [ "station require-skill " ++ show stationNum ++ " 99"
+                        , "worker grant-skill 1 99"
+                        , "worker set-cross-training 1 99"
+                        , "skill implication 99 98"
+                        ]
+                mapM_ (\cmd -> do
+                    result <- runClientM (rpcExecuteC (ExecuteReq cmd Nothing)) env
+                    case result of
+                        Left err -> expectationFailure
+                            (cmd ++ " failed instead of reporting: " ++ show err)
+                        Right output -> output `shouldSatisfy`
+                            \s -> "Unknown skill" `isInfixOf` s
+                    ) commands
+                -- The server is still answering, which is the actual regression.
+                Right skills <- runClientM listSkillsC env
+                skills `shouldBe` []
 
     -- -----------------------------------------------------------------
     -- SSE Event Stream endpoint

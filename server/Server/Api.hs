@@ -52,9 +52,19 @@ type RawAPI =
     :<|> "api" :> "drafts" :> Get '[JSON] [DraftInfo]
     :<|> "api" :> "drafts" :> ReqBody '[JSON] CreateDraftReq :> Post '[JSON] DraftCreatedResp
     :<|> "api" :> "drafts" :> Capture "id" Int :> Get '[JSON] DraftInfo
+    -- A pure read: reports violations without pruning them. Revalidate below is
+    -- the mutating counterpart.
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "assignments"
+         :> Get '[JSON] DraftAssignmentsResp
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "revalidate"
+         :> Post '[JSON] RevalidateDraftResp
     :<|> "api" :> "drafts" :> Capture "id" Int :> "generate"
          :> ReqBody '[JSON] GenerateDraftReq :> Post '[JSON] ScheduleResult
     :<|> "api" :> "drafts" :> Capture "id" Int :> "commit"
+         :> ReqBody '[JSON] CommitDraftReq :> PostNoContent
+    -- Commit past the overlapping-drafts refusal. A separate route rather than a
+    -- flag in the body, so that overriding is a distinct thing a client asks for.
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "commit" :> "force"
          :> ReqBody '[JSON] CommitDraftReq :> PostNoContent
     :<|> "api" :> "drafts" :> Capture "id" Int :> DeleteNoContent
     -- Calendar (read)

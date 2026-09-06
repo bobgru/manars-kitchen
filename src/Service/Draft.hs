@@ -11,6 +11,7 @@ module Service.Draft
     , defaultCreateDraftOpts
     , CreateDraftError(..)
     , FrozenRange(..)
+    , CommitDraftError(..)
     , CommitOutcome(..)
     , activeWorkerIds
       -- * Seeding
@@ -73,9 +74,21 @@ data FrozenRange = FrozenRange
     } deriving (Eq, Show)
 
 -- | Why 'createDraft' refused.
+--
+-- The frozen range is the only refusal left. A draft is an experiment sandbox,
+-- so overlapping an existing draft's dates is allowed — see ADR 0003, and
+-- 'commitDraft' for where the overlap is actually adjudicated.
 data CreateDraftError
-    = DraftOverlapsExisting
-    | DraftCoversFrozenDates !FrozenRange
+    = DraftCoversFrozenDates !FrozenRange
+    deriving (Eq, Show)
+
+-- | Why 'commitDraft' refused.
+--
+-- The overlap case carries the sibling drafts rather than a message, so that
+-- each caller can name them in its own idiom — a CLI line, a 409 body, a modal.
+data CommitDraftError
+    = CommitDraftNotFound
+    | CommitOverlapsDrafts ![DraftInfo]
     deriving (Eq, Show)
 
 -- | What a caller needs to know after a successful 'commitDraft'.
@@ -85,12 +98,13 @@ data CommitOutcome = CommitOutcome
       -- caller holding temporary unfreezes should clear them.
     } deriving (Eq, Show)
 
--- | Create a draft for a date range: refuse frozen dates unless forced, check
--- non-overlap, seed from calendar + pins, save draft assignments, return
--- draft_id.
+-- | Create a draft for a date range: refuse frozen dates unless forced, seed
+-- from calendar + pins, save draft assignments, return draft_id.
 --
--- The freeze check comes first so that a range which is both frozen and
--- overlapping reports the frozen dates — the more surprising of the two.
+-- The date range may overlap any number of existing drafts. Two admins trying
+-- competing schedules for the same week is the point of a draft, so creation is
+-- never refused for overlap; the conflict is only real at commit time, which is
+-- where 'commitDraft' reports it.
 createDraft :: Repository -> CreateDraftOpts -> Day -> Day
             -> IO (Either CreateDraftError Int)
 createDraft repo opts dateFrom dateTo = do
@@ -100,14 +114,10 @@ createDraft repo opts dateFrom dateTo = do
         Just (from, to) | not (cdoForce opts) ->
             return (Left (DraftCoversFrozenDates (FrozenRange freezeLine from to)))
         _ -> do
-            overlap <- repoCheckDraftOverlap repo dateFrom dateTo
-            if overlap
-                then return (Left DraftOverlapsExisting)
-                else do
-                    draftId <- repoCreateDraft repo dateFrom dateTo
-                    seed <- seedDraft repo dateFrom dateTo
-                    repoSaveDraftAssignments repo draftId seed
-                    return (Right draftId)
+            draftId <- repoCreateDraft repo dateFrom dateTo
+            seed <- seedDraft repo dateFrom dateTo
+            repoSaveDraftAssignments repo draftId seed
+            return (Right draftId)
 
 -- | The default candidate worker set: every user whose worker status is active.
 -- Inactive workers and non-worker accounts are excluded, which is the point of
@@ -219,24 +229,48 @@ generateDraft repo draftId mWorkers progressBus = do
 -- | Commit a draft to the calendar: load draft assignments, call
 -- commitToCalendar, delete the draft and every what-if session saved against it.
 --
+-- Refuses when another draft covers any of the same dates, unless @force@.
+-- Commit is a whole-range overwrite — the date range is the claim, not the
+-- assignments — so committing two overlapping drafts in turn erases the first
+-- one's work from the calendar entirely. That is recoverable from the history
+-- snapshot 'Cal.commitToCalendar' takes, which is why this is a warning to
+-- override rather than a block; ADR 0003 rejected blocking outright.
+--
+-- Overlapping siblings are left alone: auto-discarding them would destroy work
+-- the admin may still want.
+--
 -- The outcome reports whether the committed range reached back past the freeze
 -- line. Clearing temporary unfreezes is the caller's job — they are session
 -- state, and this function has no access to them — but deciding that they should
 -- be cleared is not.
-commitDraft :: Repository -> Int -> Text -> IO (Either String CommitOutcome)
-commitDraft repo draftId note = do
+commitDraft :: Repository -> Int -> Text -> Bool
+            -> IO (Either CommitDraftError CommitOutcome)
+commitDraft repo draftId note force = do
     mDraft <- repoGetDraft repo draftId
     case mDraft of
-        Nothing -> return (Left "Draft not found.")
+        Nothing -> return (Left CommitDraftNotFound)
         Just draft -> do
-            sched <- repoLoadDraftAssignments repo draftId
-            Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft) note sched
-            repoDeleteDraft repo draftId
-            repoDeleteDraftHintSessions repo draftId
-            freezeLine <- Freeze.computeFreezeLine
-            let frozen = Freeze.frozenDatesInRange freezeLine
-                            (diDateFrom draft) (diDateTo draft)
-            return (Right (CommitOutcome { coCoveredFrozenDates = not (null frozen) }))
+            siblings <- overlappingSiblings repo draft
+            if not force && not (null siblings)
+                then return (Left (CommitOverlapsDrafts siblings))
+                else do
+                    sched <- repoLoadDraftAssignments repo draftId
+                    Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft)
+                        note (Just draftId) sched
+                    repoDeleteDraft repo draftId
+                    repoDeleteDraftHintSessions repo draftId
+                    freezeLine <- Freeze.computeFreezeLine
+                    let frozen = Freeze.frozenDatesInRange freezeLine
+                                    (diDateFrom draft) (diDateTo draft)
+                    return (Right (CommitOutcome
+                        { coCoveredFrozenDates = not (null frozen) }))
+
+-- | The other drafts covering any of this draft's dates. The repository answers
+-- with every overlapping draft, which includes this one, so it is dropped here.
+overlappingSiblings :: Repository -> DraftInfo -> IO [DraftInfo]
+overlappingSiblings repo draft =
+    filter ((/= diId draft) . diId)
+        <$> repoDraftsOverlapping repo (diDateFrom draft) (diDateTo draft)
 
 -- | Discard a draft: delete it, its assignments, and every what-if session
 -- saved against it.

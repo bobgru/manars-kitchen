@@ -48,7 +48,11 @@ data CalendarCommit = CalendarCommit
     , ccDateFrom    :: !Day
     , ccDateTo      :: !Day
     , ccNote        :: !Text
-    } deriving (Show)
+    , ccDraftId     :: !(Maybe Int)
+      -- ^ The draft this commit came from, if it came from one. The draft is
+      -- deleted by the commit, so this names a row that no longer exists — it is
+      -- an admin-facing label, not a reference.
+    } deriving (Show, Eq)
 
 -- | Structured audit log entry.
 data AuditEntry = AuditEntry
@@ -215,8 +219,9 @@ data Repository = Repository
       -- ^ Save calendar assignments for a date range (delete existing in range, insert new)
     , repoLoadCalendar   :: Day -> Day -> IO Schedule
       -- ^ Load calendar assignments by date range
-    , repoSaveCommit     :: Day -> Day -> Text -> Schedule -> IO Int
-      -- ^ Save a history commit with snapshot of old assignments, return commit id
+    , repoSaveCommit     :: Day -> Day -> Text -> Maybe Int -> Schedule -> IO Int
+      -- ^ Save a history commit with snapshot of old assignments, return commit
+      -- id. The 'Maybe' 'Int' is the draft the commit came from, if any.
     , repoListCommits    :: IO [CalendarCommit]
       -- ^ List calendar commits in reverse chronological order
     , repoLoadCommitAssignments :: Int -> IO Schedule
@@ -233,8 +238,9 @@ data Repository = Repository
       -- ^ List all active drafts
     , repoGetDraft       :: Int -> IO (Maybe DraftInfo)
       -- ^ Get draft metadata by id
-    , repoCheckDraftOverlap :: Day -> Day -> IO Bool
-      -- ^ Check if a date range overlaps any existing draft
+    , repoDraftsOverlapping :: Day -> Day -> IO [DraftInfo]
+      -- ^ Every draft whose date range intersects the given one, the draft
+      -- itself included when its own range is passed
     , repoSaveDraftAssignments :: Int -> Schedule -> IO ()
       -- ^ Save assignments for a draft (replace existing)
     , repoLoadDraftAssignments :: Int -> IO Schedule

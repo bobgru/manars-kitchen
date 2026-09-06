@@ -52,7 +52,8 @@ import qualified Service.Absence as SA
 import qualified Service.Config as SC
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
-import Service.DraftValidation (DraftViolation(..), pruneDraftViolations)
+import Service.DraftValidation
+    ( DraftViolation(..), pruneDraftViolations, calendarReplacedUnder )
 import qualified Service.FreezeLine as Freeze
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
@@ -319,20 +320,24 @@ handleCommand st cmd = case cmd of
         case mDraft of
             Nothing -> putStrLn "Draft not found."
             Just d  -> do
+                -- Read the replaced-calendar report *before* pruning, which
+                -- bumps last_validated_at and would hide it.
+                replaced <- calendarReplacedUnder (asRepo st) d
                 -- Validate draft against calendar before displaying, pruning
                 -- what no longer holds
                 violations <- pruneDraftViolations (asRepo st) did
+                -- The baseline moving is worth saying whether or not it
+                -- invalidated any single assignment.
+                if null replaced
+                    then return ()
+                    else do
+                        displayReplacedCalendarReport d replaced
+                        putStrLn ""
                 -- Display violation report if any
                 if null violations
                     then return ()
                     else do
-                        users <- repoListUsers (asRepo st)
-                        stations <- SW.listStations (asRepo st)
-                        let workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList [(s, T.unpack (stationName station)) | (s, station) <- stations]
-                        displayViolationReport d workerNames stationNames violations
+                        reportViolations st d violations
                         putStrLn ""
                 -- Load (possibly updated) draft assignments
                 sched <- repoLoadDraftAssignments (asRepo st) did
@@ -433,15 +438,18 @@ handleCommand st cmd = case cmd of
                                  ++ show truly ++ " unfilled, "
                                  ++ show under ++ " understaffed positions.")
 
-    DraftCommit mDidStr mNote -> requireAdmin st $ do
+    DraftCommit mDidStr mNote force -> requireAdmin st $ do
         resolved <- resolveDraftId (asRepo st) mDidStr
         case resolved of
             Left err -> putStrLn err
             Right did -> do
                 let note = T.pack (maybe "" id mNote)
-                result <- Draft.commitDraft (asRepo st) did note
+                result <- Draft.commitDraft (asRepo st) did note force
                 case result of
-                    Left err  -> putStrLn ("Error: " ++ err)
+                    Left Draft.CommitDraftNotFound ->
+                        putStrLn "Error: Draft not found."
+                    Left (Draft.CommitOverlapsDrafts siblings) ->
+                        printCommitOverlapRefusal did mNote siblings
                     Right outcome -> do
                         putStrLn ("Draft #" ++ show did ++ " committed to calendar.")
                         -- The persisted hints went with the draft; the
@@ -459,6 +467,23 @@ handleCommand st cmd = case cmd of
                                 writeIORef (asUnfreezes st) Set.empty
                                 putStrLn "Historical dates refrozen. All temporary unfreezes cleared."
                             else return ()
+
+    -- The explicit form of the pruning `draft open` does as a side effect. It
+    -- exists so the REST revalidate endpoint has a command string that replays.
+    DraftRevalidate mDidStr -> requireAdmin st $ do
+        resolved <- resolveDraftId (asRepo st) mDidStr
+        case resolved of
+            Left err -> putStrLn err
+            Right did -> do
+                mDraft <- Draft.loadDraft (asRepo st) did
+                case mDraft of
+                    Nothing -> putStrLn "Draft not found."
+                    Just d  -> do
+                        violations <- pruneDraftViolations (asRepo st) did
+                        if null violations
+                            then putStrLn ("Draft #" ++ show did
+                                          ++ ": nothing removed.")
+                            else reportViolations st d violations
 
     DraftDiscard mDidStr -> requireAdmin st $ do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -822,7 +847,11 @@ handleCommand st cmd = case cmd of
                 (wNames, sNames, _) <- loadNameMaps st
                 putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
-    WhatIfGrantSkill wid sid -> requireAdmin st $ requireDraft st $ do
+    -- Guarded here rather than at `what-if apply`: a hint naming a skill that
+    -- does not exist has nowhere useful to go, and refusing it at the point of
+    -- entry beats crashing several commands later when the session is applied.
+    WhatIfGrantSkill wid sid -> requireAdmin st $ requireDraft st $
+        withSkillIds st [sid] $ do
         result <- getOrInitSession st
         case result of
             Left err -> putStrLn err
@@ -1012,12 +1041,13 @@ handleCommand st cmd = case cmd of
                 SW.closeStationDay (asRepo st) sid dow
                 putStrLn ("Station closed on " ++ dayStr)
 
-    StationRequireSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid -> do
-        ctx <- repoLoadSkillCtx (asRepo st)
-        let current = Map.findWithDefault Set.empty sid (scStationRequires ctx)
-        SW.setStationRequiredSkills (asRepo st) sid (Set.insert skid current)
-        sname <- lookupSkillName (asRepo st) skid
-        putStrLn ("Station now requires skill " ++ sname)
+    StationRequireSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid ->
+        withSkillIds st [skid] $ do
+            ctx <- repoLoadSkillCtx (asRepo st)
+            let current = Map.findWithDefault Set.empty sid (scStationRequires ctx)
+            SW.setStationRequiredSkills (asRepo st) sid (Set.insert skid current)
+            sname <- lookupSkillName (asRepo st) skid
+            putStrLn ("Station now requires skill " ++ sname)
 
     StationRemoveRequiredSkill arg skid -> requireAdmin st $ withStationArg st arg $ \sid -> do
         ctx <- repoLoadSkillCtx (asRepo st)
@@ -1071,7 +1101,7 @@ handleCommand st cmd = case cmd of
                 putStrLn ("  " ++ T.unpack (skillName sk))
                 ) skills
 
-    SkillImplication a b -> requireAdmin st $ do
+    SkillImplication a b -> requireAdmin st $ withSkillIds st [a, b] $ do
         SW.addSkillImplication (asRepo st) a b
         aname <- lookupSkillName (asRepo st) a
         bname <- lookupSkillName (asRepo st) b
@@ -1104,7 +1134,7 @@ handleCommand st cmd = case cmd of
         putStr (displaySkillCtx ctx)
 
     -- Worker skills (admin)
-    WorkerGrantSkill wid sid -> requireAdmin st $ do
+    WorkerGrantSkill wid sid -> requireAdmin st $ withSkillIds st [sid] $ do
         SW.grantWorkerSkill (asRepo st) (WorkerId wid) sid
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
         sname <- lookupSkillName (asRepo st) sid
@@ -1159,7 +1189,7 @@ handleCommand st cmd = case cmd of
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
         putStrLn ("Set " ++ wname ++ " seniority level: " ++ show lvl)
 
-    WorkerSetCrossTraining wid sid -> requireAdmin st $ do
+    WorkerSetCrossTraining wid sid -> requireAdmin st $ withSkillIds st [sid] $ do
         SW.addCrossTraining (asRepo st) (WorkerId wid) sid
         wname <- lookupWorkerName (asRepo st) (WorkerId wid)
         sname <- lookupSkillName (asRepo st) sid
@@ -2164,8 +2194,6 @@ createDraftWithFreezeCheck st dateFrom dateTo force = do
     case result of
         Right did -> putStrLn ("Created draft #" ++ show did
                               ++ " for " ++ show dateFrom ++ " to " ++ show dateTo)
-        Left Draft.DraftOverlapsExisting ->
-            putStrLn "Error: Date range overlaps an existing draft."
         Left (Draft.DraftCoversFrozenDates fr) -> do
             let firstFrozen = Draft.frFrom fr
                 lastFrozen  = Draft.frTo fr
@@ -2177,6 +2205,27 @@ createDraftWithFreezeCheck st dateFrom dateTo force = do
                      ++ show firstFrozen ++ " " ++ show lastFrozen)
             putStrLn ("  To override: draft create "
                      ++ show dateFrom ++ " " ++ show dateTo ++ " --force")
+
+-- | Print the refusal from a commit that would overwrite dates another draft
+-- also covers, and the exact command that proceeds anyway.
+--
+-- Naming the siblings matters more than the count: the admin has to decide
+-- whether the other draft is the one they meant to keep, and cannot do that from
+-- a number.
+printCommitOverlapRefusal :: Int -> Maybe String -> [DraftInfo] -> IO ()
+printCommitOverlapRefusal did mNote siblings = do
+    putStrLn ("Draft #" ++ show did ++ " covers dates that "
+             ++ (if length siblings == 1 then "another draft covers"
+                                        else "other drafts cover")
+             ++ " too:")
+    mapM_ (\d -> putStrLn ("  - draft #" ++ show (diId d)
+                          ++ " " ++ show (diDateFrom d)
+                          ++ " to " ++ show (diDateTo d))) siblings
+    putStrLn "Committing replaces the whole date range, so their assignments"
+    putStrLn "would be dropped from the calendar. The previous assignments are"
+    putStrLn "snapshotted in calendar history first, so this is recoverable."
+    putStrLn ("  To proceed: draft commit " ++ show did
+             ++ maybe "" (" " ++) mNote ++ " --force")
 
 -- -----------------------------------------------------------------
 -- Help registry
@@ -2196,7 +2245,8 @@ helpRegistry =
     , ("draft",    False, "draft view [id]",                         "View draft assignments (table)")
     , ("draft",    False, "draft view-compact [id]",                 "View draft assignments (compact)")
     , ("draft",    True,  "draft generate [id]",                     "Run scheduler within draft")
-    , ("draft",    True,  "draft commit [id] [note]",                "Commit draft to calendar")
+    , ("draft",    True,  "draft commit [id] [note] [--force]",      "Commit draft to calendar")
+    , ("draft",    True,  "draft revalidate [id]",                   "Re-check draft against calendar, dropping what no longer holds")
     , ("draft",    True,  "draft discard [id]",                      "Discard draft")
     , ("draft",    False, "draft hours [id]",                        "Worker hours summary for draft")
     , ("draft",    False, "draft diagnose [id]",                     "Diagnose draft")
@@ -2434,6 +2484,25 @@ resolveStationArg repo arg
             []    -> return (Left ("Unknown station: " ++ arg))
             _     -> return (Left ("Ambiguous station: " ++ arg))
 
+-- | Run an action only when every skill id given exists; report the ones that
+-- do not.
+--
+-- The relational tables carry @REFERENCES skills(id)@ and 'repoSaveSkillCtx'
+-- rewrites them wholesale, so saving a context that mentions a skill nobody
+-- created aborts the transaction with a SQLite foreign-key error. Nothing caught
+-- it, so it killed the process — in a replay or a demo script that abandons the
+-- run partway through.
+--
+-- Only the CLI needs this. REST resolves skill *names* and answers 404 for an
+-- unknown one, so a raw unchecked id cannot get in that way.
+withSkillIds :: AppState -> [SkillId] -> IO () -> IO ()
+withSkillIds st skids action = do
+    known <- Set.fromList . map fst <$> repoListSkills (asRepo st)
+    case [ n | skid@(SkillId n) <- skids, not (Set.member skid known) ] of
+        []      -> action
+        missing -> putStrLn ("Unknown skill: "
+                            ++ unwords (map show missing))
+
 -- | Resolve a station name argument and run the action; print error otherwise.
 withStationArg :: AppState -> String -> (StationId -> IO ()) -> IO ()
 withStationArg st arg action = do
@@ -2465,6 +2534,45 @@ absenceNameMaps repo = do
 -- -----------------------------------------------------------------
 -- Draft validation display
 -- -----------------------------------------------------------------
+
+-- | Print a violation report, resolving the worker and station ids to names
+-- first. Shared by @draft open@, which prunes as a side effect of reading, and
+-- @draft revalidate@, which prunes because that is what it is for.
+reportViolations :: AppState -> DraftInfo -> [DraftViolation] -> IO ()
+reportViolations st d violations = do
+    users <- repoListUsers (asRepo st)
+    stations <- SW.listStations (asRepo st)
+    let workerNames = Map.fromList
+            [ (userIdToWorkerId (userId u), T.unpack uname)
+            | u <- users, let Username uname = userName u ]
+        stationNames = Map.fromList
+            [ (s, T.unpack (stationName station)) | (s, station) <- stations ]
+    displayViolationReport d workerNames stationNames violations
+
+-- | Report that the calendar under this draft's dates was replaced since it was
+-- last looked at, and by what.
+--
+-- Names the draft that did it where the commit recorded one, because that is the
+-- label the admin recognises — they were looking at both drafts. Older commits
+-- carry no draft id, and a commit that did not come from a draft never will, so
+-- those fall back to the commit id and note.
+displayReplacedCalendarReport :: DraftInfo -> [CalendarCommit] -> IO ()
+displayReplacedCalendarReport draft commits = do
+    putStrLn ("The calendar for draft #" ++ show (diId draft) ++ "'s dates "
+             ++ "was replaced since you last opened it:")
+    mapM_ (\c -> putStrLn ("  - " ++ show (ccDateFrom c) ++ " to "
+                          ++ show (ccDateTo c) ++ " by " ++ source c
+                          ++ " at " ++ T.unpack (ccCommittedAt c))) commits
+    putStrLn "This draft's assignments were seeded from the calendar that was"
+    putStrLn "there before. Re-generate to build on the current one, or discard"
+    putStrLn "the draft if the other schedule is the one you meant to keep."
+  where
+    source c = case ccDraftId c of
+        Just n  -> "draft #" ++ show n
+        Nothing ->
+            let note = T.unpack (ccNote c)
+            in "commit #" ++ show (ccId c)
+                ++ (if null note then "" else " (" ++ note ++ ")")
 
 -- | Display a violation report grouped by worker.
 displayViolationReport :: DraftInfo -> Map.Map WorkerId String

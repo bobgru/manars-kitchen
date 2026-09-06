@@ -131,7 +131,9 @@ data Command
     | DraftView (Maybe String)          -- ^ optional draft-id
     | DraftViewCompact (Maybe String)   -- ^ optional draft-id
     | DraftGenerate (Maybe String)      -- ^ optional draft-id
-    | DraftCommit (Maybe String) (Maybe String)  -- ^ optional draft-id, optional note
+    | DraftCommit (Maybe String) (Maybe String) Bool
+        -- ^ optional draft-id, optional note, force past overlapping drafts?
+    | DraftRevalidate (Maybe String)    -- ^ optional draft-id
     | DraftDiscard (Maybe String)       -- ^ optional draft-id
     | DraftHours (Maybe String)         -- ^ optional draft-id
     | DraftDiagnose (Maybe String)      -- ^ optional draft-id
@@ -318,11 +320,10 @@ parseCommand input = case shellWords input of
     ["draft", "generate"]                -> DraftGenerate Nothing
     ["draft", "generate", did]
         | isDigit' did                   -> DraftGenerate (Just did)
-    ["draft", "commit"]                  -> DraftCommit Nothing Nothing
-    ["draft", "commit", did]
-        | isDigit' did                   -> DraftCommit (Just did) Nothing
-    ("draft" : "commit" : did : rest)
-        | isDigit' did                   -> DraftCommit (Just did) (Just (unwords rest))
+    ("draft" : "commit" : rest)          -> parseDraftCommit rest
+    ["draft", "revalidate"]              -> DraftRevalidate Nothing
+    ["draft", "revalidate", did]
+        | isDigit' did                   -> DraftRevalidate (Just did)
     ["draft", "discard"]                 -> DraftDiscard Nothing
     ["draft", "discard", did]
         | isDigit' did                   -> DraftDiscard (Just did)
@@ -388,6 +389,24 @@ parseBool "on"   = True
 parseBool "yes"  = True
 parseBool "true" = True
 parseBool _      = False
+
+-- | Parse the arguments of "draft commit [id] [note...] [--force]".
+--
+-- The note is free text, so @--force@ is recognised wherever it appears and
+-- removed before the rest is read. Anything but a numeric first token is a
+-- mistake rather than a note: a note has always required an explicit id.
+parseDraftCommit :: [String] -> Command
+parseDraftCommit ws =
+    case filter (/= "--force") ws of
+        []             -> DraftCommit Nothing Nothing force
+        (did : noteWs)
+            | isDigit' did -> DraftCommit (Just did) (noteOf noteWs) force
+        _              -> Unknown "draft commit [<draft-id>] [<note>] [--force]"
+  where
+    force = "--force" `elem` ws
+    noteOf noteWs
+        | null noteWs = Nothing
+        | otherwise   = Just (unwords noteWs)
 
 -- | Parse "what-if add-worker <name> <skills...> [hours]"
 -- If the last token is numeric, treat it as hours; rest are skill names.

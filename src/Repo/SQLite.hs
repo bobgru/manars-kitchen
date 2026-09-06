@@ -104,7 +104,7 @@ mkSQLiteRepo path = do
         , repoDeleteDraft    = sqlDeleteDraft conn
         , repoListDrafts     = sqlListDrafts conn
         , repoGetDraft       = sqlGetDraft conn
-        , repoCheckDraftOverlap = sqlCheckDraftOverlap conn
+        , repoDraftsOverlapping = sqlDraftsOverlapping conn
         , repoSaveDraftAssignments = sqlSaveDraftAssignments conn
         , repoLoadDraftAssignments = sqlLoadDraftAssignments conn
         , repoCalendarCommitsAfter = sqlCalendarCommitsAfter conn
@@ -1023,12 +1023,12 @@ sqlLoadCalendar conn dateFrom dateTo = do
     return (Schedule as)
 
 -- | Insert commit metadata and snapshot assignments, return commit id.
-sqlSaveCommit :: Connection -> Day -> Day -> Text -> Schedule -> IO Int
-sqlSaveCommit conn dateFrom dateTo note (Schedule assignments) = withTransaction conn $ do
+sqlSaveCommit :: Connection -> Day -> Day -> Text -> Maybe Int -> Schedule -> IO Int
+sqlSaveCommit conn dateFrom dateTo note mDraftId (Schedule assignments) = withTransaction conn $ do
     execute conn
-        "INSERT INTO calendar_commits (committed_at, date_from, date_to, note) \
-        \VALUES (strftime('%Y-%m-%d %H:%M:%f', 'now'), ?, ?, ?)"
-        (dayToText dateFrom, dayToText dateTo, note)
+        "INSERT INTO calendar_commits (committed_at, date_from, date_to, note, draft_id) \
+        \VALUES (strftime('%Y-%m-%d %H:%M:%f', 'now'), ?, ?, ?, ?)"
+        (dayToText dateFrom, dayToText dateTo, note, mDraftId)
     commitId <- fromIntegral <$> lastInsertRowId conn
     mapM_ (\a -> do
         let WorkerId wid = assignWorker a
@@ -1047,11 +1047,11 @@ sqlSaveCommit conn dateFrom dateTo note (Schedule assignments) = withTransaction
 sqlListCommits :: Connection -> IO [CalendarCommit]
 sqlListCommits conn = do
     rows <- query_ conn
-        "SELECT id, committed_at, date_from, date_to, note \
+        "SELECT id, committed_at, date_from, date_to, note, draft_id \
         \FROM calendar_commits ORDER BY id DESC"
-        :: IO [(Int, Text, Text, Text, Text)]
-    return [CalendarCommit cid ts (textToDay df) (textToDay dt) n
-           | (cid, ts, df, dt, n) <- rows]
+        :: IO [(Int, Text, Text, Text, Text, Maybe Int)]
+    return [CalendarCommit cid ts (textToDay df) (textToDay dt) n mdid
+           | (cid, ts, df, dt, n, mdid) <- rows]
 
 sqlLoadCommitAssignments :: Connection -> Int -> IO Schedule
 sqlLoadCommitAssignments conn commitId = do
@@ -1104,6 +1104,19 @@ sqlListDrafts conn = do
     return [DraftInfo did (textToDay df) (textToDay dt) ts lv
            | (did, df, dt, ts, lv) <- rows]
 
+-- | Every draft whose date range intersects the given one, including a draft
+-- with the identical range. Excluding the draft being committed is the caller's
+-- job, since only the caller knows which one that is.
+sqlDraftsOverlapping :: Connection -> Day -> Day -> IO [DraftInfo]
+sqlDraftsOverlapping conn dateFrom dateTo = do
+    rows <- query conn
+        "SELECT draft_id, date_from, date_to, created_at, last_validated_at \
+        \FROM drafts WHERE date_from <= ? AND date_to >= ? ORDER BY draft_id"
+        (dayToText dateTo, dayToText dateFrom)
+        :: IO [(Int, Text, Text, Text, Text)]
+    return [DraftInfo did (textToDay df) (textToDay dt) ts lv
+           | (did, df, dt, ts, lv) <- rows]
+
 sqlGetDraft :: Connection -> Int -> IO (Maybe DraftInfo)
 sqlGetDraft conn draftId = do
     rows <- query conn
@@ -1114,15 +1127,6 @@ sqlGetDraft conn draftId = do
     return $ case rows of
         [(did, df, dt, ts, lv)] -> Just (DraftInfo did (textToDay df) (textToDay dt) ts lv)
         _                       -> Nothing
-
--- | Check if a date range overlaps any existing draft.
-sqlCheckDraftOverlap :: Connection -> Day -> Day -> IO Bool
-sqlCheckDraftOverlap conn dateFrom dateTo = do
-    rows <- query conn
-        "SELECT 1 FROM drafts WHERE date_from <= ? AND date_to >= ?"
-        (dayToText dateTo, dayToText dateFrom)
-        :: IO [Only Int]
-    return (not (null rows))
 
 -- | Save assignments for a draft (delete existing, insert new).
 sqlSaveDraftAssignments :: Connection -> Int -> Schedule -> IO ()
@@ -1157,12 +1161,12 @@ sqlLoadDraftAssignments conn draftId = do
 sqlCalendarCommitsAfter :: Connection -> Text -> IO [CalendarCommit]
 sqlCalendarCommitsAfter conn ts = do
     rows <- query conn
-        "SELECT id, committed_at, date_from, date_to, note \
+        "SELECT id, committed_at, date_from, date_to, note, draft_id \
         \FROM calendar_commits WHERE committed_at > ? ORDER BY id DESC"
         (Only ts)
-        :: IO [(Int, Text, Text, Text, Text)]
-    return [CalendarCommit cid ca (textToDay df) (textToDay dt) n
-           | (cid, ca, df, dt, n) <- rows]
+        :: IO [(Int, Text, Text, Text, Text, Maybe Int)]
+    return [CalendarCommit cid ca (textToDay df) (textToDay dt) n mdid
+           | (cid, ca, df, dt, n, mdid) <- rows]
 
 -- | Update a draft's last_validated_at to the current time.
 sqlUpdateDraftValidatedAt :: Connection -> Int -> IO ()

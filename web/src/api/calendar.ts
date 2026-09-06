@@ -22,6 +22,12 @@ export interface CalendarCommit {
   dateFrom: string;
   dateTo: string;
   note: string;
+  /**
+   * The draft this commit came from. Null for a commit that did not come from
+   * one, and for commits written before the column existed. The draft itself is
+   * deleted by the commit, so this is a label, not a fetchable id.
+   */
+  draftId: number | null;
 }
 
 /**

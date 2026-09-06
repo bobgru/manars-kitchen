@@ -1,9 +1,8 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-05 · on branch `draft-validation-split-and-problem-view`
-at commit `af85f08`, six commits ahead of `master` at `eae0084` and not yet merged.
-Item 1 step 3 (the validation split) and the problem-view design are committed here,
-not on `master`.
+**Last updated:** 2026-09-05 · item 1 steps 1–6 are done and merged to `master`. Item 1
+step 7 — the draft detail page with the assignment grid — is the only piece of item 1
+left, after which item 2 (the problem view) is the next real body of work.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -17,10 +16,15 @@ leaving a stale claim behind.
 
 ## Where things stand
 
-The admin web UI has pages for skills, stations, workers, shifts, and a
+The admin web UI has pages for skills, stations, workers, shifts, drafts, and a
 read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
+
+**To run any of it, use `.claude/skills/run-manars-kitchen/`** rather than
+rediscovering the launch mechanics. It covers the build, both test suites, the
+scripted-CLI harness (`--demo <file>`), and driving the web UI in headless
+Chromium.
 
 **The project no longer uses OpenSpec.** Switched 2026-08-30 to `grill-with-docs`:
 grill the design first, then capture what was settled as glossary entries in
@@ -146,8 +150,8 @@ so nobody re-derives them:
 |---|---|
 | Force / unfreeze over REST | Not built. Creating a draft over frozen dates returns 409. Unfreeze stays CLI-only. |
 | Route and label | "Drafts" → `/drafts`. No redirect from `/schedules` — nothing ever served it. |
-| Overlapping drafts | Allowed freely. A draft is an experiment sandbox; creating one must never be refused. |
-| Overlapping commits | 409 naming the overlapping drafts; `POST /api/drafts/:id/commit/force` proceeds. |
+| Overlapping drafts | Allowed freely. A draft is an experiment sandbox; creating one must never be refused. Shipped, step 4. |
+| Overlapping commits | 409 naming the overlapping drafts; `POST /api/drafts/:id/commit/force` proceeds. Shipped, step 4. |
 | Cross-draft conflict detection | Out of scope. Competing experiments are meant to disagree. |
 | Candidate workers for generate | `workerIds` becomes optional, defaulting server-side to active workers. |
 | Manual per-slot editing | Out of scope, and when it comes it goes through what-ifs — never a draft-level assign endpoint, which would bypass rebase and validation. |
@@ -203,26 +207,91 @@ and 3:
    returns `[]` while `computeDraftViolations` reports the conflict. Step 5's endpoint
    must use the latter, and the deferred draft-workflow question below should treat the
    staleness trigger as too narrow, not just wrongly-responding.
-4. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
-   deltas removing the `Non-overlapping date ranges` requirement from `draft-session`
-   and the matching scenarios from `draft-shortcuts` — plus the commit 409 and
-   `commit/force`, and extend the staleness report to say *the calendar for these
-   dates was replaced by draft #N*.
-5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
-   GET must not mutate** — it reports violations without deleting them or bumping
-   `last_validated_at`, which is what `computeDraftViolations` is for (step 3). Pruning
-   gets an explicit `POST /api/drafts/:id/revalidate`, which calls
-   `pruneDraftViolations`. `isDraftStale` is there if the response should also say
-   whether the calendar has moved.
-6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
-   discard. No assignment grid.
+4. ~~**Allow overlapping drafts.**~~ — shipped 2026-09-05 as three commits: the create
+   guard removed, the commit-time refusal, and the replaced-calendar report. Four things
+   to carry forward:
+
+   - **The spec deltas in the original wording were not written, deliberately.**
+     `openspec/specs/draft-session` still carries the `Non-overlapping date ranges`
+     requirement and `draft-shortcuts` its scenarios. Those specs are the frozen record
+     of what shipped, per `CLAUDE.md`, so the live vocabulary moved to `CONTEXT.md`
+     (**Draft** and **Commit**) instead. Anyone reading the old specs will find a rule
+     the code no longer has.
+   - **The overlap query came back, returning rows.** `repoCheckDraftOverlap` is gone but
+     `repoDraftsOverlapping :: Day -> Day -> IO [DraftInfo]` replaces it, because a
+     caller that has to *name* the drafts cannot work from a `Bool`. It returns the draft
+     being committed too; `Service.Draft.overlappingSiblings` drops it.
+   - **`commitDraft` gained a force flag and a structured error.** Its `Either String`
+     became `Either CommitDraftError`, so `CommitDraftNotFound` and
+     `CommitOverlapsDrafts [DraftInfo]` are separable at every call site. REST exposes
+     the override as `POST /api/drafts/:id/commit/force` — a route rather than a body
+     flag, so overriding is a distinct thing a client asks for. Both routes are served by
+     one handler taking a `Bool`.
+   - **`calendar_commits` has a nullable `draft_id`, and it is a label, not a reference.**
+     Committing deletes the draft, so the id names a row that no longer exists — it is
+     kept because it is what the admin recognises. `CalendarCommit` gained
+     `ccDraftId :: Maybe Int` and `/api/calendar/history` gained `draftId`, which is
+     additive. NULL for old rows and for any commit that did not come from a draft.
+5. ~~**`GET /api/drafts/:id/assignments`**~~ — shipped 2026-09-05. Returns
+   `{assignments, violations, replacedUnder}` and does not mutate;
+   `POST /api/drafts/:id/revalidate` returns `{removed}` and does. Four things to carry
+   forward:
+
+   - **The response carries `replacedUnder`, which the original wording left optional.**
+     It is `calendarReplacedUnder` from step 4 — the commits that overwrote part of this
+     draft's own range. Included because a read that reports violations while staying
+     silent about the baseline moving misleads in exactly the case ADR 0003 made common,
+     and because adding it later would have been a response-shape change. `isDraftStale`
+     is still not exposed: a bare bool is strictly less useful than the commit list.
+   - **`violations` is a report, not a diff.** The assignments it names are still present
+     in `assignments`. `removed` on the revalidate response is named differently on
+     purpose — those are gone.
+   - **Revalidate inherits the staleness gate, and a test pins that down.**
+     `pruneDraftViolations` removes nothing unless the calendar has moved, so the GET can
+     report a violation the POST refuses to prune — an approved absence, for instance.
+     `ApiSpec`'s "revalidate removes nothing while the calendar has not moved" documents
+     it rather than papering over it. Fixing the trigger is still the deferred
+     draft-workflow question.
+   - **`draft revalidate [id]` was added to the CLI, which step 5 did not ask for.** The
+     REST handler logs `draft revalidate <id>` through `logRest`, and `replayCommands`
+     silently drops any audit entry `parseCommand` cannot read (`Unknown _ -> pure ()`).
+     Without the verb, every REST revalidate would have written an entry that replay
+     discards, quietly diverging a replayed database from the real one.
+     `Audit.CommandMeta` classifies it as **mutating** — the `classifyDraft` fallback
+     would have called it non-mutating and kept it out of the mutation-only feeds. There
+     is no `rpc/draft/revalidate`, so the remote CLI prints "not yet supported in remote
+     mode"; the web terminal gets it for free through `Server.Execute`.
+
+   No web client work: `web/src/api/` has no draft module yet, and speculative fetchers
+   would be dead code until step 6.
+6. ~~**`/drafts` list page.**~~ — shipped 2026-09-05 as `web/src/components/DraftsListPage.tsx`
+   and `web/src/api/drafts.ts`, following `WorkersListPage.tsx`. Create (with the frozen
+   refusal), generate, commit, the overlapping 409 and its force override, discard. Four
+   things to carry forward:
+
+   - **The rows carry per-draft state, at one extra request each.** `/api/drafts` reports
+     no counts, so each row reads `/api/drafts/:id/assignments` for its assignment count,
+     violations, and the "calendar replaced by draft #N" warning. A row whose detail
+     request fails degrades to metadata plus "not loaded" rather than taking the page
+     down. Drafts are few and short-lived, so the N+1 is deliberate; if that stops being
+     true, the counts belong on the list endpoint.
+   - **The replaced-calendar warning is on the list, not held back for the detail page.**
+     Pressing Commit without knowing the baseline moved is the trap ADR 0003 describes,
+     and the force override lives on this page, so the information that makes forcing
+     safe-or-not has to be here too.
+   - **The frozen 409 is terminal and says so.** REST has neither force nor unfreeze, so
+     the modal prints the `calendar unfreeze` command to run in the CLI instead of
+     offering a button that cannot exist.
+   - **Revalidate is not on the page.** Step 5 built `POST /api/drafts/:id/revalidate`,
+     but the response to a moved baseline is Generate or Discard, both of which are here.
+     Add it if the detail page turns out to want it.
 7. **Draft detail page** — the assignment grid, violations alongside assignments.
 
-For both page steps, follow `WorkersListPage.tsx` — the most recent and complete — over
-the skills/stations pages where they differ. The three existing list/detail pairs are
-inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
-key naming); prefer the worker page's choices. **Exercise them against a live server**,
-not just `tsc` — see the last bullet of item 7.
+For the remaining page step, follow `WorkersListPage.tsx` — the most recent and complete
+— over the skills/stations pages where they differ. The three existing list/detail pairs
+are inconsistent in ~10 ways (error rendering, toasts, 404 handling, `deleteConfirm` state
+key naming); prefer the worker page's choices. **Exercise it against a live server**, not
+just `tsc` — `npm run e2e:drafts` in `web/` is a worked example to copy.
 
 ### 2. The problem view — designed 2026-08-30, not started
 
@@ -348,6 +417,12 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
 
 ### 7. Smaller backlog
 
+- **`station_required_skills.station_id` has no foreign key**, unlike its
+  `skill_id` beside it. `station require-skill 999 1` therefore writes a row for a
+  station that does not exist and reports success, silently. Found 2026-09-05
+  while fixing the unknown-*skill*-id crash next to it, which is now guarded by
+  `withSkillIds` in `src/CLI/App.hs`. Same shape as item 4's
+  `worker_shift_prefs.shift_name` gap, and worth fixing with it.
 - **Station safe-delete ignores assignments.** `safeDeleteStation` checks worker
   station preferences and station required skills only. Assignment checking was
   deferred because "active schedule" needed defining; now that drafts are the only
@@ -366,7 +441,12 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   Both were type-checked and reasoned about, not exercised. The demo DB has zero
   rows in `calendar_assignments` and `calendar_commits`, so the calendar needs
   seeding before it shows anything. **Verify these in the real app before
-  trusting them.**
+  trusting them.** There is now a tool for it: `playwright` is a `web/`
+  devDependency, `web/e2e/drafts-page.mjs` is a worked driver to copy, and
+  **`.claude/skills/run-manars-kitchen/`** holds the launch mechanics — server on
+  8080, Vite on 5173, the fresh-database requirement, and the Playwright and zsh
+  traps that cost time here. Verified on macOS only; the browser driver has never
+  been run in the Linux container.
 - **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
   natively, not under emulation). Every claim the previous entry listed as expected
   held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk
@@ -429,10 +509,12 @@ The specific concerns:
    prunes its siblings the next time they are opened — the right trigger, the wrong
    response, per (1).
 5. **The look-back window is narrow.** Validation examines the seven days *before* the
-   draft's start (`DraftValidation.hs:165-166`), so calendar assignments inside the
-   draft's own range are never compared against it. That is why "the calendar for my
-   dates was just replaced" reports nothing today, and why item 1 step 4 has to add
-   that message separately.
+   draft's start, so calendar assignments inside the draft's own range are never compared
+   against it. Item 1 step 4 worked around this rather than fixing it:
+   `Service.DraftValidation.calendarReplacedUnder` answers "was the calendar under my own
+   dates replaced, and by what draft?" from the commit log, and `draft open` prints it
+   whether or not any single assignment became invalid. The underlying asymmetry stands —
+   violations are still computed against a look-back that stops at the draft's start.
 
 ---
 

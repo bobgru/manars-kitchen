@@ -28,13 +28,19 @@ time and not divided into named periods. The only artefact workers see.
 
 **Draft**:
 A working copy of assignments over a date range, seeded from the calendar and
-pins, edited privately, and either committed to the calendar or discarded.
-Drafts do not overlap each other.
+pins, edited privately, and either committed to the calendar or discarded. Any
+number of drafts may cover the same dates — competing experiments over one week
+are the point, and are *meant* to disagree, so creating one is never refused for
+overlap. The disagreement only becomes real at commit time. See ADR 0003.
 
 **Commit**:
 The act of replacing a date range of the calendar with a draft's assignments,
 and the history record it leaves behind. The date range is the claim: dates in
-range with no assignment are cleared, not skipped.
+range with no assignment are cleared, not skipped. Because the whole range is
+overwritten, committing one of two overlapping drafts erases the other's work
+from the calendar; that is refused unless forced (`draft commit --force`,
+`POST /api/drafts/:id/commit/force`), and recoverable from the history snapshot
+either way. Overlapping siblings are never auto-discarded.
 
 **Named schedule**:
 The removed artefact — a set of assignments stored under a text name, with no

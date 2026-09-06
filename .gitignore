@@ -1,5 +1,11 @@
 .stack-work
-.claude
+# Local agent state (settings, permissions, transcripts) stays out of the repo.
+# The run skill is the exception: it documents how to build, launch and drive
+# this project, which is no use to anyone if it only exists on one machine.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/run-manars-kitchen/
 stack.yaml.lock
 run-db/
 demo-db/
@@ -10,6 +16,7 @@ dist-newstyle/
 web/node_modules/
 web/dist/
 web/*.db
+web/e2e/screenshots/
 .worktrees/
 skills-lock.json
 .agents/

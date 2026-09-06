@@ -31,6 +31,7 @@ import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), Se
 import qualified Service.Worker as SW
 import qualified Service.User as SU
 import qualified Service.Draft as SD
+import qualified Service.DraftValidation as SDV
 import qualified Service.Calendar as SC
 import qualified Service.Absence as SA
 import qualified Service.Config as SCfg
@@ -117,8 +118,11 @@ server execEnv cmdBus repo user =
     :<|> handleListDrafts repo
     :<|> handleCreateDraft cmdBus repo user
     :<|> handleGetDraft repo
+    :<|> handleGetDraftAssignments repo
+    :<|> handleRevalidateDraft cmdBus repo user
     :<|> handleGenerateDraft cmdBus repo user
-    :<|> handleCommitDraft cmdBus repo user
+    :<|> handleCommitDraft cmdBus repo user False
+    :<|> handleCommitDraft cmdBus repo user True
     :<|> handleDiscardDraft cmdBus repo user
     :<|> handleGetCalendar repo
     :<|> handleListCalendarHistory repo
@@ -259,8 +263,6 @@ handleCreateDraft cmdBus repo user req = do
     result <- liftIO $ SD.createDraft repo SD.defaultCreateDraftOpts
                             (cdrDateFrom req) (cdrDateTo req)
     case result of
-        Left SD.DraftOverlapsExisting ->
-            throwApiError (Conflict "Date range overlaps an existing draft.")
         Left (SD.DraftCoversFrozenDates fr) ->
             throwConflictWithBody FrozenDatesResp
                 { fdrError      = "Date range covers frozen dates."
@@ -279,6 +281,53 @@ handleGetDraft repo did = do
     case mDraft of
         Nothing -> throwApiError (NotFound "Draft not found")
         Just d  -> pure d
+
+-- | A draft's assignments, what is wrong with them, and whether the calendar
+-- underneath them has been replaced.
+--
+-- **This must not mutate.** It reports violations without deleting them and
+-- without bumping @last_validated_at@, which is what 'SDV.computeDraftViolations'
+-- is for; 'SDV.pruneDraftViolations' is reached only through
+-- 'handleRevalidateDraft'. A GET that pruned would mean a browser refresh could
+-- silently delete a draft's assignments.
+--
+-- Not admin-gated: reading a draft is a read, and 'handleGetDraft' beside it is
+-- open too.
+handleGetDraftAssignments :: Repository -> Int -> Handler DraftAssignmentsResp
+handleGetDraftAssignments repo did = do
+    mDraft <- liftIO $ SD.loadDraft repo did
+    case mDraft of
+        -- computeDraftViolations answers [] for a missing draft, so the
+        -- existence check has to happen here or a bad id would look empty.
+        Nothing -> throwApiError (NotFound "Draft not found")
+        Just draft -> liftIO $ do
+            sched      <- repoLoadDraftAssignments repo did
+            violations <- SDV.computeDraftViolations repo did
+            replaced   <- SDV.calendarReplacedUnder repo draft
+            pure DraftAssignmentsResp
+                { darAssignments   = sched
+                , darViolations    = violations
+                , darReplacedUnder = replaced
+                }
+
+-- | Prune the assignments that no longer hold, and report what went.
+--
+-- The mutating counterpart to 'handleGetDraftAssignments'. Note that
+-- 'SDV.pruneDraftViolations' is gated on staleness, so a draft the calendar has
+-- not moved under returns @[]@ here even when the GET reports violations — an
+-- approved absence invalidates assignments without touching the calendar. That
+-- gap is recorded in @docs/STATUS.md@; it is not introduced by this endpoint.
+handleRevalidateDraft :: TopicBus CommandEvent -> Repository -> User -> Int
+                      -> Handler RevalidateDraftResp
+handleRevalidateDraft cmdBus repo user did = do
+    requireAdmin user
+    mDraft <- liftIO $ SD.loadDraft repo did
+    case mDraft of
+        Nothing -> throwApiError (NotFound "Draft not found")
+        Just _  -> do
+            removed <- liftIO $ SDV.pruneDraftViolations repo did
+            logRest cmdBus user ("draft revalidate " ++ show did)
+            pure (RevalidateDraftResp removed)
 
 -- | Generate within a draft. An absent @workerIds@ means the active workers,
 -- resolved by the service layer; an empty list means nobody, and is honoured.
@@ -301,14 +350,24 @@ handleGenerateDraft cmdBus repo user did req = do
 -- | Commit a draft. The outcome's frozen-coverage flag is ignored here: a REST
 -- caller holds no temporary unfreezes to clear, and cannot clear a CLI
 -- session's.
-handleCommitDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> CommitDraftReq -> Handler NoContent
-handleCommitDraft cmdBus repo user did req = do
+--
+-- Serves both @\/commit@ and @\/commit\/force@; @force@ says which. Overlapping
+-- siblings are a 409 naming them on the first, and no obstacle on the second.
+handleCommitDraft :: TopicBus CommandEvent -> Repository -> User -> Bool -> Int
+                  -> CommitDraftReq -> Handler NoContent
+handleCommitDraft cmdBus repo user force did req = do
     requireAdmin user
-    result <- liftIO $ SD.commitDraft repo did (cmrNote req)
+    result <- liftIO $ SD.commitDraft repo did (cmrNote req) force
     case result of
-        Left msg -> throwApiError (NotFound msg)
+        Left SD.CommitDraftNotFound -> throwApiError (NotFound "Draft not found.")
+        Left (SD.CommitOverlapsDrafts siblings) ->
+            throwConflictWithBody OverlappingDraftsResp
+                { odrError  = "Other drafts cover the same dates."
+                , odrDrafts = siblings
+                }
         Right _  -> do
-            logRest cmdBus user ("draft commit " ++ show did)
+            logRest cmdBus user
+                ("draft commit " ++ show did ++ (if force then " --force" else ""))
             pure NoContent
 
 handleDiscardDraft :: TopicBus CommandEvent -> Repository -> User -> Int -> Handler NoContent

@@ -480,14 +480,22 @@ dispatchCommand env cmd = case cmd of
                 Left err -> putStrLn err
         Nothing -> putStrLn "Specify a draft ID."
 
-    DraftCommit mDid mNote -> case mDid of
+    DraftCommit mDid mNote force -> case mDid of
         Just didStr -> do
             let note = maybe "" id mNote
-            result <- run env (cCommitDraft (RpcDraftCommit (read didStr) (T.pack note)))
+            -- The overlap refusal comes back as a 409 whose message already
+            -- names the drafts and the --force remedy, so it is printed as-is.
+            result <- run env
+                (cCommitDraft (RpcDraftCommit (read didStr) (T.pack note) force))
             case result of
                 Right _ -> putStrLn "Draft committed."
                 Left err -> putStrLn err
         Nothing -> putStrLn "Specify a draft ID."
+
+    -- Reachable over REST as POST /api/drafts/:id/revalidate, but there is no
+    -- rpc/draft/revalidate route yet, and the remote CLI only speaks rpc.
+    DraftRevalidate _ ->
+        putStrLn "draft revalidate is not yet supported in remote mode."
 
     DraftDiscard mDid -> case mDid of
         Just didStr -> do
