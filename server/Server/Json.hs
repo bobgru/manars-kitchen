@@ -346,6 +346,9 @@ instance ToJSON CalendarCommit where
         , "dateFrom"    .= formatTime defaultTimeLocale "%Y-%m-%d" (ccDateFrom c)
         , "dateTo"      .= formatTime defaultTimeLocale "%Y-%m-%d" (ccDateTo c)
         , "note"        .= ccNote c
+        -- Null for a commit that did not come from a draft, or predates the
+        -- column. A client must treat it as optional.
+        , "draftId"     .= ccDraftId c
         ]
 
 instance FromJSON CalendarCommit where
@@ -357,7 +360,8 @@ instance FromJSON CalendarCommit where
         df <- maybe (fail "invalid dateFrom") pure (parseDay dfStr)
         dt <- maybe (fail "invalid dateTo") pure (parseDay dtStr)
         n <- v .: "note"
-        pure (CalendarCommit i ca df dt n)
+        mdid <- v .:? "draftId"
+        pure (CalendarCommit i ca df dt n mdid)
 
 -- -----------------------------------------------------------------
 -- Request body types

@@ -255,7 +255,8 @@ commitDraft repo draftId note force = do
                 then return (Left (CommitOverlapsDrafts siblings))
                 else do
                     sched <- repoLoadDraftAssignments repo draftId
-                    Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft) note sched
+                    Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft)
+                        note (Just draftId) sched
                     repoDeleteDraft repo draftId
                     repoDeleteDraftHintSessions repo draftId
                     freezeLine <- Freeze.computeFreezeLine

@@ -81,7 +81,7 @@ spec = do
                     ]
             repoSaveCalendar repo (apr 6) (apr 12) existing
             -- Save commit that snapshots the existing assignments
-            commitId <- repoSaveCommit repo (apr 6) (apr 12) "test snapshot" existing
+            commitId <- repoSaveCommit repo (apr 6) (apr 12) "test snapshot" Nothing existing
             -- Verify the snapshot matches
             snapshot <- repoLoadCommitAssignments repo commitId
             snapshot `shouldBe` existing
@@ -97,7 +97,7 @@ spec = do
             -- Put original in calendar
             repoSaveCalendar repo (apr 6) (apr 12) original
             -- Commit replacement (which snapshots original first)
-            Cal.commitToCalendar repo (apr 6) (apr 12) "replacing" replacement
+            Cal.commitToCalendar repo (apr 6) (apr 12) "replacing" Nothing replacement
             -- Calendar should now have the replacement
             current <- repoLoadCalendar repo (apr 6) (apr 12)
             current `shouldBe` replacement
@@ -112,7 +112,7 @@ spec = do
 
         it "commit to empty range creates empty snapshot" $ withTestRepo $ \repo -> do
             let newSched = mkSchedule [mkAssignment 1 1 (apr 6) 8]
-            Cal.commitToCalendar repo (apr 6) (apr 12) "first commit" newSched
+            Cal.commitToCalendar repo (apr 6) (apr 12) "first commit" Nothing newSched
             commits <- repoListCommits repo
             case commits of
                 [c] -> do
@@ -199,9 +199,9 @@ spec = do
             repoSaveCalendar repo (apr 6) (apr 12) original
             -- Commit twice
             let replacement1 = mkSchedule [mkAssignment 3 1 (apr 6) 10]
-            Cal.commitToCalendar repo (apr 6) (apr 12) "commit 1" replacement1
+            Cal.commitToCalendar repo (apr 6) (apr 12) "commit 1" Nothing replacement1
             let replacement2 = mkSchedule [mkAssignment 4 2 (apr 8) 11]
-            Cal.commitToCalendar repo (apr 6) (apr 12) "commit 2" replacement2
+            Cal.commitToCalendar repo (apr 6) (apr 12) "commit 2" Nothing replacement2
             -- Calendar should have replacement2
             current <- repoLoadCalendar repo (apr 6) (apr 12)
             current `shouldBe` replacement2

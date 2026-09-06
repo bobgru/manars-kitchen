@@ -8,6 +8,7 @@ module Service.DraftValidation
       --
       -- $draftValidation
     , isDraftStale
+    , calendarReplacedUnder
     , computeDraftViolations
     , pruneDraftViolations
     ) where
@@ -29,7 +30,7 @@ import Domain.Worker
     , workerAvoidsAt
     )
 import Domain.Absence (isWorkerAvailable)
-import Repo.Types (Repository(..), DraftInfo(..))
+import Repo.Types (Repository(..), DraftInfo(..), CalendarCommit(..))
 import qualified Service.Calendar as Cal
 
 -- | A record of a constraint violation that caused an assignment to be removed.
@@ -91,6 +92,8 @@ buildLookBackContext (Schedule as) =
 --
 -- * 'isDraftStale' — has the calendar moved since this draft was last
 --   validated?
+-- * 'calendarReplacedUnder' — has the calendar moved /inside this draft's own
+--   date range/, and what replaced it?
 -- * 'computeDraftViolations' — which of the draft's assignments no longer
 --   hold? A read: no writes, and no staleness gate.
 -- * 'pruneDraftViolations' — the gate, the computation, and the removal.
@@ -107,6 +110,28 @@ buildLookBackContext (Schedule as) =
 isDraftStale :: Repository -> DraftInfo -> IO Bool
 isDraftStale repo draft =
     not . null <$> repoCalendarCommitsAfter repo (diLastValidatedAt draft)
+
+-- | The calendar commits that replaced part of this draft's /own/ date range
+-- since it was last validated, newest first.
+--
+-- This is the blind spot 'isDraftStale' and 'computeDraftViolations' share.
+-- Validation looks back at the seven days /before/ a draft starts, because that
+-- is what the alternating-weekend and rest-period rules need; it never looks at
+-- the calendar inside the range, since the draft is about to overwrite it. Once
+-- drafts may overlap, that is exactly where the surprise lives: a sibling draft
+-- committed over the same week leaves this draft's assignments individually
+-- valid and collectively built on a calendar that no longer exists.
+--
+-- Reporting is all this does. Nothing is pruned, because nothing here is
+-- necessarily wrong — the admin has to decide whether their experiment still
+-- means anything now that the baseline moved.
+calendarReplacedUnder :: Repository -> DraftInfo -> IO [CalendarCommit]
+calendarReplacedUnder repo draft = do
+    commits <- repoCalendarCommitsAfter repo (diLastValidatedAt draft)
+    return (filter overlapsDraft commits)
+  where
+    overlapsDraft c =
+        ccDateFrom c <= diDateTo draft && ccDateTo c >= diDateFrom draft
 
 -- | Which of a draft's assignments violate a hard constraint against the
 -- current calendar? Writes nothing, and does /not/ gate on staleness: every

@@ -52,7 +52,8 @@ import qualified Service.Absence as SA
 import qualified Service.Config as SC
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
-import Service.DraftValidation (DraftViolation(..), pruneDraftViolations)
+import Service.DraftValidation
+    ( DraftViolation(..), pruneDraftViolations, calendarReplacedUnder )
 import qualified Service.FreezeLine as Freeze
 import qualified Export.JSON as Export
 import Domain.Optimizer (OptProgress(..), OptPhase(..))
@@ -319,9 +320,19 @@ handleCommand st cmd = case cmd of
         case mDraft of
             Nothing -> putStrLn "Draft not found."
             Just d  -> do
+                -- Read the replaced-calendar report *before* pruning, which
+                -- bumps last_validated_at and would hide it.
+                replaced <- calendarReplacedUnder (asRepo st) d
                 -- Validate draft against calendar before displaying, pruning
                 -- what no longer holds
                 violations <- pruneDraftViolations (asRepo st) did
+                -- The baseline moving is worth saying whether or not it
+                -- invalidated any single assignment.
+                if null replaced
+                    then return ()
+                    else do
+                        displayReplacedCalendarReport d replaced
+                        putStrLn ""
                 -- Display violation report if any
                 if null violations
                     then return ()
@@ -2487,6 +2498,31 @@ absenceNameMaps repo = do
 -- -----------------------------------------------------------------
 -- Draft validation display
 -- -----------------------------------------------------------------
+
+-- | Report that the calendar under this draft's dates was replaced since it was
+-- last looked at, and by what.
+--
+-- Names the draft that did it where the commit recorded one, because that is the
+-- label the admin recognises — they were looking at both drafts. Older commits
+-- carry no draft id, and a commit that did not come from a draft never will, so
+-- those fall back to the commit id and note.
+displayReplacedCalendarReport :: DraftInfo -> [CalendarCommit] -> IO ()
+displayReplacedCalendarReport draft commits = do
+    putStrLn ("The calendar for draft #" ++ show (diId draft) ++ "'s dates "
+             ++ "was replaced since you last opened it:")
+    mapM_ (\c -> putStrLn ("  - " ++ show (ccDateFrom c) ++ " to "
+                          ++ show (ccDateTo c) ++ " by " ++ source c
+                          ++ " at " ++ T.unpack (ccCommittedAt c))) commits
+    putStrLn "This draft's assignments were seeded from the calendar that was"
+    putStrLn "there before. Re-generate to build on the current one, or discard"
+    putStrLn "the draft if the other schedule is the one you meant to keep."
+  where
+    source c = case ccDraftId c of
+        Just n  -> "draft #" ++ show n
+        Nothing ->
+            let note = T.unpack (ccNote c)
+            in "commit #" ++ show (ccId c)
+                ++ (if null note then "" else " (" ++ note ++ ")")
 
 -- | Display a violation report grouped by worker.
 displayViolationReport :: DraftInfo -> Map.Map WorkerId String

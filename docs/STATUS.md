@@ -1,9 +1,8 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-05 · on branch `draft-validation-split-and-problem-view`
-at commit `af85f08`, six commits ahead of `master` at `eae0084` and not yet merged.
-Item 1 step 3 (the validation split) and the problem-view design are committed here,
-not on `master`.
+**Last updated:** 2026-09-05 · item 1 steps 1–4 are on `master`. Step 4 is on branch
+`allow-overlapping-drafts`, three commits ahead of `master` at `4cd11a1` and not yet
+merged. Item 1 step 5 is the next unstarted piece.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -146,8 +145,8 @@ so nobody re-derives them:
 |---|---|
 | Force / unfreeze over REST | Not built. Creating a draft over frozen dates returns 409. Unfreeze stays CLI-only. |
 | Route and label | "Drafts" → `/drafts`. No redirect from `/schedules` — nothing ever served it. |
-| Overlapping drafts | Allowed freely. A draft is an experiment sandbox; creating one must never be refused. |
-| Overlapping commits | 409 naming the overlapping drafts; `POST /api/drafts/:id/commit/force` proceeds. |
+| Overlapping drafts | Allowed freely. A draft is an experiment sandbox; creating one must never be refused. Shipped, step 4. |
+| Overlapping commits | 409 naming the overlapping drafts; `POST /api/drafts/:id/commit/force` proceeds. Shipped, step 4. |
 | Cross-draft conflict detection | Out of scope. Competing experiments are meant to disagree. |
 | Candidate workers for generate | `workerIds` becomes optional, defaulting server-side to active workers. |
 | Manual per-slot editing | Out of scope, and when it comes it goes through what-ifs — never a draft-level assign endpoint, which would bypass rebase and validation. |
@@ -203,17 +202,38 @@ and 3:
    returns `[]` while `computeDraftViolations` reports the conflict. Step 5's endpoint
    must use the latter, and the deferred draft-workflow question below should treat the
    staleness trigger as too narrow, not just wrongly-responding.
-4. **Allow overlapping drafts** — delete `repoCheckDraftOverlap` and its guard, spec
-   deltas removing the `Non-overlapping date ranges` requirement from `draft-session`
-   and the matching scenarios from `draft-shortcuts` — plus the commit 409 and
-   `commit/force`, and extend the staleness report to say *the calendar for these
-   dates was replaced by draft #N*.
+4. ~~**Allow overlapping drafts.**~~ — shipped 2026-09-05 as three commits: the create
+   guard removed, the commit-time refusal, and the replaced-calendar report. Four things
+   to carry forward:
+
+   - **The spec deltas in the original wording were not written, deliberately.**
+     `openspec/specs/draft-session` still carries the `Non-overlapping date ranges`
+     requirement and `draft-shortcuts` its scenarios. Those specs are the frozen record
+     of what shipped, per `CLAUDE.md`, so the live vocabulary moved to `CONTEXT.md`
+     (**Draft** and **Commit**) instead. Anyone reading the old specs will find a rule
+     the code no longer has.
+   - **The overlap query came back, returning rows.** `repoCheckDraftOverlap` is gone but
+     `repoDraftsOverlapping :: Day -> Day -> IO [DraftInfo]` replaces it, because a
+     caller that has to *name* the drafts cannot work from a `Bool`. It returns the draft
+     being committed too; `Service.Draft.overlappingSiblings` drops it.
+   - **`commitDraft` gained a force flag and a structured error.** Its `Either String`
+     became `Either CommitDraftError`, so `CommitDraftNotFound` and
+     `CommitOverlapsDrafts [DraftInfo]` are separable at every call site. REST exposes
+     the override as `POST /api/drafts/:id/commit/force` — a route rather than a body
+     flag, so overriding is a distinct thing a client asks for. Both routes are served by
+     one handler taking a `Bool`.
+   - **`calendar_commits` has a nullable `draft_id`, and it is a label, not a reference.**
+     Committing deletes the draft, so the id names a row that no longer exists — it is
+     kept because it is what the admin recognises. `CalendarCommit` gained
+     `ccDraftId :: Maybe Int` and `/api/calendar/history` gained `draftId`, which is
+     additive. NULL for old rows and for any commit that did not come from a draft.
 5. **`GET /api/drafts/:id/assignments`** returning `{assignments, violations}`. **The
    GET must not mutate** — it reports violations without deleting them or bumping
    `last_validated_at`, which is what `computeDraftViolations` is for (step 3). Pruning
    gets an explicit `POST /api/drafts/:id/revalidate`, which calls
    `pruneDraftViolations`. `isDraftStale` is there if the response should also say
-   whether the calendar has moved.
+   whether the calendar has moved — and `calendarReplacedUnder` (step 4) if it should say
+   *what* moved it, which is the more useful answer now that drafts overlap.
 6. **`/drafts` list page** — create, generate, commit (with the 409/force flow),
    discard. No assignment grid.
 7. **Draft detail page** — the assignment grid, violations alongside assignments.
@@ -429,10 +449,12 @@ The specific concerns:
    prunes its siblings the next time they are opened — the right trigger, the wrong
    response, per (1).
 5. **The look-back window is narrow.** Validation examines the seven days *before* the
-   draft's start (`DraftValidation.hs:165-166`), so calendar assignments inside the
-   draft's own range are never compared against it. That is why "the calendar for my
-   dates was just replaced" reports nothing today, and why item 1 step 4 has to add
-   that message separately.
+   draft's start, so calendar assignments inside the draft's own range are never compared
+   against it. Item 1 step 4 worked around this rather than fixing it:
+   `Service.DraftValidation.calendarReplacedUnder` answers "was the calendar under my own
+   dates replaced, and by what draft?" from the commit log, and `draft open` prints it
+   whether or not any single assignment became invalid. The underlying asymmetry stands —
+   violations are still computed against a look-back that stops at the draft's start.
 
 ---
 

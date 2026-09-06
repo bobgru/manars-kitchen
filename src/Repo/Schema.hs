@@ -212,12 +212,18 @@ statements =
       \)"
 
       -- Calendar commits (history metadata)
+      -- draft_id is the draft this commit came from, and deliberately has no
+      -- foreign key: committing deletes the draft, so the id names something
+      -- that no longer exists. It is kept because it is the label the admin
+      -- recognises when told their draft's dates were overwritten. NULL for a
+      -- commit written before the column existed, or by anything but a draft.
     , "CREATE TABLE IF NOT EXISTS calendar_commits (\
       \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
       \  committed_at TEXT NOT NULL DEFAULT (datetime('now')),\
       \  date_from TEXT NOT NULL,\
       \  date_to TEXT NOT NULL,\
-      \  note TEXT NOT NULL DEFAULT ''\
+      \  note TEXT NOT NULL DEFAULT '',\
+      \  draft_id INTEGER\
       \)"
 
       -- Calendar commit assignments (snapshot of replaced assignments)
@@ -297,6 +303,10 @@ migrations =
       "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token)"
     -- Session idle timeout default
     , "INSERT OR IGNORE INTO scheduler_config (key, value) VALUES ('session_idle_timeout_minutes', 30)"
+    -- Which draft a calendar commit came from, for the "replaced by draft #N"
+    -- report. Fails harmlessly on a database created after the column joined
+    -- the CREATE TABLE above.
+    , "ALTER TABLE calendar_commits ADD COLUMN draft_id INTEGER"
     ]
 
 -- | Try to execute a statement, silently ignoring errors (for idempotent migrations).

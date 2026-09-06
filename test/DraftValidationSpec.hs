@@ -20,11 +20,12 @@ import Domain.Absence
     )
 import Domain.SchedulerConfig (defaultConfig)
 import Repo.SQLite (mkSQLiteRepo)
-import Repo.Types (Repository(..), DraftInfo)
+import Repo.Types (Repository(..), DraftInfo, CalendarCommit(..))
 import Service.DraftValidation
     ( DraftViolation(..)
     , validateAssignment, buildLookBackContext
     , computeDraftViolations, pruneDraftViolations, isDraftStale
+    , calendarReplacedUnder
     )
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
@@ -66,9 +67,11 @@ may d = fromGregorian 2026 5 d
 createForced :: Repository -> Day -> Day -> IO (Either String Int)
 createForced repo from to =
     either (Left . show) Right
-        <$> Draft.createDraft repo opts from to
-  where
-    opts = Draft.defaultCreateDraftOpts { Draft.cdoForce = True }
+        <$> Draft.createDraft repo forcedOpts from to
+
+-- | Create options that ignore the freeze line, for the fixed 2026 fixtures.
+forcedOpts :: Draft.CreateDraftOpts
+forcedOpts = Draft.defaultCreateDraftOpts { Draft.cdoForce = True }
 
 -- | Create a forced draft and hand the action both its id and its loaded
 -- 'DraftInfo' — 'isDraftStale' takes the record, not the id.
@@ -275,7 +278,7 @@ spec = do
                                 ]
                         -- Need a tiny delay so committed_at > draft's last_validated_at
                         threadDelay 10000  -- 10ms: ensure committed_at > last_validated_at
-                        Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" calSched
+                        Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" Nothing calSched
 
                         -- Validate the draft
                         violations <- pruneDraftViolations repo did
@@ -312,7 +315,7 @@ spec = do
                                 , mkAssignment 5 1 (apr 26) 9
                                 ]
                         threadDelay 1100000
-                        Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" calSched
+                        Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" Nothing calSched
 
                         -- First call: should detect violations
                         violations1 <- pruneDraftViolations repo did
@@ -335,9 +338,55 @@ spec = do
             withTestRepo $ \repo ->
                 withDraft repo (may 1) (may 31) $ \_ draft -> do
                     threadDelay 1100000  -- committed_at > last_validated_at
-                    Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend"
+                    Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" Nothing
                         (mkSchedule [mkAssignment 5 1 (apr 25) 9])
                     isDraftStale repo draft `shouldReturn` True
+
+    -- ---------------------------------------------------------------
+    -- calendarReplacedUnder: the blind spot the staleness gate has, now
+    -- that two drafts may cover the same week
+    -- ---------------------------------------------------------------
+    describe "calendarReplacedUnder" $ do
+        it "is empty when nothing has been committed" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \_ draft ->
+                    calendarReplacedUnder repo draft `shouldReturn` []
+
+        -- The commit that makes a draft *stale* is not necessarily one that
+        -- replaced the calendar underneath it: staleness is any commit at all.
+        it "ignores a commit outside the draft's own date range" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \_ draft -> do
+                    threadDelay 1100000
+                    Cal.commitToCalendar repo (apr 25) (apr 26) "April weekend" Nothing
+                        (mkSchedule [mkAssignment 5 1 (apr 25) 9])
+                    -- Stale, but not replaced under: the two questions differ.
+                    isDraftStale repo draft `shouldReturn` True
+                    calendarReplacedUnder repo draft `shouldReturn` []
+
+        it "names the draft that replaced the calendar under this one" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \_ draft -> do
+                    threadDelay 1100000
+                    -- A sibling draft over part of the same range is committed.
+                    Right sibling <- Draft.createDraft repo forcedOpts (may 4) (may 8)
+                    repoSaveDraftAssignments repo sibling
+                        (mkSchedule [mkAssignment 8 1 (may 4) 9])
+                    Right _ <- Draft.commitDraft repo sibling "sibling wins" True
+                    replaced <- calendarReplacedUnder repo draft
+                    map ccDraftId replaced `shouldBe` [Just sibling]
+                    map ccDateFrom replaced `shouldBe` [may 4]
+
+        -- A commit that did not come from a draft still has to be reported, it
+        -- just cannot be attributed to one.
+        it "reports a draft-less commit with no draft id" $
+            withTestRepo $ \repo ->
+                withDraft repo (may 1) (may 31) $ \_ draft -> do
+                    threadDelay 1100000
+                    Cal.commitToCalendar repo (may 4) (may 8) "by hand" Nothing
+                        (mkSchedule [mkAssignment 8 1 (may 4) 9])
+                    replaced <- calendarReplacedUnder repo draft
+                    map ccDraftId replaced `shouldBe` [Nothing]
 
     -- ---------------------------------------------------------------
     -- computeDraftViolations: the read half of the split. No staleness
