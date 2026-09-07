@@ -145,10 +145,11 @@ const chips = await page.locator(".calendar-chip").count();
 if (chips === 0) fail("generated draft rendered no chips in the grid");
 console.log(`grid shows ${chips} chips`);
 
-// A freshly generated draft is NOT necessarily clean: the scheduler produces
-// assignments its own validator rejects -- 7 "period hours" violations on the
-// demo fixture. So this asserts a delta below rather than a clean start. See
-// docs/STATUS.md.
+// A freshly generated draft is clean on this fixture as of 2026-09-07, when the
+// scheduler and the validator stopped disagreeing about authorised overtime.
+// This still asserts a *delta* rather than "before is 0", because whether a
+// generated schedule happens to be clean depends on the fixture, and that is not
+// what these steps are testing.
 const violationsHeading = () => page.getByRole("heading", { name: /^Violations \(/ });
 const violationCount = async () =>
   Number((await violationsHeading().textContent()).match(/\((\d+)\)/)[1]);

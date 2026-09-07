@@ -11,6 +11,7 @@ module Domain.Worker
     , workerMaxHours
     , workerOptedInOvertime
     , wouldBeOvertime
+    , exceedsPermittedHours
       -- * Employment status queries
     , workerOvertimeModel
     , workerPayPeriodTracking
@@ -207,6 +208,35 @@ wouldBeOvertime ctx (periodStart, periodEnd) calendarHrs sched a =
                         added = if alreadyAtSlot then 0 else slotDuration (assignSlot a)
                     in draftHrs + calHrs + added > maxH
 
+-- | Would this assignment put the worker beyond the hours they are /permitted/,
+-- once their overtime model and opt-in are taken into account?
+--
+-- This is the hard rule. 'wouldBeOvertime' is not: it answers "is this
+-- overtime?", and overtime is frequently allowed — that is what an opt-in is
+-- for. Anything judging an assignment legal or illegal wants this function;
+-- only something reasoning about overtime as a category wants 'wouldBeOvertime'
+-- directly.
+--
+-- It exists because the answer was previously written out three times — inline
+-- in 'Domain.Scheduler.canAssignSlot', in 'tryAssignOvertimeHours', and in
+-- 'Service.DraftValidation.validateAssignment' — and the third copy had drifted,
+-- reporting every deliberately-authorised overtime assignment as a violation of
+-- a hard constraint.
+--
+-- 'OTManualOnly' over the cap counts as exceeded. The scheduler will not create
+-- such an assignment under either pass, so one in a draft came from a pin or a
+-- what-if, and nothing anywhere records "a human authorised this overtime" —
+-- there is no state that could distinguish deliberate manual overtime from a
+-- stale pin.
+exceedsPermittedHours :: WorkerContext -> (Day, Day) -> Map WorkerId DiffTime
+                      -> Schedule -> Assignment -> Bool
+exceedsPermittedHours ctx bounds calendarHrs sched a
+    | not (wouldBeOvertime ctx bounds calendarHrs sched a) = False
+    | otherwise = case workerOvertimeModel ctx (assignWorker a) of
+        OTExempt     -> False  -- the overtime concept does not apply
+        OTManualOnly -> True   -- never authorised automatically
+        OTEligible   -> not (workerOptedInOvertime ctx (assignWorker a))
+
 -- ---------------------------------------------------------------------
 -- Daily rules
 -- ---------------------------------------------------------------------
@@ -380,13 +410,8 @@ tryAssignHours ctx bounds calHrs a sched
 tryAssignOvertimeHours :: WorkerContext -> (Day, Day) -> Map WorkerId DiffTime
                       -> Assignment -> Schedule -> Maybe Schedule
 tryAssignOvertimeHours ctx bounds calHrs a sched
-    | not (wouldBeOvertime ctx bounds calHrs sched a) = Just (assign a sched)
-    | otherwise = case workerOvertimeModel ctx (assignWorker a) of
-        OTExempt     -> Just (assign a sched)
-        OTManualOnly -> Nothing
-        OTEligible   -> if workerOptedInOvertime ctx (assignWorker a)
-                        then Just (assign a sched)
-                        else Nothing
+    | exceedsPermittedHours ctx bounds calHrs sched a = Nothing
+    | otherwise                                      = Just (assign a sched)
 
 -- ---------------------------------------------------------------------
 -- Tests
@@ -827,3 +852,66 @@ spec = do
                 a = Assignment tw_alice tst_grill testFriday
             in tryAssignOvertimeHours ctx testBounds testCalHrs a sched
                 `shouldSatisfy` (== Just (assign a sched))
+
+    -- The predicate both the scheduler and the draft validator ask, so that they
+    -- cannot disagree about which assignments are legal. The distinction from
+    -- wouldBeOvertime is the whole point: overtime is often permitted.
+    describe "exceedsPermittedHours" $ do
+        it "is False when the assignment is not overtime at all" $
+            let sched = scheduleWithHours tw_alice 10
+                a = Assignment tw_alice tst_grill testFriday
+            in exceedsPermittedHours testWorkerContext testBounds testCalHrs sched a
+                `shouldBe` False
+
+        it "is False for OTEligible who opted in, even over the limit" $
+            let sched = scheduleWithDayHours tw_alice 40  -- at limit
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours testWorkerContext testBounds testCalHrs sched a
+                `shouldBe` False
+
+        it "is True for OTEligible who did not opt in" $
+            let ctx = testWorkerContext { wcOvertimeOptIn = Set.empty }
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours ctx testBounds testCalHrs sched a `shouldBe` True
+
+        it "is True for OTManualOnly even when opted in" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_alice OTManualOnly
+                    , wcOvertimeOptIn = Set.singleton tw_alice }
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours ctx testBounds testCalHrs sched a `shouldBe` True
+
+        it "is False for OTExempt regardless of hours" $
+            let ctx = testWorkerContext
+                    { wcOvertimeModel = Map.singleton tw_alice OTExempt }
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours ctx testBounds testCalHrs sched a `shouldBe` False
+
+        it "is False for a PPExempt worker, who has no limit to exceed" $
+            let ctx = testWorkerContext
+                    { wcPayPeriodTracking = Map.singleton tw_alice PPExempt
+                    , wcOvertimeOptIn = Set.empty }
+                sched = scheduleWithDayHours tw_alice 40
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours ctx testBounds testCalHrs sched a `shouldBe` False
+
+        -- The demo's "last resort" admin: a zero regular-hour cap plus an
+        -- opt-in. Every assignment is overtime and every one is authorised.
+        it "is False for a zero-hour cap with an overtime opt-in" $
+            let ctx = testWorkerContext
+                    { wcMaxPeriodHours = Map.singleton tw_alice 0
+                    , wcOvertimeOptIn = Set.singleton tw_alice }
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours ctx testBounds testCalHrs emptySchedule a
+                `shouldBe` False
+
+        it "is True for a zero-hour cap without one" $
+            let ctx = testWorkerContext
+                    { wcMaxPeriodHours = Map.singleton tw_alice 0
+                    , wcOvertimeOptIn = Set.empty }
+                a = Assignment tw_alice tst_grill testTuesday
+            in exceedsPermittedHours ctx testBounds testCalHrs emptySchedule a
+                `shouldBe` True

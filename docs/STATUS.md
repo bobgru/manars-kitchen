@@ -1,6 +1,7 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-06 · the drafts surface is complete. The `/drafts/:id` detail
+**Last updated:** 2026-09-07 · the drafts surface is complete and the scheduler and draft
+validator no longer disagree about which assignments are legal. The `/drafts/:id` detail
 page shipped, and with it the `ScheduleGrid` and `CommitDraftDialog` extractions, so the
 old item 1 is gone from this file entirely. **Item 2, the problem view, is the next real
 body of work**; item 1 is now the three pieces deliberately left out of the detail page.
@@ -21,6 +22,26 @@ The admin web UI has pages for skills, stations, workers, shifts, drafts (list a
 detail), and a read-only calendar. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
+
+**One predicate decides whether an assignment's hours are legal, and both the
+scheduler and the draft validator ask it.** `Domain.Worker.exceedsPermittedHours`,
+added 2026-09-07. It is `wouldBeOvertime` plus the worker's overtime model and
+opt-in: `OTExempt` never exceeds, `OTManualOnly` always does once over the cap,
+`OTEligible` does only without an opt-in. **`wouldBeOvertime` is not a legality
+test** — it answers "is this overtime?", and overtime is frequently authorised.
+Anything judging an assignment legal wants `exceedsPermittedHours`.
+
+This existed in three places and the third had drifted. `validateAssignment` called
+`wouldBeOvertime` directly, so every deliberately-authorised overtime assignment was
+reported as breaking a hard constraint — on the demo fixture that was all 7 of
+`admin`'s, who has `set-hours admin 0` plus `set-overtime admin on` precisely so they
+can be a last resort. The same shape of bug sat dormant in the daily rule: the
+validator used the 8-hour `wouldExceedDailyRegular` threshold where the scheduler's
+overtime pass uses the 16-hour `wouldExceedDailyTotal` ceiling, so a legal 9-hour day
+was a violation. Both now use the permissive envelope. `tryAssignOvertimeHours`, which
+only tests use, became a wrapper over the predicate rather than a fourth copy.
+`canAssignSlot`'s behaviour is unchanged — that rewrite is provably equivalent, case
+by case.
 
 **The grid is shared, and it owns its own limits.** `web/src/components/ScheduleGrid.tsx`
 renders a schedule as hours × days for both `/calendar` and `/drafts/:id`; its pure parts
@@ -102,11 +123,10 @@ service-layer and optimizer moves, the structured-rename and SSE role-filtering 
 the named-schedule removal, and the whole drafts surface. All of this was green, with
 `LANG` unset:
 
-- `stack build --pedantic` — clean. **This run did not `stack clean` first**, because it
-  changed no `.hs` file: the detail page is frontend-only, every endpoint it needs already
-  existed. A clean rebuild could not have said anything about TSX. Any change that does
-  touch Haskell owes the full clean gate `CLAUDE.md` describes.
-- 271 integration + 386 unit examples, 0 failures, 1 pending (the weekend divergence in
+- `stack clean && stack build --pedantic` — clean. The detail page itself changed no
+  `.hs` file and was verified warm on that basis; the hour-rule fix on 2026-09-07 did, and
+  took the full clean gate.
+- 271 integration + 397 unit examples, 0 failures, 1 pending (the weekend divergence in
   item 6), run sequentially — never two `stack test` invocations at once, see item 5.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
@@ -195,6 +215,15 @@ not built on persisted violations is the sick-call case: an approved absence inv
 calendar assignments *without changing the calendar*, so anything recomputed on write
 misses it. That is the same blind spot as the staleness gate inside
 `pruneDraftViolations`, which only fires on a calendar commit.
+
+One thing to pick up, added 2026-09-07: **authorised overtime is a Compromise, and it
+currently surfaces nowhere.** Since `exceedsPermittedHours` makes an opted-in worker's
+overtime legal, a draft that works `admin` well past their zero-hour cap now looks
+identical to one that does not. That is right — it is not a **Violation** — but ADR 0004
+already lists hour headroom among Compromise's sources, so the Compromise work in step 2
+above should pick it up. It is the cheapest compromise to derive of the set: the
+predicate that decides it is already written, and the sentence it owes the detail pane
+is "worked 9 hours past their limit, which they opted into".
 
 ### 3. The demo is not representative of a working restaurant
 
@@ -315,16 +344,14 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   8080, Vite on 5173, which drivers want a fresh database and which want a
   demo-seeded one, and the Playwright and zsh traps that cost time here. Verified
   on macOS only; the browser driver has never been run in the Linux container.
-- **A freshly generated draft already violates hard rules.** On the demo fixture,
-  `draft generate` over a clean future week produces 410 assignments and **7
-  `period hours` violations** the moment `computeDraftViolations` looks at them —
-  all belonging to `admin`. So `Domain.Scheduler` and
-  `Service.DraftValidation.validateAssignment` disagree about the per-period hour
-  limit, and the scheduler is the one that is wrong, since it had every chance not
-  to make the assignment. Found 2026-09-06 while writing `e2e/draft-detail.mjs`,
-  which now asserts on a violation-count *delta* rather than a clean start because
-  of it. Worth chasing before the problem view lands: item 2 projects exactly these
-  violations onto the dashboard, so every generated draft would arrive pre-broken.
+- **`dailyOk` in `canAssignSlot` ignores the overtime model.** Fixed next to it on
+  2026-09-07, but not fixed *by* it. When overtime is allowed, the daily ceiling is
+  `wouldExceedDailyTotal` (16h) for **everyone** — an `OTManualOnly` worker gets a
+  12-hour day from the scheduler as readily as an opted-in one, because only the
+  per-period rule consults the model. That may well be wrong, and the draft
+  validator now matches the scheduler's behaviour deliberately rather than
+  papering over it: if the scheduler's daily rule should consult the model, fix it
+  there and `exceedsPermittedHours`'s daily sibling follows.
 - **An unresolvable entity name in a CLI command fails silently.** `worker
   grant-skill marco nonexistent-skill` echoes the command and prints *nothing* —
   no error, no "unknown skill", and the exit status is unaffected. Name-to-id

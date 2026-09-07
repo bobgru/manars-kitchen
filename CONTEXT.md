@@ -98,11 +98,25 @@ _Avoid_: using "problem" loosely for a bug in the software.
 The kind of **Problem** where an existing assignment breaks a hard rule — skill
 qualification, absence, alternating weekends, period or daily hours, rest period,
 consecutive hours, avoid-pairing. Something is scheduled that should not be.
+_Avoid_: treating overtime as one. Overtime past a worker's regular hours is a
+violation only when it is not **Authorised overtime**, and the daily rule's hard
+ceiling is the maximum hours in a day, not the non-overtime threshold below it.
+
+**Authorised overtime**:
+Hours past a worker's regular per-period limit that their overtime model and opt-in
+permit — an `OTExempt` worker always, an `OTEligible` worker who opted in, an
+`OTManualOnly` worker never. Legal, and therefore not a **Violation**; it is a
+**Compromise**, because someone is working more than their stated limit even though
+they agreed to. `Domain.Worker.exceedsPermittedHours` is the one predicate that
+decides this, and both the scheduler and the draft validator ask it.
+_Avoid_: reading `wouldBeOvertime` as "is illegal". It answers only "is this
+overtime", which is a different and much weaker claim.
 
 **Compromise**:
 The kind of **Problem** where an assignment is legal but ignores a stated
 preference — a worker's station or shift preference, their wish for variety,
-their hour headroom. Nothing is broken; someone did not get what they wanted.
+their hour headroom, or **Authorised overtime**. Nothing is broken; someone did not
+get what they wanted.
 _Avoid_: calling this a soft violation. Nothing is violated, so the word invites
 the reader to treat it as a **Violation**.
 

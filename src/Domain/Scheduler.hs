@@ -448,20 +448,15 @@ canAssignSlot ctx allowOT w st slot sched =
         else isMultiStationSlot sctx st slot
              && Set.size existing < seniorityLvl + 1
              && not (any (\ea -> assignStation ea == st) (Set.toList existing))
-    otModel = workerOvertimeModel wctx w
-    ppTrack = workerPayPeriodTracking wctx w
     bounds = schPeriodBounds ctx
     calHrs = schCalendarHours ctx
-    weeklyOk = case ppTrack of
-        PPExempt   -> True  -- no period hour limit enforced
-        PPStandard ->
-            if allowOT
-            then case otModel of
-                OTExempt     -> True   -- overtime concept doesn't apply
-                OTManualOnly -> not (wouldBeOvertime wctx bounds calHrs sched a)  -- never auto-assigned OT
-                OTEligible   -> not (wouldBeOvertime wctx bounds calHrs sched a)
-                                || workerOptedInOvertime wctx w
-            else not (wouldBeOvertime wctx bounds calHrs sched a)
+    -- The permissive pass asks what the worker's overtime model and opt-in
+    -- permit; the strict pass allows no overtime at all, for anybody. The
+    -- permissive answer is 'exceedsPermittedHours', shared with the draft
+    -- validator so the two cannot disagree about which assignments are legal.
+    weeklyOk = if allowOT
+               then not (exceedsPermittedHours wctx bounds calHrs sched a)
+               else not (wouldBeOvertime wctx bounds calHrs sched a)
     dailyOk = if allowOT
               then not (wouldExceedDailyTotal cfg a sched)
               else not (wouldExceedDailyRegular cfg a sched)

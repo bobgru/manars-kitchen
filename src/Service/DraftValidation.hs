@@ -26,7 +26,7 @@ import Domain.Scheduler (SchedulerContext(..), blockedByAlternateWeekend)
 import Domain.Skill (qualified)
 import Domain.Worker
     ( violatesRestPeriod, needsBreak
-    , wouldBeOvertime, wouldExceedDailyRegular
+    , exceedsPermittedHours, wouldExceedDailyTotal
     , workerAvoidsAt
     )
 import Domain.Absence (isWorkerAvailable)
@@ -51,10 +51,18 @@ validateAssignment ctx a sched
     | blockedByAlternateWeekend ctx w slot =
         Just (DraftViolation a "alternating weekends"
             "worked previous weekend in calendar")
-    | wouldBeOvertime (schWorkerCtx ctx) (schPeriodBounds ctx) (schCalendarHours ctx) sched a =
-        Just (DraftViolation a "period hours" "would exceed per-period hour limit")
-    | wouldExceedDailyRegular (schConfig ctx) a sched =
-        Just (DraftViolation a "daily hours" "would exceed daily hour limit")
+    -- Both hour rules use the *permissive* envelope, the one the scheduler
+    -- applies when overtime is allowed. Using the strict rules here reported
+    -- every legitimately-authorised overtime assignment as breaking a hard
+    -- constraint: 'wouldBeOvertime' ignores the worker's overtime model and
+    -- opt-in, and 'wouldExceedDailyRegular' is the 8-hour non-overtime
+    -- threshold, not a ceiling.
+    | exceedsPermittedHours (schWorkerCtx ctx) (schPeriodBounds ctx)
+                            (schCalendarHours ctx) sched a =
+        Just (DraftViolation a "period hours"
+            "exceeds per-period hour limit, and overtime is not authorised")
+    | wouldExceedDailyTotal (schConfig ctx) a sched =
+        Just (DraftViolation a "daily hours" "would exceed maximum hours in one day")
     | violatesRestPeriod (schConfig ctx) w slot sched =
         Just (DraftViolation a "rest period"
             "insufficient rest since previous day's last assignment")

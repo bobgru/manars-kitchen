@@ -223,6 +223,48 @@ spec = do
                 combined = mkSchedule [draftAssign]
             validateAssignment ctx draftAssign combined `shouldBe` Nothing
 
+        -- The demo's "last resort" admin: `worker set-hours admin 0` plus
+        -- `worker set-overtime admin on`. The scheduler assigns them precisely
+        -- because the opt-in authorises it, and the validator used to call every
+        -- one of those assignments a hard-constraint violation, because
+        -- `wouldBeOvertime` knows nothing about overtime models or opt-ins.
+        it "permits authorised overtime past a zero-hour cap" $ do
+            let base = mkValidationCtx Set.empty
+                wctx = (schWorkerCtx base)
+                    { wcMaxPeriodHours = Map.singleton w_marco 0
+                    , wcOvertimeOptIn  = Set.singleton w_marco
+                    }
+                ctx = base { schWorkerCtx = wctx }
+                draftAssign = mkAssignment 5 1 (may 4) 9  -- Monday
+                combined = mkSchedule [draftAssign]
+            validateAssignment ctx draftAssign combined `shouldBe` Nothing
+
+        it "reports unauthorised overtime past a zero-hour cap" $ do
+            let base = mkValidationCtx Set.empty
+                wctx = (schWorkerCtx base)
+                    { wcMaxPeriodHours = Map.singleton w_marco 0
+                    , wcOvertimeOptIn  = Set.empty
+                    }
+                ctx = base { schWorkerCtx = wctx }
+                draftAssign = mkAssignment 5 1 (may 4) 9
+                combined = mkSchedule [draftAssign]
+            case validateAssignment ctx draftAssign combined of
+                Nothing -> expectationFailure "Expected a period-hours violation"
+                Just v  -> dvConstraint v `shouldBe` "period hours"
+
+        -- The daily rule had the same shape of bug: the validator applied the
+        -- 8-hour regular threshold where the scheduler's overtime pass applies
+        -- the 16-hour ceiling, so a legal 9-hour overtime day was a violation.
+        it "permits a nine-hour day, which is overtime and not a breach" $ do
+            let ctx = mkValidationCtx Set.empty
+                -- Nine hours in three-hour blocks: the four-hour consecutive
+                -- limit is a separate rule and would otherwise fire first.
+                dayAssigns =
+                    [ mkAssignment 5 1 (may 4) h | h <- [6, 7, 8, 10, 11, 12, 14, 15, 16] ]
+                combined = mkSchedule dayAssigns
+            length dayAssigns `shouldBe` 9
+            validateAssignment ctx (last dayAssigns) combined `shouldBe` Nothing
+
     -- ---------------------------------------------------------------
     -- Unit tests for buildLookBackContext
     -- ---------------------------------------------------------------
