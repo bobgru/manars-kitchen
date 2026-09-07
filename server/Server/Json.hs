@@ -13,6 +13,8 @@ module Server.Json
     , OverlappingDraftsResp(..)
     , DraftAssignmentsResp(..)
     , RevalidateDraftResp(..)
+    , ProblemResp(..)
+    , HorizonResp(..)
     , AbsenceCreatedResp(..)
       -- * Skill / Station / Shift CRUD
     , CreateSkillReq(..)
@@ -72,10 +74,10 @@ module Server.Json
     ) where
 
 import Data.Aeson
-    ( ToJSON(..), FromJSON(..), (.=), (.:), (.:?), (.!=)
+    ( ToJSON(..), FromJSON(..), Value, (.=), (.:), (.:?), (.!=)
     , object, withObject, withText
     )
-import qualified Data.Aeson.Types
+import Data.Aeson.Types (Pair, Parser)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text, unpack)
@@ -98,6 +100,11 @@ import Domain.PayPeriod (PayPeriodConfig(..), PayPeriodType(..), parsePayPeriodT
 import Export.JSON (ExportData)
 import Repo.Types (DraftInfo(..), CalendarCommit(..), AuditEntry(..))
 import Service.DraftValidation (DraftViolation(..))
+import Service.Problems
+    ( Problem(..), ProblemScope(..), Horizon(..)
+    , problemWorker, problemStation, problemScope, problemSeverity
+    , problemEarliestDay
+    )
 import qualified Service.Worker as SW
 
 -- -----------------------------------------------------------------
@@ -1336,6 +1343,90 @@ instance ToJSON StationReferencesResp where
         [ "workerPrefs"    .= [object ["name" .= n] | (_, n) <- SW.strWorkerPrefs refs]
         , "requiredSkills" .= [object ["name" .= n] | (_, n) <- SW.strRequiredSkills refs]
         ]
+
+
+-- -----------------------------------------------------------------
+-- Problems
+-- -----------------------------------------------------------------
+
+-- | One problem, flattened for a client.
+--
+-- @kind@ is what picks the wording; @severityRank@ is what a cell aggregates on,
+-- higher being more severe. Both are sent because the ordering belongs on the
+-- server — a client that hardcoded it would be a second place to change when a
+-- fourth kind appears. They are derived from the same constructor, so they cannot
+-- disagree.
+--
+-- @worker@ and @station@ are nullable because not every problem has both:
+-- understaffing is a station-and-slot fact with no worker at all. This is the
+-- envelope the three projections in ADR 0004 filter on.
+newtype ProblemResp = ProblemResp Problem
+    deriving (Eq, Show)
+
+instance ToJSON ProblemResp where
+    toJSON (ProblemResp p) = object
+        ([ "kind"         .= problemKindName p
+         , "severityRank" .= fromEnum (problemSeverity p)
+         , "worker"       .= problemWorker p
+         , "station"      .= problemStation p
+         , "scope"        .= scopeJson (problemScope p)
+         , "earliestDay"  .= problemEarliestDay p
+         ] ++ problemDetail p)
+
+problemKindName :: Problem -> Text
+problemKindName (PViolation _)          = "violation"
+problemKindName (PUnderstaffed _ _ _ _) = "understaffed"
+
+-- | The kind-specific payload. A client switches on @kind@ to know which of
+-- these to read.
+problemDetail :: Problem -> [Pair]
+problemDetail (PViolation v) = ["violation" .= v]
+problemDetail (PUnderstaffed _ _ assigned required) =
+    [ "assigned" .= assigned
+    , "required" .= required
+    ]
+
+scopeJson :: ProblemScope -> Value
+scopeJson (ScopeSlot t) = object ["kind" .= ("slot" :: Text), "slot" .= t]
+scopeJson (ScopeDay d)  = object ["kind" .= ("day" :: Text), "day" .= d]
+
+-- | Parses back what 'ToJSON' writes, dispatching on @kind@. Exists so the
+-- integration suite can decode the endpoint through the servant client, and so
+-- the encoding is exercised as a round trip rather than only asserted on.
+instance FromJSON ProblemResp where
+    parseJSON = withObject "ProblemResp" $ \v -> do
+        kind <- v .: "kind" :: Parser Text
+        case kind of
+            "violation" -> ProblemResp . PViolation <$> v .: "violation"
+            "understaffed" -> do
+                st       <- v .: "station"
+                scope    <- v .: "scope"
+                slot     <- withObject "scope" (.: "slot") scope
+                assigned <- v .: "assigned"
+                required <- v .: "required"
+                pure (ProblemResp (PUnderstaffed st slot assigned required))
+            other -> fail ("unknown problem kind: " ++ T.unpack other)
+
+-- | One horizon the problem view can be scoped to.
+--
+-- @label@ is a date range rather than a word for the two pay periods, because
+-- 'Domain.PayPeriod.PayPeriodType' is configurable and "this week" would be a lie
+-- for a monthly-paid restaurant. Both dates are inclusive.
+newtype HorizonResp = HorizonResp Horizon
+    deriving (Eq, Show)
+
+instance ToJSON HorizonResp where
+    toJSON (HorizonResp h) = object
+        [ "key"   .= hKey h
+        , "label" .= hLabel h
+        , "from"  .= hFrom h
+        , "to"    .= hTo h
+        ]
+
+instance FromJSON HorizonResp where
+    parseJSON = withObject "HorizonResp" $ \v ->
+        fmap HorizonResp (Horizon <$> v .: "key" <*> v .: "label"
+                                  <*> v .: "from" <*> v .: "to")
 
 -- -----------------------------------------------------------------
 -- Helpers

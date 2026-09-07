@@ -11,6 +11,7 @@ headless Chromium in `web/e2e/`, run from `web/`:
 | `npm run e2e:drafts` | `/drafts` | **fresh** — asserts on draft #1 and the empty list |
 | `npm run e2e:draft-detail` | `/drafts/:id` | **demo-seeded**, and a fresh copy per run |
 | `npm run e2e:calendar` | `/calendar` | **demo-seeded** |
+| `npm run e2e:dashboard` | `/` (the problem view) | **demo-seeded**, fresh copy per run |
 
 The **CLI** is driven by `stack exec manars-cli -- --demo <script>`, which replays
 a file of commands non-interactively; that is the only way to exercise CLI
@@ -111,7 +112,15 @@ week, the resulting replaced-calendar warning, committing from the detail page a
 the confirmation handed to the list, and the terminal state for a draft id that does
 not exist. It mutates the database, so **re-run it against a fresh copy**.
 `e2e:calendar` walks four — the live month, a history snapshot, and both branches of
-the range guard.
+the range guard. `e2e:dashboard` walks seven — the three horizon segments and their
+marks, the hours grid, a marked cell and its detail pane, switching horizon, and the
+count coming down live over SSE once a draft is committed over the current period. It
+mutates the database too.
+
+**The demo fixture makes the problem view look alarming, and that is the fixture.**
+Its calendar is April 2026, which no horizon covers, so a demo-seeded database opens
+on roughly 630 understaffing problems per fortnight — every open station-slot, unstaffed.
+See `docs/STATUS.md` items 2a and 3 before concluding the page is broken.
 
 To drive a different page, copy the closest of the three — each header lists the
 prerequisites it does not manage.
@@ -160,7 +169,7 @@ stack test --pedantic manars-kitchen:test:manars-kitchen-integration-test
 ```
 
 As of 2026-09-07: 400 unit examples, 0 failures, 1 pending (a known optimizer
-divergence, `docs/STATUS.md` item 6); 271 integration examples, 0 failures. The
+divergence, `docs/STATUS.md` item 6); 279 integration examples, 0 failures. The
 only warnings in a clean build are three `ld: warning: -U option is redundant`
 lines from the macOS linker.
 

@@ -51,6 +51,7 @@ import qualified Service.Calendar as Cal
 import Servant.API (NoContent)
 import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
+import Service.Problems (Problem(..), Horizon(..))
 import Server.Auth (LoginReq(..), LoginResp(..), authHandler)
 import Server.EventStream (eventStreamApp)
 import Server.Execute (newExecuteEnv, ExecuteEnv(..))
@@ -190,6 +191,8 @@ _addHintC :: AddHintReq -> ClientM [Hint]
 _revertHintC :: HintSessionRef -> ClientM [Hint]
 _applyHintsC :: HintSessionRef -> ClientM NoContent
 _rebaseHintsC :: HintSessionRef -> ClientM RebaseResultResp
+getProblemsC :: Maybe Day -> Maybe Day -> ClientM [ProblemResp]
+getHorizonsC :: ClientM [HorizonResp]
 
 logoutC
     :<|> listStationsC
@@ -281,6 +284,8 @@ logoutC
     :<|> _revertHintC
     :<|> _applyHintsC
     :<|> _rebaseHintsC
+    :<|> getProblemsC
+    :<|> getHorizonsC
     = client api
 
 -- -----------------------------------------------------------------
@@ -630,6 +635,86 @@ spec = do
             case result of
                 Left err -> expectationFailure (show err)
                 Right params -> length params `shouldSatisfy` (> 0)
+
+    -- The problem view's one endpoint. Three client-side projections read this,
+    -- so it has to carry every kind at once. ADR 0004 and ADR 0006.
+    describe "GET /api/problems" $ do
+        it "requires both from and to" $ withTestApp $ \env -> do
+            result <- runClientM (getProblemsC Nothing Nothing) env
+            result `shouldFailWith` 400
+
+        it "rejects a backwards range" $ withTestApp $ \env -> do
+            (from, to) <- futureWeek
+            result <- runClientM (getProblemsC (Just to) (Just from)) env
+            result `shouldFailWith` 400
+
+        it "reports nothing on an empty database" $ withTestApp $ \env -> do
+            (from, to) <- futureWeek
+            Right problems <- runClientM (getProblemsC (Just from) (Just to)) env
+            problems `shouldBe` []
+
+        it "reports understaffing for a station nobody is on" $
+            withSeededApp $ \repo env -> do
+                _ <- SW.addStation repo "grill" 1 1
+                day <- fromToday 30
+                Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
+                let understaffed =
+                        [ (a, r) | ProblemResp (PUnderstaffed _ _ a r) <- problems ]
+                understaffed `shouldSatisfy` (not . null)
+                -- Nothing else in the range: no assignments means no violations.
+                length understaffed `shouldBe` length problems
+                all (== (0, 1)) understaffed `shouldBe` True
+
+        -- A station whose minimum is zero is not understaffed by having nobody on
+        -- it. It is simply not being staffed. CONTEXT.md, "Understaffing".
+        it "reports nothing for a station whose minimum is zero" $
+            withSeededApp $ \repo env -> do
+                _ <- SW.addStation repo "prep" 0 2
+                day <- fromToday 30
+                Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
+                problems `shouldBe` []
+
+        -- The calendar as ADR 0004's virtual default draft: a committed
+        -- assignment that stopped being valid, with no draft anywhere in sight.
+        it "reports a violation against the committed calendar" $
+            withSeededApp $ \repo env -> do
+                _ <- SW.addSkill repo "grill" ""
+                sid <- SW.addStation repo "grill" 1 1
+                SW.grantWorkerSkill repo (WorkerId 1) (SkillId 1)
+                SW.setStationRequiredSkills repo sid (Set.singleton (SkillId 1))
+                (from, to) <- futureWeek
+                Right resp <- runClientM (createDraftC (CreateDraftReq from to)) env
+                let did = dcrId resp
+                Right _ <- runClientM (generateDraftC did (GenerateDraftReq Nothing)) env
+                Right _ <- runClientM (commitDraftC did (CommitDraftReq "for problems")) env
+                -- Pull the skill out from under the committed assignments.
+                SW.revokeWorkerSkill repo (WorkerId 1) (SkillId 1)
+                Right problems <- runClientM (getProblemsC (Just from) (Just to)) env
+                let constraints =
+                        [ dvConstraint v | ProblemResp (PViolation v) <- problems ]
+                constraints `shouldSatisfy` (not . null)
+                all (== "skill qualification") constraints `shouldBe` True
+
+    describe "GET /api/horizons" $ do
+        it "returns today, the current period and the next" $
+            withTestApp $ \env -> do
+                Right hs <- runClientM getHorizonsC env
+                [hKey h | HorizonResp h <- hs]
+                    `shouldBe` ["today", "current-period", "next-period"]
+
+        it "scopes today to a single day, and the periods do not overlap" $
+            withTestApp $ \env -> do
+                Right hs <- runClientM getHorizonsC env
+                let ranges = [(hFrom h, hTo h) | HorizonResp h <- hs]
+                case ranges of
+                    [(t0, t1), (c0, c1), (n0, n1)] -> do
+                        t0 `shouldBe` t1
+                        -- Today falls inside the current period, which is what
+                        -- lets the client fetch one range and derive all three.
+                        (t0 >= c0 && t0 <= c1) `shouldBe` True
+                        n0 `shouldBe` addDays 1 c1
+                        (n1 > n0) `shouldBe` True
+                    _ -> expectationFailure "expected exactly three horizons"
 
     describe "Error responses" $ do
         it "GET /api/drafts/:id returns 404 for missing draft" $

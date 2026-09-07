@@ -13,6 +13,18 @@ import {
 } from "../api/drafts";
 import { useEntityEvents } from "../hooks/useSSE";
 import CommitDraftDialog from "./CommitDraftDialog";
+import { parseDay, formatDay } from "../lib/grid";
+
+/**
+ * The day after a given one, as YYYY-MM-DD. Used to name the first date that is
+ * not frozen, since the freeze line is the last frozen date.
+ */
+function nextDay(day: string): string {
+  const d = parseDay(day);
+  if (!d) return day;
+  d.setDate(d.getDate() + 1);
+  return formatDay(d);
+}
 
 /**
  * A draft plus the summary read from `/api/drafts/:id/assignments`.
@@ -288,12 +300,28 @@ export default function DraftsListPage() {
               before the freeze line ({frozenRefusal.freezeLine}).
             </p>
             <p>
-              There is no override here. Either pick a later range, or unfreeze the
-              dates from the CLI first:
+              The simplest fix is to start the range at{" "}
+              {nextDay(frozenRefusal.freezeLine)} or later.
+            </p>
+            {/* An unfreeze is per-CLI-session state held in memory, so unfreezing
+                in a terminal and then pressing Create here cannot work: the server
+                never sees it. Both commands have to run in the same CLI session.
+                Saying only "unfreeze from the CLI" sent people down exactly that
+                dead end. */}
+            <p>
+              To schedule the frozen dates anyway, run <strong>both</strong> of these
+              in one <code>manars-cli</code> session — unfreezing in a terminal and
+              then creating the draft here will be refused again, because the
+              unfreeze lives in that CLI session and never reaches the server:
             </p>
             <pre>
               calendar unfreeze {frozenRefusal.frozenFrom} {frozenRefusal.frozenTo}
+              {"\n"}draft create {createFrom} {createTo}
             </pre>
+            <p className="text-muted">
+              A single <code>draft create ... --force</code> in the CLI does the same
+              thing in one step.
+            </p>
             <div className="modal-actions">
               <button className="btn" onClick={() => setFrozenRefusal(null)}>
                 Close

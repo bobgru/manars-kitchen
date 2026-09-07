@@ -654,6 +654,96 @@ th.calendar-col-frozen {
   color: #f0c674;
 }
 
+/*
+ * Horizon control: three segments that both mark where problems are and select
+ * which range the grid shows. The selected one is marked with a leading "▸" and a
+ * brighter background, so selection does not rest on colour.
+ */
+.horizon-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.horizon-seg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 0.4rem 0.7rem;
+  color: #e8e8e8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.horizon-seg:hover {
+  background: #1d2b4d;
+}
+
+.horizon-seg-on {
+  background: #0f3460;
+  border-color: #5390d9;
+  font-weight: 700;
+}
+
+.horizon-label {
+  white-space: nowrap;
+}
+
+.horizon-count {
+  color: #aaa;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/*
+ * Problem cells. Each carries a glyph and a count in text, so the fill is a
+ * secondary cue only. Violation uses bright yellow on the blue-yellow axis, the
+ * same reasoning as .msg-warn; understaffing is distinguished by a lighter fill
+ * and a different glyph rather than by hue alone.
+ */
+.problem-cell {
+  min-width: 4.5rem;
+  height: 1.6rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.problem-cell-violation {
+  background: #3a2f0b;
+  color: #ffd75f;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.problem-cell-understaffed {
+  background: #123048;
+  color: #cfe8ff;
+  cursor: pointer;
+}
+
+.problem-cell-compromise {
+  background: #23293a;
+  color: #cfcfcf;
+  cursor: pointer;
+}
+
+/* Selection is an outline plus the caption in the details heading below. */
+.problem-cell-selected {
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
+}
+
+.problem-mark {
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
 .calendar-legend {
   display: flex;
   gap: 1rem;

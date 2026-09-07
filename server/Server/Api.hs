@@ -239,6 +239,18 @@ type RawAPI =
     :<|> "api" :> "hints" :> "rebase" :> ReqBody '[JSON] HintSessionRef
          :> Post '[JSON] RebaseResultResp
 
+    -- -----------------------------------------------------------------
+    -- Problems
+    -- -----------------------------------------------------------------
+    -- One endpoint, three client-side projections. `from` and `to` are required:
+    -- a problem set without a date range is meaningless, so there is no "all
+    -- problems" to fall back to. See ADR 0006.
+    :<|> "api" :> "problems" :> QueryParam "from" Day :> QueryParam "to" Day
+         :> Get '[JSON] [ProblemResp]
+    -- The ranges the horizon control offers, computed from the configured pay
+    -- period so no client duplicates that arithmetic.
+    :<|> "api" :> "horizons" :> Get '[JSON] [HorizonResp]
+
 -- | The old API type alias (for backward compat in type signatures)
 type API = RawAPI
 

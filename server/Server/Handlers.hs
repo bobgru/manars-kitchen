@@ -38,6 +38,7 @@ import qualified Service.Config as SCfg
 import qualified Service.Auth as SAuth
 import qualified Service.FreezeLine as SF
 import qualified Service.HintRebase as SHR
+import qualified Service.Problems as SP
 import qualified Export.JSON as Exp
 import Server.Api (RawAPI, FullAPI)
 import Server.Json
@@ -216,6 +217,9 @@ server execEnv cmdBus repo user =
     :<|> handleRevertHint repo user
     :<|> handleApplyHints repo user
     :<|> handleRebaseHints repo user
+    -- Problems
+    :<|> handleGetProblems repo
+    :<|> handleGetHorizons repo
 
 -- | Protected server: REST + RPC, both receiving User from AuthProtect.
 protectedServer :: ExecuteEnv -> Repository -> User -> Server (RawAPI :<|> RpcAPI)
@@ -389,6 +393,34 @@ handleGetCalendar repo mFrom mTo =
     case (mFrom, mTo) of
         (Just from, Just to) -> liftIO $ SC.loadCalendarSlice repo from to
         _ -> throwApiError (BadRequest "Both 'from' and 'to' query params are required")
+
+-- -----------------------------------------------------------------
+-- Problems
+-- -----------------------------------------------------------------
+
+-- | Every problem in a date range of the committed calendar.
+--
+-- Not admin-gated, matching the calendar read beside it: this reports on what is
+-- already scheduled and adds no information a worker cannot get from
+-- @GET \/api\/calendar@.
+--
+-- Both query params are required rather than defaulted. A problem set is always
+-- scoped to a range — see ADR 0004 — and a default would invent a scope the caller
+-- did not choose.
+handleGetProblems :: Repository -> Maybe Day -> Maybe Day -> Handler [ProblemResp]
+handleGetProblems repo mFrom mTo =
+    case (mFrom, mTo) of
+        (Just from, Just to)
+            | from > to -> throwApiError
+                (BadRequest "'from' must not be after 'to'")
+            | otherwise -> liftIO $
+                map ProblemResp <$> SP.computeProblems repo (from, to)
+        _ -> throwApiError (BadRequest "Both 'from' and 'to' query params are required")
+
+-- | The three ranges the horizon control offers: today, the current pay period,
+-- and the next.
+handleGetHorizons :: Repository -> Handler [HorizonResp]
+handleGetHorizons repo = liftIO $ map HorizonResp <$> SP.horizons repo
 
 handleListCalendarHistory :: Repository -> Handler [CalendarCommit]
 handleListCalendarHistory repo = liftIO $ SC.listCalendarHistory repo

@@ -4,9 +4,10 @@
 validator no longer disagree about which assignments are legal. The `/drafts/:id` detail
 page shipped, and with it the `ScheduleGrid` and `CommitDraftDialog` extractions, so the
 old item 1 is gone from this file entirely. Item 1 is now the three pieces deliberately
-left out of the detail page. **Item 2, the problem view, is under way: piece 1 of 5 is
-done** — the validation core is generalised and the context assembly extracted. Piece 2 is
-`GET /api/problems` and `GET /api/horizons` over violations and understaffing.
+left out of the detail page. **Item 2, the problem view, is under way: pieces 1, 2 and 3 of
+5 are done** — `/` is the problem view, served by `GET /api/problems` and
+`GET /api/horizons` over a generalised validation core. Piece 4 is the worker and station
+views plus the `Station` zone label; piece 5 is Compromise.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -103,6 +104,23 @@ to the active workers via `activeWorkerIds`. Two consequences to keep in mind:
   `frozenTo`, and `draft create ... --force` in `--remote` mode is refused —
   `cli/CLI/RpcClient.hs` still discards the flag, deliberately. Unfreeze remains
   local-CLI-only; `POST /api/calendar/unfreeze` is still a no-op stub.
+- **Unfreezing in a CLI and then creating the draft in the browser cannot work**, and
+  the UI used to tell people to do exactly that. An unfreeze is
+  `asUnfreezes :: IORef (Set (Day, Day))` in one CLI process (`src/CLI/App.hs:89`);
+  it is never persisted and never sent anywhere, and `handleCreateDraft` always
+  passes `SD.defaultCreateDraftOpts` — no force, no unfreezes
+  (`server/Server/Handlers.hs:267`). So the two commands have to run in the **same**
+  interactive CLI session, or `draft create ... --force` in one step. Reported by the
+  user on 2026-09-07 after following the frozen-dates modal's own advice; the modal
+  now names both commands and says why a terminal-then-browser sequence is refused.
+  **Two things here are still wrong and unfixed.** `POST /api/calendar/unfreeze`
+  returns **204** while doing nothing, so an API caller is told it worked — a stub
+  that fails loudly would be honest, and this one lies. And the freeze line is
+  recomputed from the clock on every call rather than being state anyone can inspect
+  or change over the wire, so there is no design in which the browser could unfreeze
+  without inventing one. Deciding whether unfreeze should be persisted server-side
+  state, or stay a CLI-session concept the web UI simply cannot reach, is a real
+  question and is not settled anywhere.
 - **An absent `workerIds` is not an empty one.** `Nothing` means the active workers,
   `Just []` means schedule nobody, and both are honoured. Container-mode
   `draft generate` used to send `[]` and so silently scheduled nobody; fixed at the
@@ -140,7 +158,7 @@ the named-schedule removal, and the whole drafts surface. All of this was green,
 - `stack clean && stack build --pedantic` — clean. The detail page itself changed no
   `.hs` file and was verified warm on that basis; the hour-rule fix on 2026-09-07 did, and
   took the full clean gate.
-- 271 integration + 400 unit examples, 0 failures, 1 pending (the weekend divergence in
+- 279 integration + 400 unit examples, 0 failures, 1 pending (the weekend divergence in
   item 6), run sequentially — never two `stack test` invocations at once, see item 5.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
@@ -222,6 +240,17 @@ Five pieces, in this order. Each is independently shippable.
    **Not as mechanical as it looked.** See the period-bounds paragraph near the top of this
    file: the extraction exposed the validator measuring hour limits over the draft's own
    date range instead of the pay period, with calendar hours empty.
+2. ~~**Violations and understaffing over the calendar**, plus `GET /api/problems` and
+   `GET /api/horizons`.~~ — shipped 2026-09-07 as `Service.Problems`. `Problem` is a
+   two-constructor sum (`PViolation` wrapping the existing `DraftViolation`,
+   `PUnderstaffed`); `PCompromise` arrives with piece 5. The JSON carries both `kind`, for
+   wording, and `severityRank`, for cell aggregation, so no client owns the ordering.
+   Understaffing skips zero-minimum stations and station-slots outside a station's hours.
+   Eight `ApiSpec` examples cover it, including a violation against the committed calendar
+   with no draft anywhere — the virtual default draft working as ADR 0004 describes.
+
+   **Original wording follows.**
+
 2. **Violations and understaffing over the calendar**, plus `GET /api/problems?from=&to=`
    and `GET /api/horizons`. Still no UI — fully testable in `ApiSpec`, and where the
    understaffing edge cases live: a station whose `stationMinStaff` is zero is *not*
@@ -229,6 +258,24 @@ Five pieces, in this order. Each is independently shippable.
    at all. Expected pairs come from `Domain.Calendar.generateDateRangeSlots` crossed with
    the stations, minus `Domain.Skill.stationClosedSlots`. If this grows, split it into
    violations then understaffing rather than letting it get bigger.
+3. ~~**The hours view at `/`, plus the horizon control.**~~ — shipped 2026-09-07.
+   `DashboardPage.tsx` is the problem view now; the ten-line placeholder is gone.
+   `web/src/api/problems.ts` holds the fetchers, one fetch covers the union of all three
+   horizons, and switching horizon is a date filter rather than a request. Cells carry a
+   glyph and a count, never colour alone; the selected cell gets an outline plus a caption
+   in the detail heading. `npm run e2e:dashboard` drives it.
+
+   Two things worth knowing. Every topic that can change the answer is subscribed —
+   `calendar`, `draft`, `absence`, `worker`, `station`, `skill` — because an approved
+   absence or a revoked skill invalidates assignments without touching the calendar, which
+   is the case ADR 0004 is built around. And **ADR 0004's "earliest affected date" per
+   cell is redundant under the agreed axes**: with days as the shared column, a cell's
+   earliest date is always its column header. It is shown on the *horizon segments*
+   instead, where "must I act today" is a real question — each segment reads
+   "125 problems, from 2026-09-07" or "clear".
+
+   **Original wording follows.**
+
 3. **The hours view at `/`, plus the horizon control.** One visualization end to end,
    replacing the ten-line `DashboardPage`. Days across the top, hours down the side. The
    first piece anyone can look at.
@@ -264,6 +311,34 @@ scheduler *should* honour it is a real open question, and a bigger one than it l
 `Domain.Shift` and `groupSlotsByShift` exist, so the data and the grouping are there and
 only the scoring is missing.
 
+### 2a. Does understaffing presuppose an attempt to staff? — open, found 2026-09-07
+
+**Decide this before piece 4.** Piece 3 made it visible: point the problem view at a pay
+period nobody has scheduled yet and it reports **630 understaffing problems per
+fortnight** — every open station-slot, because every open station-slot is empty. On the
+demo fixture, whose calendar is April 2026, that is the entire opening screen. Technically
+correct, and useless: the admin's situation is "I have not built this period yet", not
+"630 things are wrong".
+
+`CONTEXT.md` already draws the neighbouring line — a station whose minimum is zero is not
+understaffed by having nobody, it is simply not being staffed. The question is whether the
+same reasoning extends from a *station* to a *range*: is a day with no assignments at all
+understaffed, or unscheduled?
+
+Three options, none implemented:
+
+- **Leave it.** 630 is honest, and the horizon marks still tell you which period to look
+  at. Cheapest, and the counts stay comparable across periods.
+- **Report "not scheduled" as its own state** for a day with zero assignments, once per
+  day rather than once per station-slot. Needs a third `Problem` constructor and a cell
+  state, and it is a genuinely different fact from understaffing.
+- **Only report understaffing where the day has at least one assignment**, on the grounds
+  that understaffing presupposes an attempt. Smallest change; loses the ability to say
+  "nothing is scheduled" at all, which may be the more useful message.
+
+Whichever way, it changes `Service.Problems` and so belongs before the worker and station
+views project the same set twice more.
+
 ### 3. The demo is not representative of a working restaurant
 
 `make fast-demo` reports **199 assignments, 159 unfilled**. A real restaurant is mostly
@@ -272,6 +347,20 @@ show and makes it impossible to tell a real regression from the fixture. Either 
 fixture so it fills, or — better — split it into a few named scenarios (fully staffed;
 one worker calls in sick; a station reopens understaffed) so each surface can be
 exercised against the state it is meant to display.
+
+**The fixture's hour caps contradict its pay period.** Found 2026-09-07 by pointing
+`GET /api/problems` at the demo database: the committed calendar reports **39 violations**
+over Apr 6–12, 38 of them `period hours`. That is not a bug in the endpoint — it is
+`config set-pay-period biweekly 2026-04-06` (line 238) sitting next to
+`worker set-hours <name> 40` (lines 147–158). `set-hours` is a cap **per pay period**, so
+with a fortnightly period those lines mean 20 hours a week, while the fixture plainly
+intends 40. Worker 2 has 38 hours in Apr 6–12 plus 4 in Apr 13–19 against a 40-hour
+fortnight, and every hour past the fortieth is reported. Either double the caps to 80 or
+set the pay period to `weekly`.
+
+Worth fixing before piece 3 of item 2: the dashboard's first visualization will open on
+this fixture and announce 39 violations that are an artefact of it. Note also that this is
+the problem view doing its job — a contradiction nothing else surfaced.
 
 Note if you edit `demo/restaurant-setup.txt`: **every draft id in it is positional**, so
 inserting or removing a `draft create` shifts the rest.
@@ -370,6 +459,20 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   reading `demo/restaurant-setup.txt` is what actually populates sample data. A
   web-terminal-friendly version would run the script server-side, or offer a
   "populate with sample data" command.
+- **Export is lossy, silently, and `minStaff` comes back as 1.** `demo-export.json`
+  carries only `skills`, `stations`, `workers`, `skillImplications` and
+  `absenceTypes`. `ExportStation` has no `minStaff` or `maxStaff` field at all, and
+  `importStation` reconstructs every station with `repoCreateStation repo nm 1 1`
+  (`src/Export/JSON.hs:266`), so a station whose minimum was 0 or 3 comes back as 1.
+  Nothing warns. Also absent: **calendar assignments**, drafts, pins, shifts,
+  scheduler config and the pay-period config. So an export is reference data, not a
+  database snapshot, and it is the wrong fixture for anything that reads the
+  calendar — a problem view built on it would report understaffing on every open
+  station-slot (because every minimum became 1) and no violations at all (because
+  there are no assignments). Found 2026-09-07 when a reimported export showed no
+  problems. Decide whether export is *meant* to be a full snapshot before adding
+  fields: if it is, the gap is a bug; if it is reference data by design, it should
+  say so and `--demo` should stay the only way to get a populated calendar.
 - **Import does not refresh the GUI.** `Handlers.hs` publishes `import data`,
   which classifies as entityType `import-export`; no web component subscribes to
   it. See `notes.txt` for the original observation.
@@ -645,6 +748,31 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 
 ## Open questions
 
-None blocking. The named-schedules-vs-drafts question that used to sit here was settled
-on 2026-08-23 in favour of drafts — see ADR 0001. The one deliberately deferred question
-is the draft workflow above, which is now unblocked rather than deferred.
+Two are open as of 2026-09-07, and both want a decision rather than more code. The
+named-schedules-vs-drafts question that used to sit here was settled on 2026-08-23 in
+favour of drafts — see ADR 0001. The draft workflow above is unblocked rather than
+deferred.
+
+**1. Does understaffing presuppose an attempt to staff?** Written up as item 2a, and it
+blocks piece 4 of item 2 — the worker and station views project the same problem set twice
+more, so the answer should land before they do. Short version: a pay period nobody has
+scheduled reports one understaffing problem per open station-slot, about 630 a fortnight,
+which is true and useless.
+
+**2. Should unfreeze be server-side state, or stay a CLI-session concept the web UI cannot
+reach?** Today it is the latter by accident rather than by decision. An unfreeze is an
+`IORef` in one CLI process; `POST /api/calendar/unfreeze` returns 204 and does nothing;
+and the freeze line is recomputed from the clock per call rather than being state anyone
+can inspect. The mechanics are in the freeze-line bullets under "Where things stand".
+
+Three shapes this could take, none chosen. **Persist unfreezes** in a table, so any client
+can grant and see them, and `POST /api/calendar/unfreeze` becomes real — the most useful
+and the most work, and it needs a rule for when they expire beyond today's
+auto-refreeze-on-commit. **Make the stub fail loudly**, a 501 or a 403 naming the CLI, so
+at least nothing is told it worked; cheap, honest, and leaves the web UI unable to
+schedule frozen dates forever. **Leave it and document it**, which is the current state
+now that the modal explains itself.
+
+Worth deciding rather than drifting, because the freeze line is the one rule that protects
+the past, and "the admin can only edit history from a terminal" is a defensible policy but
+not one anybody actually chose.

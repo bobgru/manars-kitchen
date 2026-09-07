@@ -47,6 +47,7 @@ library
                      , Service.Context
                      , Service.Draft
                      , Service.DraftValidation
+                     , Service.Problems
                      , Service.FreezeLine
                      , Service.PubSub
                      , Service.HintRebase
