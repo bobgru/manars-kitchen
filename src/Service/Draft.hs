@@ -40,8 +40,8 @@ import Domain.Shift (defaultShifts)
 import Domain.Skill (stationClosedSlots)
 import Domain.Pin (expandPins)
 import Domain.Calendar (generateDateRangeSlots, defaultHours)
-import Domain.PayPeriod (defaultPayPeriodConfig, payPeriodBounds)
 import Repo.Types (Repository(..), DraftInfo(..))
+import Service.Context (loadValidationContext)
 import qualified Service.Calendar as Cal
 import qualified Service.FreezeLine as Freeze
 
@@ -197,30 +197,16 @@ generateDraft repo draftId mWorkers progressBus = do
             workers <- maybe (activeWorkerIds repo) return mWorkers
             seed <- repoLoadDraftAssignments repo draftId
             let slots = generateDateRangeSlots defaultHours dateFrom dateTo Set.empty
-            skillCtx   <- repoLoadSkillCtx repo
-            workerCtx  <- repoLoadWorkerCtx repo
-            absenceCtx <- repoLoadAbsenceCtx repo
-            cfg        <- repoLoadSchedulerConfig repo
-            shifts     <- repoLoadShifts repo
-            -- Load pay period config to determine period bounds
-            mPpc <- repoLoadPayPeriodConfig repo
-            let ppc = maybe defaultPayPeriodConfig id mPpc
-                periodBounds = payPeriodBounds ppc dateFrom
-            -- Pre-compute calendar hours for the period
-            calHrs <- computeCalendarHours repo workerCtx (fst periodBounds) (snd periodBounds)
-            let closed = stationClosedSlots skillCtx slots
-                ctx = SchedulerContext
-                    { schSkillCtx    = skillCtx
-                    , schWorkerCtx   = workerCtx
-                    , schAbsenceCtx  = absenceCtx
-                    , schSlots       = slots
+            -- The shared loader decides the pay-period bounds and the calendar
+            -- hours; this caller supplies only what is genuinely its own. Note
+            -- `schPrevWeekendWorkers` stays empty here: generation does not apply
+            -- the alternating-weekends rule, though validation does. That
+            -- asymmetry is deliberate for now and recorded in docs/STATUS.md.
+            base <- loadValidationContext repo (dateFrom, dateTo) Set.empty
+            let ctx = base
+                    { schSlots       = slots
                     , schWorkers     = workers
-                    , schClosedSlots = closed
-                    , schShifts      = shifts
-                    , schPrevWeekendWorkers = Set.empty
-                    , schConfig      = cfg
-                    , schPeriodBounds = periodBounds
-                    , schCalendarHours = calHrs
+                    , schClosedSlots = stationClosedSlots (schSkillCtx base) slots
                     }
             result <- optimizeSchedule ctx seed progressBus
             repoSaveDraftAssignments repo draftId (srSchedule result)

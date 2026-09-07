@@ -114,9 +114,13 @@ overtime", which is a different and much weaker claim.
 
 **Compromise**:
 The kind of **Problem** where an assignment is legal but ignores a stated
-preference — a worker's station or shift preference, their wish for variety,
-their hour headroom, or **Authorised overtime**. Nothing is broken; someone did not
-get what they wanted.
+preference — a worker's station preference, their wish for variety, their hour
+headroom, or **Authorised overtime**. Nothing is broken; someone did not get what
+they wanted.
+_Avoid_: listing a worker's **shift preference** among these. The scheduler never
+reads `wcShiftPrefs` — it is stored, set, displayed and exported, and no scheduling
+code consults it — so an unhonoured shift preference is a missing feature rather
+than a compromise anyone made. See ADR 0006.
 _Avoid_: calling this a soft violation. Nothing is violated, so the word invites
 the reader to treat it as a **Violation**.
 

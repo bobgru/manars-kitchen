@@ -3,8 +3,10 @@
 **Last updated:** 2026-09-07 · the drafts surface is complete and the scheduler and draft
 validator no longer disagree about which assignments are legal. The `/drafts/:id` detail
 page shipped, and with it the `ScheduleGrid` and `CommitDraftDialog` extractions, so the
-old item 1 is gone from this file entirely. **Item 2, the problem view, is the next real
-body of work**; item 1 is now the three pieces deliberately left out of the detail page.
+old item 1 is gone from this file entirely. Item 1 is now the three pieces deliberately
+left out of the detail page. **Item 2, the problem view, is under way: piece 1 of 5 is
+done** — the validation core is generalised and the context assembly extracted. Piece 2 is
+`GET /api/problems` and `GET /api/horizons` over violations and understaffing.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -42,6 +44,18 @@ was a violation. Both now use the permissive envelope. `tryAssignOvertimeHours`,
 only tests use, became a wrapper over the predicate rather than a fourth copy.
 `canAssignSlot`'s behaviour is unchanged — that rewrite is provably equivalent, case
 by case.
+
+**Hour limits are measured over the pay period, and one loader now decides that for
+everyone.** `Service.Context.loadValidationContext`, added 2026-09-07 with item 2 piece 1.
+`Service.Draft` and `Service.DraftValidation` each assembled their own `SchedulerContext`,
+and the validator's was wrong in two fields: `schPeriodBounds` was the *draft's own date
+range* where `generateDraft` uses `payPeriodBounds ppc`, and `schCalendarHours` was
+`Map.empty` where `generateDraft` computes it. So the validator measured the per-period
+limit over the wrong window — too permissive when the pay period is longer than the draft,
+too strict when shorter — and ignored hours already committed to the calendar. That is the
+same family as the `exceedsPermittedHours` bug above, found the same way: by making two
+copies into one. The two contexts do legitimately differ in `schSlots`, `schClosedSlots`
+and `schPrevWeekendWorkers`, so the loader takes those rather than pretending otherwise.
 
 **The grid is shared, and it owns its own limits.** `web/src/components/ScheduleGrid.tsx`
 renders a schedule as hours × days for both `/calendar` and `/drafts/:id`; its pure parts
@@ -126,7 +140,7 @@ the named-schedule removal, and the whole drafts surface. All of this was green,
 - `stack clean && stack build --pedantic` — clean. The detail page itself changed no
   `.hs` file and was verified warm on that basis; the hour-rule fix on 2026-09-07 did, and
   took the full clean gate.
-- 271 integration + 397 unit examples, 0 failures, 1 pending (the weekend divergence in
+- 271 integration + 400 unit examples, 0 failures, 1 pending (the weekend divergence in
   item 6), run sequentially — never two `stack test` invocations at once, see item 5.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
@@ -180,50 +194,75 @@ three is in **ADR 0005**.
   shows.
 
 
-### 2. The problem view — designed 2026-08-30, not started
+### 2. The problem view — designed 2026-08-30, grilled 2026-09-07, in progress
 
 The `/` dashboard becomes a visualization of **problems** across workers, stations and
-slots. The full design and the rejected alternatives are in **ADR 0004**; the vocabulary
-is in `CONTEXT.md` under "Problems". Read both before starting — the shape is not
-obvious from the code, and three of the pieces do not exist yet.
+slots. **ADR 0004** is the design and the rejected alternatives; **ADR 0006** is what
+grilling it settled — the API shape, the `Problem` type, severity order, and which
+compromises are derivable. The vocabulary is in `CONTEXT.md` under "Problems". Read all
+three before starting; the shape is not obvious from the code.
 
-What this needs, roughly in dependency order:
+Five pieces, in this order. Each is independently shippable.
 
-1. **Generalise the validation core.** `Service.DraftValidation.validateDraft` is private
-   and takes a `DraftInfo`; it needs to take a `Schedule` plus a `(Day, Day)` range so
-   the calendar slice can be fed through it. This is the "virtual default draft" — there
-   is deliberately no default draft *row*, see the ADR. Today's step 3 split already
-   isolated the body, so this is close to mechanical.
-2. **Compromise has no implementation at all.** The soft score lives only inside the
-   optimizer's hill climbing (`Domain.Scheduler.scoreSlotWorker`, seven components, some
-   of them penalties) and reaches no client. Deriving per-assignment compromises from the
-   penalty components is new work, and each one owes the detail pane a sentence — "Ana
-   got the same station three days running", not "score 0.31".
-3. **A nullable zone label on `Station`**, for grouping the station view. Not
-   coordinates; the floor plan is deferred in the ADR.
-4. **An auto-approve flag on `AbsenceType`**, same shape as the existing `atYearlyLimit`,
-   so a sick call submitted from a mobile client takes effect immediately instead of
-   waiting for approval. **This lets a worker grant themselves an absence**, because
-   `handleRequestAbsence` is `requireSelfOrAdmin` — intended for sick leave, but it is an
-   authorization change, so do not slip it in silently.
-5. **The three visualizations plus the horizon control.** Projections of one problem set;
-   cells aggregate to most-severe plus earliest affected date.
+1. ~~**Generalise the validation core, and extract the context assembly.**~~ — shipped
+   2026-09-07 as `Service.Context.loadValidationContext` plus
+   `Service.DraftValidation.validateSchedule :: Repository -> (Day, Day) -> Schedule -> IO
+   [DraftViolation]`. `validateDraft` is now four lines over it, and `generateDraft` takes
+   its context from the same loader. Original wording follows, since the caveats still
+   apply.
 
-Two things to carry forward. The horizon is a **required input**, not a filter applied
-afterwards — a problem set without a date range is meaningless. And the reason this is
-not built on persisted violations is the sick-call case: an approved absence invalidates
+   **Generalise the validation core, and extract the context assembly.**
+   `Service.DraftValidation.validateDraft` is private and takes a `DraftInfo`; it needs to
+   take a `Schedule` plus a `(Day, Day)` range so the calendar slice can be fed through it.
+   That is the "virtual default draft" — there is deliberately no default draft *row*, see
+   ADR 0004. The 2026-08-30 split already isolated the body. The same commit extracts the
+   `SchedulerContext` assembly, which `Service.Draft` and `Service.DraftValidation` each
+   build separately and `Service.Problems` would build a third time. No UI, no endpoint.
+
+   **Not as mechanical as it looked.** See the period-bounds paragraph near the top of this
+   file: the extraction exposed the validator measuring hour limits over the draft's own
+   date range instead of the pay period, with calendar hours empty.
+2. **Violations and understaffing over the calendar**, plus `GET /api/problems?from=&to=`
+   and `GET /api/horizons`. Still no UI — fully testable in `ApiSpec`, and where the
+   understaffing edge cases live: a station whose `stationMinStaff` is zero is *not*
+   understaffed by having nobody, and closed station-slots are not expected to be staffed
+   at all. Expected pairs come from `Domain.Calendar.generateDateRangeSlots` crossed with
+   the stations, minus `Domain.Skill.stationClosedSlots`. If this grows, split it into
+   violations then understaffing rather than letting it get bigger.
+3. **The hours view at `/`, plus the horizon control.** One visualization end to end,
+   replacing the ten-line `DashboardPage`. Days across the top, hours down the side. The
+   first piece anyone can look at.
+4. **The worker and station views.** Same day columns, rows of workers and of
+   stations-grouped-by-zone, so one date lines up vertically across all three panels. This
+   is where the nullable **zone label on `Station`** lands, with its CLI verb and REST
+   route. Not coordinates; the floor plan is deferred in ADR 0004.
+5. **Compromise** — the three kinds from ADR 0006, added to the existing endpoint and
+   picked up by views that already work. Last because it is the most judgement-heavy part
+   and everything above is useful without it.
+
+Three things to carry forward. The horizon is a **required input**, not a filter applied
+afterwards — a problem set without a date range is meaningless. The reason this is not
+built on persisted violations is the sick-call case: an approved absence invalidates
 calendar assignments *without changing the calendar*, so anything recomputed on write
-misses it. That is the same blind spot as the staleness gate inside
-`pruneDraftViolations`, which only fires on a calendar commit.
+misses it — the same blind spot as the staleness gate inside `pruneDraftViolations`, which
+only fires on a calendar commit. And the problem set is about the **calendar**, not about
+drafts; `computeProblems` never reads the `drafts` table.
 
-One thing to pick up, added 2026-09-07: **authorised overtime is a Compromise, and it
-currently surfaces nowhere.** Since `exceedsPermittedHours` makes an opted-in worker's
-overtime legal, a draft that works `admin` well past their zero-hour cap now looks
-identical to one that does not. That is right — it is not a **Violation** — but ADR 0004
-already lists hour headroom among Compromise's sources, so the Compromise work in step 2
-above should pick it up. It is the cheapest compromise to derive of the set: the
-predicate that decides it is already written, and the sentence it owes the detail pane
-is "worked 9 hours past their limit, which they opted into".
+**Split out, deliberately: an auto-approve flag on `AbsenceType`**, same shape as the
+existing `atYearlyLimit`, so a sick call from a mobile client takes effect immediately
+instead of waiting for approval. It is in ADR 0004 but not in the five pieces above,
+because **it lets a worker grant themselves an absence** — `handleRequestAbsence` is
+`requireSelfOrAdmin` — and that is an authorization change with its own grill owed, not a
+line inside a dashboard feature. The problem view reads absences either way.
+
+**The scheduler never reads `wcShiftPrefs`.** Found 2026-09-07 while working out which
+compromises are derivable. It is stored, set, displayed and exported, and no scheduling
+code consults it — `scoreSlotWorker` does not mention it. So a shift preference currently
+has no effect on scheduling at all, which is why shift preference is not among the
+compromises and why `CONTEXT.md`'s Compromise entry had to be corrected. Whether the
+scheduler *should* honour it is a real open question, and a bigger one than it looks:
+`Domain.Shift` and `groupSlotsByShift` exist, so the data and the grouping are there and
+only the scoring is missing.
 
 ### 3. The demo is not representative of a working restaurant
 
@@ -344,6 +383,19 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   8080, Vite on 5173, which drivers want a fresh database and which want a
   demo-seeded one, and the Playwright and zsh traps that cost time here. Verified
   on macOS only; the browser driver has never been run in the Linux container.
+- **`generateDraft` does not apply the alternating-weekends rule, but validation
+  does.** `Service.Draft.generateDraft` passes `schPrevWeekendWorkers = Set.empty`,
+  so `blockedByAlternateWeekend` never fires during generation, while
+  `validateSchedule` computes the set from a seven-day calendar look-back and
+  reports "alternating weekends" violations from it —
+  `test/DraftValidationSpec.hs` has a test that it does. So generating a draft for
+  the week after a committed week can produce assignments the validator then
+  rejects. **Fourth instance of the family** in ADR 0005 and ADR 0006, and the only
+  one deliberately left in place on 2026-09-07: unlike the period-bounds and
+  overtime-model fixes, closing this one *restricts* what the scheduler may do, so
+  it changes schedules rather than only changing which of them are called legal.
+  `Service.Context.loadValidationContext` takes the set as an argument precisely so
+  this stays an explicit choice at each call site. Found 2026-09-07.
 - **`dailyOk` in `canAssignSlot` ignores the overtime model.** Fixed next to it on
   2026-09-07, but not fixed *by* it. When overtime is allowed, the daily ceiling is
   `wouldExceedDailyTotal` (16h) for **everyone** — an `OTManualOnly` worker gets a

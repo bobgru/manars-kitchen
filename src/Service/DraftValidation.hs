@@ -11,11 +11,12 @@ module Service.DraftValidation
     , calendarReplacedUnder
     , computeDraftViolations
     , pruneDraftViolations
+      -- * The generalised core
+    , validateSchedule
     ) where
 
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Time (DayOfWeek(..), addDays, dayOfWeek)
+import Data.Time (Day, DayOfWeek(..), addDays, dayOfWeek)
 
 import Domain.Types
     ( WorkerId
@@ -23,6 +24,7 @@ import Domain.Types
     )
 import Domain.Schedule (bySlot)
 import Domain.Scheduler (SchedulerContext(..), blockedByAlternateWeekend)
+import Service.Context (loadValidationContext)
 import Domain.Skill (qualified)
 import Domain.Worker
     ( violatesRestPeriod, needsBreak
@@ -183,52 +185,42 @@ pruneDraftViolations repo draftId = do
                     repoUpdateDraftValidatedAt repo draftId
                     return violations
 
--- | The shared body of 'computeDraftViolations' and 'pruneDraftViolations':
--- validate every assignment the draft holds against a calendar look-back
--- window. Returns the draft's assignments alongside the violations so a caller
--- that prunes does not load them a second time.
+-- | Which assignments in a schedule violate a hard constraint, judged against
+-- the committed calendar around the range they occupy?
+--
+-- This is the generalised validation core. It takes a 'Schedule' and a range
+-- rather than a draft, so the calendar can be fed through it as ADR 0004's
+-- \"virtual default draft\" — there is deliberately no default draft /row/.
+--
+-- The look-back is the seven days of calendar before the range. It supplies the
+-- previous-weekend workers the alternating-weekends rule needs, and it joins the
+-- schedule under judgement so that rest-period and consecutive-hour rules can see
+-- across the boundary. Note what it does /not/ do: it never looks at the calendar
+-- /inside/ the range, which is the asymmetry 'calendarReplacedUnder' exists to
+-- work around.
+validateSchedule :: Repository -> (Day, Day) -> Schedule -> IO [DraftViolation]
+validateSchedule repo (from, to) sched = do
+    let assignments = Set.toList (unSchedule sched)
+    if null assignments
+        then return []
+        else do
+            lookBackSched <- Cal.loadCalendarSlice repo
+                                 (addDays (-7) from) (addDays (-1) from)
+            ctx <- loadValidationContext repo (from, to)
+                       (buildLookBackContext lookBackSched)
+            let combined = Schedule (Set.union (unSchedule lookBackSched)
+                                               (unSchedule sched))
+            return
+                [ v
+                | a <- assignments
+                , Just v <- [validateAssignment ctx a combined]
+                ]
+
+-- | The shared body of 'computeDraftViolations' and 'pruneDraftViolations'.
+-- Returns the draft's assignments alongside the violations so a caller that
+-- prunes does not load them a second time.
 validateDraft :: Repository -> DraftInfo -> IO (Schedule, [DraftViolation])
 validateDraft repo draft = do
     draftSched <- repoLoadDraftAssignments repo (diId draft)
-    let draftAssignments = Set.toList (unSchedule draftSched)
-    if null draftAssignments
-        then return (draftSched, [])
-        else do
-            -- Load look-back context (7 days before draft start)
-            let lookBackStart = addDays (-7) (diDateFrom draft)
-                lookBackEnd   = addDays (-1) (diDateFrom draft)
-            lookBackSched <- Cal.loadCalendarSlice repo lookBackStart lookBackEnd
-
-            -- Build the SchedulerContext for validation
-            let prevWeekendWorkers = buildLookBackContext lookBackSched
-            skillCtx   <- repoLoadSkillCtx repo
-            workerCtx  <- repoLoadWorkerCtx repo
-            absenceCtx <- repoLoadAbsenceCtx repo
-            cfg        <- repoLoadSchedulerConfig repo
-
-            let ctx = SchedulerContext
-                    { schSkillCtx    = skillCtx
-                    , schWorkerCtx   = workerCtx
-                    , schAbsenceCtx  = absenceCtx
-                    , schSlots       = []
-                    , schWorkers     = Set.empty
-                    , schClosedSlots = Set.empty
-                    , schShifts      = []
-                    , schPrevWeekendWorkers = prevWeekendWorkers
-                    , schConfig      = cfg
-                    , schPeriodBounds = (diDateFrom draft, diDateTo draft)
-                    , schCalendarHours = Map.empty
-                    }
-
-            -- Build combined schedule: look-back + draft assignments
-            let combinedSched = Schedule (Set.union (unSchedule lookBackSched)
-                                                    (unSchedule draftSched))
-
-            -- Validate each draft assignment
-            let violations = concatMap (\a ->
-                    case validateAssignment ctx a combinedSched of
-                        Just v  -> [v]
-                        Nothing -> []
-                    ) draftAssignments
-
-            return (draftSched, violations)
+    violations <- validateSchedule repo (diDateFrom draft, diDateTo draft) draftSched
+    return (draftSched, violations)

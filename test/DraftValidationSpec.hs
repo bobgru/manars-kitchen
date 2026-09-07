@@ -23,7 +23,7 @@ import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo, CalendarCommit(..))
 import Service.DraftValidation
     ( DraftViolation(..)
-    , validateAssignment, buildLookBackContext
+    , validateAssignment, buildLookBackContext, validateSchedule
     , computeDraftViolations, pruneDraftViolations, isDraftStale
     , calendarReplacedUnder
     )
@@ -268,6 +268,34 @@ spec = do
     -- ---------------------------------------------------------------
     -- Unit tests for buildLookBackContext
     -- ---------------------------------------------------------------
+    -- ---------------------------------------------------------------
+    -- The generalised core: a Schedule plus a range, no draft involved.
+    -- This is what lets the calendar be validated as ADR 0004's virtual
+    -- default draft.
+    -- ---------------------------------------------------------------
+    describe "validateSchedule" $ do
+        it "judges a bare schedule with no draft row anywhere" $
+            withTestRepo $ \repo -> do
+                let (from, to) = (may 4, may 8)   -- Mon-Fri
+                    sched = mkSchedule [mkAssignment 5 1 (may 4) 9]
+                violations <- validateSchedule repo (from, to) sched
+                violations `shouldBe` []
+
+        it "returns no violations for an empty schedule" $
+            withTestRepo $ \repo -> do
+                violations <- validateSchedule repo (may 4, may 8) (Schedule Set.empty)
+                violations `shouldBe` []
+
+        it "reports a violation in a bare schedule, against real repo state" $
+            withTestRepo $ \repo -> do
+                -- An approved absence invalidates the assignment without any
+                -- draft or calendar commit being involved. This is the sick-call
+                -- case ADR 0004 is built around.
+                repoSaveAbsenceCtx repo (absenceFor w_marco (may 4))
+                let sched = mkSchedule [mkAssignment 5 1 (may 4) 9]
+                violations <- validateSchedule repo (may 4, may 8) sched
+                map dvConstraint violations `shouldBe` ["absence conflict"]
+
     describe "buildLookBackContext" $ do
         it "extracts weekend workers from schedule" $ do
             let sched = mkSchedule
