@@ -6,6 +6,7 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import qualified Data.Text as T
 import System.Directory (removeFile)
+import System.FilePath (takeDirectory, (</>))
 import Control.Monad (forM_)
 import Control.Exception (catch, SomeException)
 
@@ -68,9 +69,32 @@ demoFromFile delayUs file = do
     putStrLn $ "Script: " ++ file
     putStrLn ""
     (_conn, repo) <- mkSQLiteRepo dbPath
-    contents <- readFile file
-    let cmds = filter (\l -> not (null l)) (lines contents)
-    runDemo repo delayUs cmds
+    cmds <- loadScript 0 file
+    runDemo repo delayUs (filter (not . null) cmds)
+
+-- | Read a replay script, expanding @include \<path\>@ lines in place.
+--
+-- Included paths are relative to the including file's own directory, so a
+-- scenario in @demo\/@ says @include restaurant.txt@ rather than repeating the
+-- repo-root prefix. This exists so that the restaurant itself — its skills,
+-- stations, workers and hour caps — is written once and shared by every scenario
+-- that needs a restaurant; see @demo\/README.md@.
+--
+-- The depth limit is a cycle guard: a script that includes itself would otherwise
+-- read files until it exhausted memory.
+loadScript :: Int -> FilePath -> IO [String]
+loadScript depth file
+    | depth > 8 = do
+        putStrLn ("Error: include nesting too deep at " ++ file
+                 ++ " (a cycle?). Giving up.")
+        exitFailure
+    | otherwise = do
+        contents <- readFile file
+        concat <$> mapM expand (lines contents)
+  where
+    expand line = case words line of
+        ["include", path] -> loadScript (depth + 1) (takeDirectory file </> path)
+        _                 -> return [line]
 
 -- | Ensure at least one admin user exists. If not, create default admin/admin.
 ensureAdminExists :: Repository -> IO ()

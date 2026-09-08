@@ -1,225 +1,14 @@
-# === Shifts ===
-shift create morning 6 10
-shift create midday 10 14
-shift create lunch-rush 11 15
-shift create afternoon 14 18
-shift create evening 17 20
-
-# === Skills ===
-skill create grill
-skill create pizza
-skill create sandwich
-skill create beverage
-skill create receiving
-skill create register
-skill create busboy
-skill create master-chef
-
-# master-chef implies all food prep skills
-skill implication master-chef grill
-skill implication master-chef pizza
-skill implication master-chef sandwich
-skill implication master-chef beverage
-
-# cooking skills imply busboy
-skill implication grill busboy
-skill implication pizza busboy
-skill implication sandwich busboy
-skill implication beverage busboy
-
-# pizza, grill, sandwich imply beverage
-skill implication grill beverage
-skill implication pizza beverage
-skill implication sandwich beverage
-
-# pizza, sandwich, beverage imply register
-skill implication pizza register
-skill implication sandwich register
-skill implication beverage register
-
-# === Stations ===
-station create grill
-station create pizza
-station create sandwich
-station create beverage
-station create receiving
-station create register
-station create busboy
-
-station require-skill grill grill
-station require-skill pizza pizza
-station require-skill sandwich sandwich
-station require-skill beverage beverage
-station require-skill receiving receiving
-station require-skill register register
-station require-skill busboy busboy
-
-# Station operating hours
-station set-hours grill 10 17
-station set-hours pizza 11 16
-station set-hours sandwich 10 17
-station set-hours beverage 7 17
-station set-hours receiving 6 11
-station set-hours register 7 17
-station set-hours busboy 10 18
-
-# Multi-station hours (non-peak: workers can cover 2 stations)
-# Early morning (7-10) and late afternoon (15-18) are non-peak
-station set-multi-hours grill 10 12
-station set-multi-hours pizza 11 13
-station set-multi-hours sandwich 10 12
-station set-multi-hours beverage 7 10
-station set-multi-hours register 7 10
-station set-multi-hours busboy 10 12
-station set-multi-hours grill 15 17
-station set-multi-hours pizza 15 16
-station set-multi-hours sandwich 15 17
-station set-multi-hours beverage 15 17
-station set-multi-hours register 15 17
-station set-multi-hours busboy 15 18
-
-# Receiving closed on weekends
-station close-day receiving saturday
-station close-day receiving sunday
-
-# Sunday: light crew (grill, beverage, register only)
-station close-day pizza sunday
-station close-day sandwich sunday
-station close-day busboy sunday
-
-# === Workers (11 + admin) ===
-user create marco changeme normal
-user create lucia changeme normal
-user create tony changeme normal
-user create maria changeme normal
-user create sam changeme normal
-user create rosa changeme normal
-user create jake changeme normal
-user create nina changeme normal
-user create carlos changeme normal
-user create pat changeme normal
-user create alex changeme normal
-
-# === Worker Skills ===
-# Admin: master chef, available as last resort
-worker grant-skill admin master-chef
-# Marco: master chef
-worker grant-skill marco master-chef
-# Lucia: master chef, per-diem
-worker grant-skill lucia master-chef
-# Tony: grill + sandwich
-worker grant-skill tony grill
-worker grant-skill tony sandwich
-# Maria: pizza + beverage
-worker grant-skill maria pizza
-worker grant-skill maria beverage
-# Sam: receiving + sandwich
-worker grant-skill sam receiving
-worker grant-skill sam sandwich
-# Rosa: receiving + busboy + sandwich + beverage + pizza
-worker grant-skill rosa receiving
-worker grant-skill rosa busboy
-worker grant-skill rosa sandwich
-worker grant-skill rosa beverage
-worker grant-skill rosa pizza
-# Jake: register + busboy + sandwich + pizza
-worker grant-skill jake register
-worker grant-skill jake busboy
-worker grant-skill jake sandwich
-worker grant-skill jake pizza
-# Nina: beverage + register + sandwich
-worker grant-skill nina beverage
-worker grant-skill nina register
-worker grant-skill nina sandwich
-# Carlos: sandwich + busboy + grill
-worker grant-skill carlos sandwich
-worker grant-skill carlos busboy
-worker grant-skill carlos grill
-# Pat: pizza + busboy + sandwich + grill
-worker grant-skill pat pizza
-worker grant-skill pat busboy
-worker grant-skill pat sandwich
-worker grant-skill pat grill
-# Alex: experienced cook (master-chef)
-worker grant-skill alex master-chef
-
-# === Worker Hours ===
-worker set-hours admin 0
-worker set-hours marco 40
-worker set-hours lucia 4  # overridden below by set-status per-diem
-worker set-hours tony 40
-worker set-hours maria 40
-worker set-hours sam 40
-worker set-hours rosa 40
-worker set-hours jake 40
-worker set-hours nina 40
-worker set-hours carlos 40
-worker set-hours pat 40
-worker set-hours alex 40
-
-# === Employment Status ===
-# Marco: salaried manager — overtime=manual-only, tracking=standard, 40h
-worker set-status marco salaried
-# Lucia: per-diem — overtime=exempt, tracking=exempt, no hour limit
-# (replaces manual set-hours lucia 4 above — per-diem removes the limit)
-worker set-status lucia per-diem
-# Tony: full-time — overtime=eligible, tracking=standard, 40h
-worker set-status tony full-time
-# Pat: temp worker
-worker set-temp pat on
-# Rosa: override overtime model to manual-only (won't get auto-overtime)
-worker set-overtime-model rosa manual-only
-
-# Show employment properties alongside other worker info
-worker info
-
-# No overtime opt-in — we want a schedule with zero planned overtime
-# Admin is last resort only
-worker set-overtime admin on
-
-# === Preferences ===
-# Workers with cooking skills prefer their stations over busboy/register
-# Marco: master chef — prefers grill, pizza, sandwich, beverage
-worker set-prefs marco grill pizza sandwich beverage
-# Lucia: master chef — prefers grill, pizza, sandwich, beverage
-worker set-prefs lucia grill pizza sandwich beverage
-# Tony: grill + sandwich — prefers grill, sandwich
-worker set-prefs tony grill sandwich
-# Maria: pizza + beverage — prefers pizza, beverage
-worker set-prefs maria pizza beverage
-# Nina: beverage + register — prefers beverage
-worker set-prefs nina beverage
-# Carlos: sandwich + busboy — prefers sandwich
-worker set-prefs carlos sandwich
-# Pat: pizza + busboy — prefers pizza
-worker set-prefs pat pizza
-# Jake: register + busboy — prefers register
-worker set-prefs jake register
-# Alex: master chef — prefers grill, pizza, sandwich, beverage
-worker set-prefs alex grill pizza sandwich beverage
-
-# === Shift Preferences ===
-# Marco: prefers morning
-worker set-shift-pref marco morning midday
-# Lucia: prefers morning (per-diem, 4h)
-worker set-shift-pref lucia morning
-# Tony: prefers afternoon and evening
-worker set-shift-pref tony afternoon evening
-# Maria: prefers morning
-worker set-shift-pref maria morning midday
-# Sam: prefers morning
-worker set-shift-pref sam morning
-# Rosa: no preference (flexible)
-# Jake: prefers evening, weekend
-worker set-shift-pref jake evening weekend
-# Nina: prefers midday and afternoon
-worker set-shift-pref nina midday afternoon
-# Carlos: prefers morning and midday
-worker set-shift-pref carlos morning midday
-# Pat: prefers afternoon
-worker set-shift-pref pat afternoon
-# Alex: prefers midday and afternoon
-worker set-shift-pref alex midday afternoon
+# The feature tour: every CLI surface, in order, against a fixed historical week.
+#
+# Dates here are deliberately hardcoded to April 2026 and must stay historical —
+# the freeze-line section below depends on the dates being in the past, which is
+# the whole point of that guardrail. For a fixture whose calendar covers *today*,
+# which is what the problem view at `/` needs, see demo/current-period.txt.
+#
+# The restaurant itself lives in restaurant.txt and is shared with the other
+# scenarios. Note that every draft id below is positional: inserting or removing a
+# `draft create` shifts the rest.
+include restaurant.txt
 
 # === Absences ===
 # Nina has approved absence on Friday Apr 10
@@ -232,16 +21,19 @@ absence approve 1
 config show
 
 # === Pay Periods ===
-# Configure biweekly pay periods anchored to the first demo week.
-# The scheduler uses this to compute per-period hour limits:
-#   Period 1: Apr 6–19 (weeks 1–2), Period 2: Apr 20–May 3 (weeks 3–4)
-config set-pay-period biweekly 2026-04-06
+# Weekly pay periods anchored to the first demo week, so each week is its own
+# hour-limit window and restaurant.txt's `worker set-hours … 40` lines mean 40
+# hours a week — which is what this fixture has always intended.
+#   Period 1: Apr 6–12, Period 2: Apr 13–19, and so on.
+#
+# `PayPeriodType` is configurable and `biweekly` is the more interesting setting,
+# but it cannot be demonstrated here yet: nothing in the CLI reports problems
+# against the committed calendar, so switching the period at the end of the tour
+# would print nothing, and leaving it switched would hand every demo-seeded
+# fixture 38 period-hours violations. Revisit when the CLI grows a
+# `calendar problems` verb.
+config set-pay-period weekly 2026-04-06
 config show-pay-period
-
-# === Seniority ===
-# Marco and Alex are experienced: seniority level 2
-worker set-seniority marco 2
-worker set-seniority alex 2
 
 # === Generate Schedule ===
 # Every schedule is built inside a draft: create the draft, generate into it,

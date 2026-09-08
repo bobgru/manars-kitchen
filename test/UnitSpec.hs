@@ -18,6 +18,7 @@ import qualified Domain.SchedulerConfig
 import qualified Domain.Pin
 import qualified Domain.Optimizer
 import qualified Domain.PayPeriod
+import qualified CLI.DateArg
 import qualified CalendarSpec
 import qualified DraftSpec
 import qualified DraftValidationSpec
@@ -43,6 +44,7 @@ main = do
     describe "Domain.Pin"             Domain.Pin.spec
     describe "Domain.Optimizer"       Domain.Optimizer.spec
     describe "Domain.PayPeriod"       Domain.PayPeriod.spec
+    describe "CLI.DateArg"            CLI.DateArg.spec
     describe "Calendar"               CalendarSpec.spec
     describe "Draft"                  DraftSpec.spec
     describe "DraftValidation"        DraftValidationSpec.spec

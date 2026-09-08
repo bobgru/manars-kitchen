@@ -163,6 +163,22 @@ a commit touching frozen dates lands.
 The interval that overtime and hour limits are measured over. Independent of
 draft date ranges, which may cover any span.
 
+**Relative date**:
+A date argument written against today rather than as a calendar date — `today`,
+`today+N`, `today-N`. Accepted anywhere a date is, and the reason a **Scenario**
+stays correct however long after it was written it runs. See ADR 0008.
+_Avoid_: reading a partially understood one charitably. `today+` is rejected, not
+treated as `today`; a half-understood date schedules the wrong week and looks
+deliberate.
+
+**Scenario**:
+A named replay script in `demo/` that builds one state worth looking at — a staffed
+current period, a sick call after the fact, the feature tour. Scenarios `include` a
+shared restaurant rather than each defining their own, so the restaurant cannot
+drift between them.
+_Avoid_: calling any of them "the demo". There is more than one, and which one you
+want depends on what you are looking at — see `demo/README.md`.
+
 ### People
 
 **User**:

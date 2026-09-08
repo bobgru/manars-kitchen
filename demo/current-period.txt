@@ -1,0 +1,55 @@
+# A restaurant whose calendar covers *today*, for looking at the app.
+#
+# The feature tour in restaurant-setup.txt is pinned to April 2026 because its
+# freeze-line section needs historical dates. That makes it the wrong fixture for
+# the problem view at `/`, whose horizons are today, this pay period and the next:
+# against April 2026 every horizon is empty and the whole screen reads "not
+# scheduled". This scenario exists for that case, and stays correct whenever it is
+# run because every date below is relative to today.
+#
+# What it leaves you looking at:
+#   - the current pay period fully staffed, with whatever real problems the
+#     scheduler could not avoid;
+#   - an approved absence landing *after* the commit, so the calendar holds
+#     assignments that are no longer valid — the sick-call case the problem view
+#     is built around (ADR 0004), and the one nothing else surfaces;
+#   - the next pay period deliberately untouched, so the "not scheduled" state
+#     (ADR 0007) is visible next to a staffed one.
+#
+# Usage:
+#   stack exec manars-cli -- --demo demo/current-period.txt --no-delay
+
+include restaurant.txt
+
+# === Pay Periods ===
+# Weekly, anchored to today, so "current period" starts today and the two
+# scheduled/unscheduled periods below line up with the horizon control.
+config set-pay-period weekly today
+config show-pay-period
+
+# === This period, staffed ===
+# No --force needed: every date is today or later, so nothing is frozen.
+draft create today today+6
+draft generate 1
+draft hours 1
+draft commit 1 current period from the current-period fixture
+calendar hours today today+6
+
+# === A sick call, after the fact ===
+# Approved *after* the commit, so the calendar keeps assignments that are now
+# invalid. Nothing about the calendar changed — which is exactly why the problem
+# view recomputes rather than reading stored violations.
+absence-type create sick on
+absence set-allowance nina sick 10
+absence request sick nina today+2 today+3
+absence approve 1
+
+# === Next period, deliberately empty ===
+# Nothing is scheduled here on purpose. The problem view reports each such day
+# once as "not scheduled" rather than once per open station-slot; see ADR 0007.
+# To staff it too, uncomment these:
+# draft create today+7 today+13
+# draft generate 2
+# draft commit 2 next period
+
+calendar view-compact today today+6

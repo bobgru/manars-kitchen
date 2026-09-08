@@ -21,7 +21,7 @@ import qualified Data.Set as Set
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import Data.Time
-    ( Day, DayOfWeek(..), TimeOfDay(..), parseTimeM, defaultTimeLocale
+    ( Day, DayOfWeek(..), TimeOfDay(..)
     , addDays, fromGregorian, toGregorian, gregorianMonthLength, dayOfWeek
     )
 import Data.Time.Clock (getCurrentTime, utctDay)
@@ -64,6 +64,8 @@ import Service.PubSub
     , publishEnrichedCommand, sourceString
     )
 import CLI.Commands (Command(..), parseCommand)
+import CLI.DateArg (withDay, withDayPair, dateArgSyntax)
+import Data.List (isInfixOf)
 import CLI.Display
 import CLI.Resolve
     ( EntityKind(..), EntityRef(..), SessionContext
@@ -277,10 +279,8 @@ handleCommand :: AppState -> Command -> IO ()
 handleCommand st cmd = case cmd of
     -- Draft
     DraftCreate startStr endStr force -> requireAdmin st $
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) ->
-                createDraftWithFreezeCheck st s e force
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e ->
+            createDraftWithFreezeCheck st s e force
 
     DraftThisMonth -> requireAdmin st $ do
         today <- utctDay <$> getCurrentTime
@@ -571,127 +571,115 @@ handleCommand st cmd = case cmd of
 
     -- Calendar
     CalendarView startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                sched <- Cal.loadCalendarSlice (asRepo st) s e
-                if Set.null (unSchedule sched)
-                    then putStrLn "No calendar assignments in this range."
-                    else do
-                        users <- repoListUsers (asRepo st)
-                        stations <- SW.listStations (asRepo st)
-                        skillCtx <- repoLoadSkillCtx (asRepo st)
-                        let workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName station))
-                                | (StationId sid, station) <- stations ]
-                        putStr (displayScheduleTable workerNames stationNames
-                                   Calendar.defaultHours (scStationHours skillCtx) sched)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e -> do
+            sched <- Cal.loadCalendarSlice (asRepo st) s e
+            if Set.null (unSchedule sched)
+                then putStrLn "No calendar assignments in this range."
+                else do
+                    users <- repoListUsers (asRepo st)
+                    stations <- SW.listStations (asRepo st)
+                    skillCtx <- repoLoadSkillCtx (asRepo st)
+                    let workerNames = Map.fromList
+                            [ (userIdToWorkerId (userId u), T.unpack uname)
+                            | u <- users, let Username uname = userName u ]
+                        stationNames = Map.fromList
+                            [ (StationId sid, T.unpack (stationName station))
+                            | (StationId sid, station) <- stations ]
+                    putStr (displayScheduleTable workerNames stationNames
+                               Calendar.defaultHours (scStationHours skillCtx) sched)
 
     CalendarViewByWorker startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                sched <- Cal.loadCalendarSlice (asRepo st) s e
-                if Set.null (unSchedule sched)
-                    then putStrLn "No calendar assignments in this range."
-                    else putStr (displayScheduleByWorker sched)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e -> do
+            sched <- Cal.loadCalendarSlice (asRepo st) s e
+            if Set.null (unSchedule sched)
+                then putStrLn "No calendar assignments in this range."
+                else putStr (displayScheduleByWorker sched)
 
     CalendarViewByStation startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                sched <- Cal.loadCalendarSlice (asRepo st) s e
-                if Set.null (unSchedule sched)
-                    then putStrLn "No calendar assignments in this range."
-                    else putStr (displayScheduleByStation sched)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e -> do
+            sched <- Cal.loadCalendarSlice (asRepo st) s e
+            if Set.null (unSchedule sched)
+                then putStrLn "No calendar assignments in this range."
+                else putStr (displayScheduleByStation sched)
 
     CalendarViewCompact startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                sched <- Cal.loadCalendarSlice (asRepo st) s e
-                if Set.null (unSchedule sched)
-                    then putStrLn "No calendar assignments in this range."
-                    else do
-                        users <- repoListUsers (asRepo st)
-                        stations <- SW.listStations (asRepo st)
-                        skillCtx <- repoLoadSkillCtx (asRepo st)
-                        let workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName station))
-                                | (StationId sid, station) <- stations ]
-                        putStr (displayScheduleCompact workerNames stationNames
-                                   Calendar.defaultHours (scStationHours skillCtx) sched)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e -> do
+            sched <- Cal.loadCalendarSlice (asRepo st) s e
+            if Set.null (unSchedule sched)
+                then putStrLn "No calendar assignments in this range."
+                else do
+                    users <- repoListUsers (asRepo st)
+                    stations <- SW.listStations (asRepo st)
+                    skillCtx <- repoLoadSkillCtx (asRepo st)
+                    let workerNames = Map.fromList
+                            [ (userIdToWorkerId (userId u), T.unpack uname)
+                            | u <- users, let Username uname = userName u ]
+                        stationNames = Map.fromList
+                            [ (StationId sid, T.unpack (stationName station))
+                            | (StationId sid, station) <- stations ]
+                    putStr (displayScheduleCompact workerNames stationNames
+                               Calendar.defaultHours (scStationHours skillCtx) sched)
 
     CalendarHours startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                sched <- Cal.loadCalendarSlice (asRepo st) s e
-                if Set.null (unSchedule sched)
-                    then putStrLn "No calendar assignments in this range."
-                    else do
-                        users <- repoListUsers (asRepo st)
-                        workerCtx <- repoLoadWorkerCtx (asRepo st)
-                        let workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                        putStr (displayWorkerHours workerNames
-                                   (wcMaxPeriodHours workerCtx) sched)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e -> do
+            sched <- Cal.loadCalendarSlice (asRepo st) s e
+            if Set.null (unSchedule sched)
+                then putStrLn "No calendar assignments in this range."
+                else do
+                    users <- repoListUsers (asRepo st)
+                    workerCtx <- repoLoadWorkerCtx (asRepo st)
+                    let workerNames = Map.fromList
+                            [ (userIdToWorkerId (userId u), T.unpack uname)
+                            | u <- users, let Username uname = userName u ]
+                    putStr (displayWorkerHours workerNames
+                               (wcMaxPeriodHours workerCtx) sched)
 
     CalendarDiagnose startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e) -> do
-                sched <- Cal.loadCalendarSlice (asRepo st) s e
-                if Set.null (unSchedule sched)
-                    then putStrLn "No calendar assignments in this range."
-                    else do
-                        users <- repoListUsers (asRepo st)
-                        stations <- SW.listStations (asRepo st)
-                        skills <- SW.listSkills (asRepo st)
-                        skillCtx   <- repoLoadSkillCtx (asRepo st)
-                        workerCtx  <- repoLoadWorkerCtx (asRepo st)
-                        absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-                        shifts     <- repoLoadShifts (asRepo st)
-                        cfg        <- repoLoadSchedulerConfig (asRepo st)
-                        let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                            slots = Set.toList $ Set.map assignSlot (unSchedule sched)
-                            closed = stationClosedSlots skillCtx slots
-                            slotDates = map slotDate slots
-                            periodBounds = case slotDates of
-                                [] -> (toEnum 0, toEnum 0)
-                                ds -> (minimum ds, addDays 1 (maximum ds))
-                            ctx = Scheduler.SchedulerContext
-                                { Scheduler.schSkillCtx    = skillCtx
-                                , Scheduler.schWorkerCtx   = workerCtx
-                                , Scheduler.schAbsenceCtx  = absenceCtx
-                                , Scheduler.schSlots       = slots
-                                , Scheduler.schWorkers     = workers
-                                , Scheduler.schClosedSlots = closed
-                                , Scheduler.schShifts      = shifts
-                                , Scheduler.schPrevWeekendWorkers = Set.empty
-                                , Scheduler.schConfig      = cfg
-                                , Scheduler.schPeriodBounds = periodBounds
-                                , Scheduler.schCalendarHours = Map.empty
-                                }
-                            result = Scheduler.buildScheduleFrom sched ctx
-                            diags = Diagnosis.diagnose result ctx
-                            workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName station))
-                                | (StationId sid, station) <- stations ]
-                            skillNames = Map.fromList
-                                [ (sid, T.unpack (skillName sk))
-                                | (sid, sk) <- skills ]
-                        putStr (displayDiagnosis workerNames stationNames skillNames result diags)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+        withDayPair startStr endStr $ \s e -> do
+            sched <- Cal.loadCalendarSlice (asRepo st) s e
+            if Set.null (unSchedule sched)
+                then putStrLn "No calendar assignments in this range."
+                else do
+                    users <- repoListUsers (asRepo st)
+                    stations <- SW.listStations (asRepo st)
+                    skills <- SW.listSkills (asRepo st)
+                    skillCtx   <- repoLoadSkillCtx (asRepo st)
+                    workerCtx  <- repoLoadWorkerCtx (asRepo st)
+                    absenceCtx <- repoLoadAbsenceCtx (asRepo st)
+                    shifts     <- repoLoadShifts (asRepo st)
+                    cfg        <- repoLoadSchedulerConfig (asRepo st)
+                    let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
+                        slots = Set.toList $ Set.map assignSlot (unSchedule sched)
+                        closed = stationClosedSlots skillCtx slots
+                        slotDates = map slotDate slots
+                        periodBounds = case slotDates of
+                            [] -> (toEnum 0, toEnum 0)
+                            ds -> (minimum ds, addDays 1 (maximum ds))
+                        ctx = Scheduler.SchedulerContext
+                            { Scheduler.schSkillCtx    = skillCtx
+                            , Scheduler.schWorkerCtx   = workerCtx
+                            , Scheduler.schAbsenceCtx  = absenceCtx
+                            , Scheduler.schSlots       = slots
+                            , Scheduler.schWorkers     = workers
+                            , Scheduler.schClosedSlots = closed
+                            , Scheduler.schShifts      = shifts
+                            , Scheduler.schPrevWeekendWorkers = Set.empty
+                            , Scheduler.schConfig      = cfg
+                            , Scheduler.schPeriodBounds = periodBounds
+                            , Scheduler.schCalendarHours = Map.empty
+                            }
+                        result = Scheduler.buildScheduleFrom sched ctx
+                        diags = Diagnosis.diagnose result ctx
+                        workerNames = Map.fromList
+                            [ (userIdToWorkerId (userId u), T.unpack uname)
+                            | u <- users, let Username uname = userName u ]
+                        stationNames = Map.fromList
+                            [ (StationId sid, T.unpack (stationName station))
+                            | (StationId sid, station) <- stations ]
+                        skillNames = Map.fromList
+                            [ (sid, T.unpack (skillName sk))
+                            | (sid, sk) <- skills ]
+                    putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
     CalendarHistory -> do
         commits <- Cal.listCalendarHistory (asRepo st)
@@ -725,24 +713,22 @@ handleCommand st cmd = case cmd of
             else putStr (displayScheduleByStation sched)
 
     CalendarUnfreeze dateStr ->
-        case parseDay dateStr of
-            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-            Just d -> do
-                freezeLine <- Freeze.computeFreezeLine
-                if not (Freeze.isFrozen freezeLine d)
-                    then putStrLn ("Date " ++ show d
-                                  ++ " is not frozen (it is after the freeze line "
-                                  ++ show freezeLine ++ ").")
-                    else do
-                        modifyIORef' (asUnfreezes st) (Set.insert (d, d))
-                        putStrLn ("Unfrozen: " ++ show d
-                                 ++ " (session only, will refreeze on commit or restart)")
+        withDay dateStr $ \d -> do
+            freezeLine <- Freeze.computeFreezeLine
+            if not (Freeze.isFrozen freezeLine d)
+                then putStrLn ("Date " ++ show d
+                              ++ " is not frozen (it is after the freeze line "
+                              ++ show freezeLine ++ ").")
+                else do
+                    modifyIORef' (asUnfreezes st) (Set.insert (d, d))
+                    putStrLn ("Unfrozen: " ++ show d
+                             ++ " (session only, will refreeze on commit or restart)")
 
     CalendarUnfreezeRange startStr endStr ->
-        case (parseDay startStr, parseDay endStr) of
-            (Just s, Just e)
-                | s > e -> putStrLn "Invalid range: start date must be on or before end date."
-                | otherwise -> do
+        withDayPair startStr endStr $ \s e ->
+            if s > e
+                then putStrLn "Invalid range: start date must be on or before end date."
+                else do
                     freezeLine <- Freeze.computeFreezeLine
                     let frozenStart = s
                         frozenEnd   = min e freezeLine
@@ -757,7 +743,6 @@ handleCommand st cmd = case cmd of
                                               ++ " (session only, dates after freeze line already unfrozen)")
                                 else putStrLn ("Unfrozen: " ++ show frozenStart ++ " to "
                                               ++ show frozenEnd ++ " (session only)")
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
 
     CalendarFreezeStatus -> do
         freezeLine <- Freeze.computeFreezeLine
@@ -775,40 +760,36 @@ handleCommand st cmd = case cmd of
 
     -- What-if (hint session)
     WhatIfCloseStation sid dateStr hr -> requireAdmin st $ requireDraft st $
-        case parseDay dateStr of
-            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-            Just day -> do
-                result <- getOrInitSession st
-                case result of
-                    Left err -> putStrLn err
-                    Right hs -> do
-                        let slot = Slot day (TimeOfDay hr 0 0) 3600
-                            hint = CloseStation (StationId sid) slot
-                            sess = hstSess hs
-                            oldResult = sessResult sess
-                            sess' = addHint hint sess
-                            hs' = hs { hstSess = sess' }
-                        autoSaveHintSession st hs'
-                        (wNames, sNames, _) <- loadNameMaps st
-                        putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+        withDay dateStr $ \day -> do
+            result <- getOrInitSession st
+            case result of
+                Left err -> putStrLn err
+                Right hs -> do
+                    let slot = Slot day (TimeOfDay hr 0 0) 3600
+                        hint = CloseStation (StationId sid) slot
+                        sess = hstSess hs
+                        oldResult = sessResult sess
+                        sess' = addHint hint sess
+                        hs' = hs { hstSess = sess' }
+                    autoSaveHintSession st hs'
+                    (wNames, sNames, _) <- loadNameMaps st
+                    putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
     WhatIfPin wid sid dateStr hr -> requireAdmin st $ requireDraft st $
-        case parseDay dateStr of
-            Nothing -> putStrLn "Invalid date format. Use YYYY-MM-DD."
-            Just day -> do
-                result <- getOrInitSession st
-                case result of
-                    Left err -> putStrLn err
-                    Right hs -> do
-                        let slot = Slot day (TimeOfDay hr 0 0) 3600
-                            hint = PinAssignment (WorkerId wid) (StationId sid) slot
-                            sess = hstSess hs
-                            oldResult = sessResult sess
-                            sess' = addHint hint sess
-                            hs' = hs { hstSess = sess' }
-                        autoSaveHintSession st hs'
-                        (wNames, sNames, _) <- loadNameMaps st
-                        putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
+        withDay dateStr $ \day -> do
+            result <- getOrInitSession st
+            case result of
+                Left err -> putStrLn err
+                Right hs -> do
+                    let slot = Slot day (TimeOfDay hr 0 0) 3600
+                        hint = PinAssignment (WorkerId wid) (StationId sid) slot
+                        sess = hstSess hs
+                        oldResult = sessResult sess
+                        sess' = addHint hint sess
+                        hs' = hs { hstSess = sess' }
+                    autoSaveHintSession st hs'
+                    (wNames, sNames, _) <- loadNameMaps st
+                    putStr (displayHintDiff wNames sNames oldResult (sessResult sess'))
 
     WhatIfAddWorker name skillStrs mHours -> requireAdmin st $ requireDraft st $ do
         -- Resolve skill names to SkillIds
@@ -1329,15 +1310,15 @@ handleCommand st cmd = case cmd of
         case parsePayPeriodType typ of
             Nothing -> putStrLn ("Unknown pay period type: " ++ typ
                                  ++ ". Valid types: weekly, biweekly, semi-monthly, monthly")
-            Just ppType -> case parseDay anchor of
-                Nothing -> putStrLn ("Invalid date format: " ++ anchor ++ " (expected YYYY-MM-DD)")
-                Just anchorDay -> do
-                    let ppc = PayPeriodConfig ppType anchorDay
-                    SC.savePayPeriodConfig (asRepo st) ppc
-                    let (s, e) = payPeriodBounds ppc anchorDay
-                    putStrLn ("Pay period set: " ++ showPayPeriodType ppType
-                             ++ ", anchor " ++ anchor)
-                    putStrLn ("Current period: " ++ show s ++ " to " ++ show e)
+            Just ppType -> withDay anchor $ \anchorDay -> do
+                let ppc = PayPeriodConfig ppType anchorDay
+                SC.savePayPeriodConfig (asRepo st) ppc
+                let (s, e) = payPeriodBounds ppc anchorDay
+                -- The resolved date, not the argument: "anchor today" in a script
+                -- should record which day that was.
+                putStrLn ("Pay period set: " ++ showPayPeriodType ppType
+                         ++ ", anchor " ++ show anchorDay)
+                putStrLn ("Current period: " ++ show s ++ " to " ++ show e)
 
     ConfigShowPayPeriod -> do
         mPpc <- SC.loadPayPeriodConfig (asRepo st)
@@ -1420,17 +1401,13 @@ handleCommand st cmd = case cmd of
         putStr (displayAbsences wNames tNames reqs)
 
     -- Absence request (worker or admin)
-    CmdAbsenceRequest tid wid sd ed -> do
-        let mStart = parseDay (T.unpack sd)
-            mEnd   = parseDay (T.unpack ed)
-        case (mStart, mEnd) of
-            (Just s, Just e) -> do
-                result <- SA.requestAbsenceService (asRepo st)
-                    (WorkerId wid) (AbsenceTypeId tid) s e
-                case result of
-                    Right (AbsenceId aid) -> putStrLn ("Requested absence #" ++ show aid)
-                    Left err -> putStrLn ("Error: " ++ show err)
-            _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+    CmdAbsenceRequest tid wid sd ed ->
+        withDayPair (T.unpack sd) (T.unpack ed) $ \s e -> do
+            result <- SA.requestAbsenceService (asRepo st)
+                (WorkerId wid) (AbsenceTypeId tid) s e
+            case result of
+                Right (AbsenceId aid) -> putStrLn ("Requested absence #" ++ show aid)
+                Left err -> putStrLn ("Error: " ++ show err)
 
     AbsenceListMine -> do
         reqs <- SA.listWorkerAbsences (asRepo st) (userIdToWorkerId (userId (asUser st)))
@@ -1888,9 +1865,6 @@ rebuildSessionAfterApply st hs = do
             let hs' = HintState sess' (hstDraftId hs) cp False
             repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) remaining cp
             writeIORef (asHintSession st) (Just hs')
-
-parseDay :: String -> Maybe Day
-parseDay = parseTimeM True defaultTimeLocale "%Y-%m-%d"
 
 showDayOfWeek :: DayOfWeek -> String
 showDayOfWeek Monday    = "monday"
@@ -2442,6 +2416,15 @@ printHelpGroup role group =
             mapM_ (\(syn, desc) ->
                 putStrLn ("  " ++ padRight synW syn ++ desc)
                 ) cmds
+            -- Said once per group rather than on every <date> above, which would
+            -- treble the width of the syntax column.
+            when (any (dateTaking . fst) cmds) $ do
+                putStrLn ""
+                putStrLn ("  Dates accept " ++ dateArgSyntax ++ ".")
+  where
+    dateTaking syn = "<date>" `isInfixOf` syn
+                  || "<start>" `isInfixOf` syn
+                  || "<end>" `isInfixOf` syn
 
 when :: Bool -> IO () -> IO ()
 when True  action = action

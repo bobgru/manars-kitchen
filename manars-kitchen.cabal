@@ -65,6 +65,7 @@ library
                      , CLI.Display
                      , CLI.App
                      , CLI.Resolve
+                     , CLI.DateArg
                      , Utils
                      , Utils.Encoding
   default-language:    Haskell2010
@@ -107,6 +108,7 @@ executable manars-cli
                      , containers
                      , time
                      , directory
+                     , filepath
                      , bytestring
                      , aeson
                      , servant

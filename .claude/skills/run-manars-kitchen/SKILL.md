@@ -117,12 +117,17 @@ marks, the unscheduled-day baseline, switching horizon, the per-hour problems ap
 live over SSE once a draft is committed over the current period, and a marked cell with
 its detail pane. It mutates the database too.
 
-**A demo-seeded problem view opens on "not scheduled", and that is the fixture.** Its
-calendar is April 2026, which no horizon covers, so nobody is on any day in range. Each
-such day is reported once as unscheduled rather than as ~45 understaffings (ADR 0007), so
-the opening screen is 14 problems per fortnight, one badge per column, and **no hour
-cells** — there is nothing to click until something is committed over the period. See
-`docs/STATUS.md` item 3 before concluding the page is broken.
+**Seeded from the tour, the problem view opens on "not scheduled", and that is the
+fixture.** `restaurant-setup.txt`'s calendar is April 2026, which no horizon covers, so
+nobody is on any day in range. Each such day is reported once as unscheduled rather than as
+~45 understaffings (ADR 0007), so the opening screen is one badge per column and **no hour
+cells** — there is nothing to click until something is committed over the period. That is
+what `e2e:dashboard` asserts, so keep seeding it from the tour.
+
+**To look at a populated problem view, seed from `demo/current-period.txt` instead.** It
+staffs the current pay period from today and opens on 18 problems: 11 `absence conflict`
+violations from a sick call approved after the commit, and 7 unscheduled days for next
+period. Same recipe as above, swapping the script.
 
 To drive a different page, copy the closest of the three — each header lists the
 prerequisites it does not manage.
@@ -143,14 +148,29 @@ needed when the behaviour under test depends on distinct millisecond timestamps
 (draft `last_validated_at` versus a calendar commit's `committed_at`, for
 instance).
 
-The project's own scripted demo is the same mechanism:
+Dates accept `today`, `today+N` and `today-N` as well as `YYYY-MM-DD`, which is what
+lets a script stay correct however long after it was written it runs. A partially
+understood date is rejected rather than read charitably: `today+` is an error.
+
+There is more than one scenario in `demo/`, and which one you want depends on what
+you are looking at — `demo/README.md` is the index. The two that matter here:
 
 ```bash
+# The feature tour: every CLI surface, fixed to April 2026. The --demo default.
 stack exec manars-cli -- --demo demo/restaurant-setup.txt --no-delay
+
+# A restaurant whose calendar covers today. Use this one for the web UI.
+stack exec manars-cli -- --demo demo/current-period.txt --no-delay
 ```
 
-It ends with `Replay complete.` and reports 199 assignments / 159 unfilled. Use
-`stack exec` rather than `make demo` — see Gotchas.
+Both end with `Replay complete.`. The tour's drafts now generate 395–410 assignments
+with 0–11 unfilled each (they used to collapse to 212/154 in the second week of a
+pay period — see `docs/STATUS.md` item 3). `current-period.txt` staffs the current
+period and leaves the next empty on purpose. Use `stack exec` rather than
+`make demo` — see Gotchas.
+
+`include <path>` splices one script into another, resolved relative to the including
+file, which is why the restaurant itself lives once in `demo/restaurant.txt`.
 
 ## Run (human path)
 
@@ -170,7 +190,7 @@ stack test --pedantic manars-kitchen:test:manars-kitchen-unit-test
 stack test --pedantic manars-kitchen:test:manars-kitchen-integration-test
 ```
 
-As of 2026-09-07: 400 unit examples, 0 failures, 1 pending (a known optimizer
+As of 2026-09-07: 407 unit examples, 0 failures, 1 pending (a known optimizer
 divergence, `docs/STATUS.md` item 6); 280 integration examples, 0 failures. The
 only warnings in a clean build are three `ld: warning: -U option is redundant`
 lines from the macOS linker.

@@ -9,7 +9,7 @@ module CLI.RpcClient
     ) where
 
 import qualified Data.Text as T
-import Data.Time (Day, fromGregorian, toGregorian, gregorianMonthLength)
+import Data.Time (fromGregorian, toGregorian, gregorianMonthLength)
 import Data.Time.Clock (getCurrentTime, utctDay)
 import Network.HTTP.Client (newManager, defaultManagerSettings)
 import Servant.API ((:<|>)(..))
@@ -32,6 +32,7 @@ import Domain.Worker (OvertimeModel(..), PayPeriodTracking(..))
 import Domain.SchedulerConfig (presetNames)
 import Repo.Types (DraftInfo(..), CalendarCommit(..), AuditEntry(..))
 import CLI.Commands (Command(..))
+import CLI.DateArg (withDay, withDayPair)
 import CLI.Display
 import Server.Json
 import Server.Rpc
@@ -231,13 +232,6 @@ requireAdmin env action =
         else putStrLn "Permission denied: admin only."
 
 -- Parse a date string, returning Nothing on failure.
-parseDay :: String -> Maybe Day
-parseDay s = case break (== '-') s of
-    (y, '-':rest) -> case break (== '-') rest of
-        (m, '-':d) -> Just (fromGregorian (read y) (read m) (read d))
-        _ -> Nothing
-    _ -> Nothing
-
 -- -----------------------------------------------------------------
 -- Command dispatch
 -- -----------------------------------------------------------------
@@ -418,13 +412,11 @@ dispatchCommand env cmd = case cmd of
             Left err -> putStrLn err
 
     -- Drafts
-    DraftCreate startStr endStr _force -> case (parseDay startStr, parseDay endStr) of
-        (Just s, Just e) -> do
-            result <- run env (cCreateDraft (CreateDraftReq s e))
-            case result of
-                Right resp -> putStrLn ("Draft created: " ++ show (dcrId resp))
-                Left err -> putStrLn err
-        _ -> putStrLn "Invalid date format. Use YYYY-MM-DD."
+    DraftCreate startStr endStr _force -> withDayPair startStr endStr $ \s e -> do
+        result <- run env (cCreateDraft (CreateDraftReq s e))
+        case result of
+            Right resp -> putStrLn ("Draft created: " ++ show (dcrId resp))
+            Left err -> putStrLn err
 
     DraftThisMonth -> do
         today <- utctDay <$> getCurrentTime
@@ -512,40 +504,32 @@ dispatchCommand env cmd = case cmd of
         putStrLn "draft diagnose is not yet supported in remote mode."
 
     -- Calendar
-    CalendarView startStr endStr -> case (parseDay startStr, parseDay endStr) of
-        (Just s, Just e) -> do
-            result <- run env (cViewCalendar (RpcDateRange s e))
-            case result of
-                Right sched -> putStr (displaySchedule sched)
-                Left err -> putStrLn err
-        _ -> putStrLn "Invalid date format."
+    CalendarView startStr endStr -> withDayPair startStr endStr $ \s e -> do
+        result <- run env (cViewCalendar (RpcDateRange s e))
+        case result of
+            Right sched -> putStr (displaySchedule sched)
+            Left err -> putStrLn err
 
-    CalendarViewByWorker startStr endStr -> case (parseDay startStr, parseDay endStr) of
-        (Just s, Just e) -> do
-            result <- run env (cViewCalendar (RpcDateRange s e))
-            case result of
-                Right sched -> putStr (displayScheduleByWorker sched)
-                Left err -> putStrLn err
-        _ -> putStrLn "Invalid date format."
+    CalendarViewByWorker startStr endStr -> withDayPair startStr endStr $ \s e -> do
+        result <- run env (cViewCalendar (RpcDateRange s e))
+        case result of
+            Right sched -> putStr (displayScheduleByWorker sched)
+            Left err -> putStrLn err
 
-    CalendarViewByStation startStr endStr -> case (parseDay startStr, parseDay endStr) of
-        (Just s, Just e) -> do
-            result <- run env (cViewCalendar (RpcDateRange s e))
-            case result of
-                Right sched -> putStr (displayScheduleByStation sched)
-                Left err -> putStrLn err
-        _ -> putStrLn "Invalid date format."
+    CalendarViewByStation startStr endStr -> withDayPair startStr endStr $ \s e -> do
+        result <- run env (cViewCalendar (RpcDateRange s e))
+        case result of
+            Right sched -> putStr (displayScheduleByStation sched)
+            Left err -> putStrLn err
 
     CalendarViewCompact startStr endStr ->
         dispatchCommand env (CalendarView startStr endStr)
 
-    CalendarHours startStr endStr -> case (parseDay startStr, parseDay endStr) of
-        (Just s, Just e) -> do
-            result <- run env (cViewCalendar (RpcDateRange s e))
-            case result of
-                Right sched -> putStr (displaySchedule sched)
-                Left err -> putStrLn err
-        _ -> putStrLn "Invalid date format."
+    CalendarHours startStr endStr -> withDayPair startStr endStr $ \s e -> do
+        result <- run env (cViewCalendar (RpcDateRange s e))
+        case result of
+            Right sched -> putStr (displaySchedule sched)
+            Left err -> putStrLn err
 
     CalendarDiagnose startStr endStr ->
         dispatchCommand env (CalendarView startStr endStr)
@@ -563,13 +547,11 @@ dispatchCommand env cmd = case cmd of
     CalendarHistoryView _commitId ->
         putStrLn "Calendar history view is not yet supported in remote mode."
 
-    CalendarUnfreeze dateStr -> case parseDay dateStr of
-        Just d -> runOk env (cUnfreeze (UnfreezeReq d d)) "Date unfrozen."
-        Nothing -> putStrLn "Invalid date format."
+    CalendarUnfreeze dateStr -> withDay dateStr $ \d ->
+        runOk env (cUnfreeze (UnfreezeReq d d)) "Date unfrozen."
 
-    CalendarUnfreezeRange startStr endStr -> case (parseDay startStr, parseDay endStr) of
-        (Just s, Just e) -> runOk env (cUnfreeze (UnfreezeReq s e)) "Range unfrozen."
-        _ -> putStrLn "Invalid date format."
+    CalendarUnfreezeRange startStr endStr -> withDayPair startStr endStr $ \s e ->
+        runOk env (cUnfreeze (UnfreezeReq s e)) "Range unfrozen."
 
     CalendarFreezeStatus -> do
         result <- run env (cFreezeStatus RpcEmpty)
@@ -600,10 +582,10 @@ dispatchCommand env cmd = case cmd of
     ConfigReset -> requireAdmin env $
         runOk env (cResetConfig RpcEmpty) "Config reset to defaults."
 
-    ConfigSetPayPeriod typeStr dateStr -> requireAdmin env $ case parseDay dateStr of
-        Just d -> runOk env (cSetPayPeriod (SetPayPeriodReq typeStr d))
-            "Pay period configured."
-        Nothing -> putStrLn "Invalid date format."
+    ConfigSetPayPeriod typeStr dateStr -> requireAdmin env $
+        withDay dateStr $ \d ->
+            runOk env (cSetPayPeriod (SetPayPeriodReq typeStr d))
+                "Pay period configured."
 
     ConfigShowPayPeriod ->
         putStrLn "Pay period display is not yet supported in remote mode."
@@ -635,13 +617,11 @@ dispatchCommand env cmd = case cmd of
             Left err -> putStrLn err
 
     CmdAbsenceRequest tid wid startStr endStr ->
-        case (parseDay (T.unpack startStr), parseDay (T.unpack endStr)) of
-            (Just s, Just e) -> do
-                result <- run env (cRequestAbsence (RequestAbsenceReq wid tid s e))
-                case result of
-                    Right resp -> putStrLn ("Absence requested (id: " ++ show (acrId resp) ++ ")")
-                    Left err -> putStrLn err
-            _ -> putStrLn "Invalid date format."
+        withDayPair (T.unpack startStr) (T.unpack endStr) $ \s e -> do
+            result <- run env (cRequestAbsence (RequestAbsenceReq wid tid s e))
+            case result of
+                Right resp -> putStrLn ("Absence requested (id: " ++ show (acrId resp) ++ ")")
+                Left err -> putStrLn err
 
     AbsenceListMine ->
         putStrLn "Absence list (mine) is not yet supported in remote mode."

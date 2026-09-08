@@ -9,7 +9,9 @@ left out of the detail page. **Item 2, the problem view, is under way: pieces 1,
 `GET /api/horizons` over a generalised validation core. The blocker in front of piece 4 is
 gone too: an unscheduled day is now its own kind of problem rather than 630 understaffings
 (ADR 0007). **Piece 4, the worker and station views plus the `Station` zone label, is next**;
-piece 5 is Compromise.
+piece 5 is Compromise. The demo fixture was fixed the same day (ADR 0008): schedules now
+fill, and `demo/current-period.txt` puts a staffed restaurant under today's horizons, which
+is the fixture to open the web UI against.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -327,31 +329,69 @@ scheduler *should* honour it is a real open question, and a bigger one than it l
 `Domain.Shift` and `groupSlotsByShift` exist, so the data and the grouping are there and
 only the scoring is missing.
 
-### 3. The demo is not representative of a working restaurant
+### 3. The demo — mostly fixed 2026-09-07, with three findings left behind
 
-`make fast-demo` reports **199 assignments, 159 unfilled**. A real restaurant is mostly
-staffed, so a demo that is 80% holes gives a false picture of what the problem view will
-show and makes it impossible to tell a real regression from the fixture. Either fix the
-fixture so it fills, or — better — split it into a few named scenarios (fully staffed;
-one worker calls in sick; a station reopens understaffed) so each surface can be
-exercised against the state it is meant to display.
+**Fixed: the fixture's hour caps contradicted its pay period.** `set-hours` is a cap per
+*pay period*, so `worker set-hours <name> 40` next to `config set-pay-period biweekly` meant
+20 hours a week where the fixture plainly intended 40. The demo now sets `weekly`. Measured
+before and after, over the whole replay:
 
-**The fixture's hour caps contradict its pay period.** Found 2026-09-07 by pointing
-`GET /api/problems` at the demo database: the committed calendar reports **39 violations**
-over Apr 6–12, 38 of them `period hours`. That is not a bug in the endpoint — it is
-`config set-pay-period biweekly 2026-04-06` (line 238) sitting next to
-`worker set-hours <name> 40` (lines 147–158). `set-hours` is a cap **per pay period**, so
-with a fortnightly period those lines mean 20 hours a week, while the fixture plainly
-intends 40. Worker 2 has 38 hours in Apr 6–12 plus 4 in Apr 13–19 against a 40-hour
-fortnight, and every hour past the fortieth is reported. Either double the caps to 80 or
-set the pay period to `weekly`.
+| fixture | week 2 generate | problems on the committed Apr 6–19 calendar | revalidation demo removes |
+|---|---|---|---|
+| was (`biweekly`, 40h) | 212 assigned / 154 unfilled | 39, of which 38 `period hours` | 70 assignments |
+| **now (`weekly`, 40h)** | **410 / 8** | **5, all `consecutive hours`**, 0 understaffed | 70 assignments |
+| rejected: `biweekly` + 80h | 406 / 7 | 42 `period hours` + 3 understaffed | **395 assignments** |
 
-Worth fixing before piece 3 of item 2: the dashboard's first visualization will open on
-this fixture and announce 39 violations that are an artefact of it. Note also that this is
-the problem view doing its job — a contradiction nothing else surfaced.
+Doubling the caps looked fine at generation time and was worse everywhere else — hours are
+distributed unevenly, so two ~45-hour weeks breach an 80-hour fortnight, and re-opening a
+draft after its sibling commits then deletes nearly the whole week. Every draft in the
+replay now lands between 395 and 410 assignments with 0–11 unfilled, and the cross-draft
+revalidation demo still removes 70 assignments, so its teaching point survives.
 
-Note if you edit `demo/restaurant-setup.txt`: **every draft id in it is positional**, so
-inserting or removing a `draft create` shifts the rest.
+The cost: **the demo no longer exercises a non-weekly `PayPeriodType`.** Demonstrating
+`biweekly` needs somewhere to show the violations it causes, and nothing in the CLI reports
+problems against the committed calendar — so a `calendar problems <from> <to>` verb is the
+prerequisite, and it is a natural CLI counterpart to the problem view. Whatever demonstrates
+it must switch back to `weekly` at the end, or every demo-seeded fixture inherits 38
+period-hours violations.
+
+**Fixed: no fixture covered today.** The problem view's horizons come from today, so a
+fixture pinned to April 2026 left every horizon empty. `demo/current-period.txt` now staffs
+the current pay period from `today`, approves an absence *after* committing — the sick-call
+case, which is the one nothing else surfaces — and leaves the next period empty so the
+"not scheduled" state sits beside a staffed one. It opens on 18 problems: 11 `absence
+conflict` violations and 7 unscheduled days. The restaurant itself moved to
+`demo/restaurant.txt` and is `include`d, and dates accept `today` / `today+N` / `today-N`.
+**ADR 0008** is the decision; `demo/README.md` says which fixture to use for what.
+
+**Still open, found while verifying the above.**
+
+- **`calendar hours` counts assignments, not hours worked.** It reported tony at 45h against
+  a 40h cap with "5h overtime" on a calendar where the validator reports no violation, and
+  the validator is right: 45 assignment rows, **33 distinct hours**. The demo's
+  `station set-multi-hours` lets one worker cover two stations in the same hour, and the
+  display counts both. So the CLI's hours table overstates hours wherever multi-station
+  coverage exists, and disagrees with `exceedsPermittedHours` about who is in overtime —
+  the same family as commit `bc1d494`, this time in the display layer. `displayWorkerHours`
+  should count distinct `(worker, slot)` pairs. Small, self-contained, and it misleads
+  anyone reading the table.
+- **Five `consecutive hours` violations survive on the committed calendar**, four on Apr 6
+  and one on Apr 11 — the two days the tour **pins** Marco (`pin marco grill monday
+  morning`, `pin marco grill saturday midday`). A pinned assignment plus what the scheduler
+  adds around it appears to exceed the consecutive-hours ceiling, which would mean the pin
+  path does not ask the predicate the validator asks. Not caused by the pay-period config,
+  and worth its own investigation.
+- **The audit trail does not resolve relative dates.** `Audit.CommandMeta.classify` reads
+  the raw command line and recognises a date by shape, so `draft create today today+6` is
+  audited with empty `dateFrom` / `dateTo`. Display-only, so nothing malfunctions. See the
+  consequences section of ADR 0008 before "fixing" it.
+- **The original suggestion still stands**: more named scenarios (a station reopening
+  understaffed; a worker resigning mid-period) are now cheap, because `include` exists and
+  `demo/restaurant.txt` is shared. Add them when a surface needs a state to be exercised
+  against.
+
+Note if you edit the scenarios: **every draft id in `demo/restaurant-setup.txt` is
+positional**, so inserting or removing a `draft create` shifts the rest.
 
 ### 4. Shift delete orphans worker preferences
 
