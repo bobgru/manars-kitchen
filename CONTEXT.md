@@ -128,11 +128,22 @@ the reader to treat it as a **Violation**.
 The kind of **Problem** where a station has fewer assignments than its minimum
 staffing for a slot. A station whose minimum is zero is not understaffed by
 having nobody — it is simply not being staffed.
+_Avoid_: reporting it on a day that is **Unscheduled**. Understaffing presupposes
+an attempt to staff.
+
+**Unscheduled**:
+The kind of **Problem** where a day expects staff and holds no assignments at
+all — not "everything is wrong with this day" but "this day has not been built
+yet". Reported once for the day, in place of its stations' **Understaffing**, and
+about no worker and no station. A day on which every station is closed or at a
+zero minimum is not unscheduled; nothing was expected of it. See ADR 0007.
+_Avoid_: treating it as the sum of its slots. It is one fact about the day, which
+is why it outranks **Understaffing** and is scoped to a date rather than a slot.
 
 **Unfilled**:
 A station and slot the scheduler could not staff. The raw fact, and not yet a
 judgement: an unfilled slot is **Understaffing** only where the station's minimum
-staffing is above zero.
+staffing is above zero and the day has been staffed at all.
 
 **Horizon**:
 The date range a problem view is scoped to — today, the current pay period, or

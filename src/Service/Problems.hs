@@ -11,7 +11,7 @@
 -- draft; drafts have their own page.
 --
 -- __Compromise is not implemented here yet.__ It is piece 5 of the plan in
--- @docs\/STATUS.md@, and 'Problem' gains a constructor when it lands. The two
+-- @docs\/STATUS.md@, and 'Problem' gains a constructor when it lands. The three
 -- kinds below are the ones with a derivation that already exists.
 module Service.Problems
     ( -- * Problems
@@ -60,14 +60,17 @@ data ProblemScope
 -- | How much a problem wants attention. The ordering is what a cell showing its
 -- most-severe problem depends on.
 --
--- 'SevViolation' outranks 'SevUnderstaffed' because a violation is always
--- actionable and sometimes legally material, where understaffing may be
--- survivable. The choice is deliberately low-stakes: severity decides only which
--- kind a cell /announces/, and every cell also reports its earliest affected date
--- and lists everything in it when opened. See ADR 0006.
+-- 'SevViolation' outranks the rest because a violation is always actionable and
+-- sometimes legally material, where understaffing may be survivable.
+-- 'SevUnscheduled' sits above 'SevUnderstaffed' because a day nobody has staffed
+-- at all blocks more than a thin station does. The choice is deliberately
+-- low-stakes: severity decides only which kind a cell /announces/, and every cell
+-- also reports its earliest affected date and lists everything in it when opened.
+-- See ADR 0006 and ADR 0007.
 data Severity
     = SevCompromise
     | SevUnderstaffed
+    | SevUnscheduled
     | SevViolation
     deriving (Eq, Ord, Show, Enum, Bounded)
 
@@ -83,26 +86,37 @@ data Problem
     | PUnderstaffed !StationId !Slot !Int !Int
       -- ^ A station has fewer assignments than its minimum for a slot:
       -- station, slot, assigned, required.
+    | PUnscheduled !Day
+      -- ^ A day that expects staff and has no assignments at all. Not the same
+      -- fact as understaffing, and reported instead of it for that day — see
+      -- ADR 0007.
     deriving (Eq, Show)
 
 -- | The worker a problem is about, if any. Understaffing has none: nobody is
--- there, which is the problem.
+-- there, which is the problem. Neither has an unscheduled day, for the same
+-- reason at a larger scale.
 problemWorker :: Problem -> Maybe WorkerId
 problemWorker (PViolation v)          = Just (assignWorker (dvAssignment v))
 problemWorker (PUnderstaffed _ _ _ _) = Nothing
+problemWorker (PUnscheduled _)        = Nothing
 
--- | The station a problem is about, if any.
+-- | The station a problem is about, if any. An unscheduled day is about the whole
+-- restaurant, so it names no station: it would otherwise appear once per station
+-- and be the very per-station report it replaces.
 problemStation :: Problem -> Maybe StationId
 problemStation (PViolation v)           = Just (assignStation (dvAssignment v))
 problemStation (PUnderstaffed st _ _ _) = Just st
+problemStation (PUnscheduled _)         = Nothing
 
 problemScope :: Problem -> ProblemScope
 problemScope (PViolation v)          = ScopeSlot (assignSlot (dvAssignment v))
 problemScope (PUnderstaffed _ t _ _) = ScopeSlot t
+problemScope (PUnscheduled d)        = ScopeDay d
 
 problemSeverity :: Problem -> Severity
 problemSeverity (PViolation _)          = SevViolation
 problemSeverity (PUnderstaffed _ _ _ _) = SevUnderstaffed
+problemSeverity (PUnscheduled _)        = SevUnscheduled
 
 -- | The first day a problem affects. This is what a cell reports alongside its
 -- most-severe kind, because the question an admin is asking is "must I act
@@ -115,10 +129,10 @@ problemEarliestDay p = case problemScope p of
 -- | Every problem in an inclusive date range of the committed calendar.
 --
 -- Violations come from feeding the calendar slice through
--- 'Service.DraftValidation.validateSchedule'. Understaffing is computed against
--- the slots the range is expected to have staffed: every generated slot crossed
--- with every station, minus the station-slot pairs that fall outside a station's
--- operating hours.
+-- 'Service.DraftValidation.validateSchedule'. Staffing problems are computed
+-- against the slots the range is expected to have staffed: every generated slot
+-- crossed with every station, minus the station-slot pairs that fall outside a
+-- station's operating hours.
 --
 -- A station whose 'stationMinStaff' is zero is __not__ understaffed by having
 -- nobody on it. It is simply not being staffed, which is a fact about the
@@ -128,26 +142,48 @@ computeProblems :: Repository -> (Day, Day) -> IO [Problem]
 computeProblems repo range@(from, to) = do
     calSched <- Cal.loadCalendarSlice repo from to
     violations <- validateSchedule repo range calSched
-    understaffed <- computeUnderstaffing repo range calSched
-    return (map PViolation violations ++ understaffed)
+    staffing <- computeStaffingProblems repo range calSched
+    return (map PViolation violations ++ staffing)
 
--- | Station-slot pairs staffed below their minimum.
-computeUnderstaffing :: Repository -> (Day, Day) -> Schedule -> IO [Problem]
-computeUnderstaffing repo (from, to) sched = do
+-- | Days nobody has staffed at all, and station-slots staffed below their
+-- minimum.
+--
+-- These are computed together because they are alternatives. A day that expects
+-- staff and holds no assignments whatsoever is __unscheduled__, reported once for
+-- the day, and its station-slots are /not/ also reported understaffed: the admin's
+-- situation there is "I have not built this period yet", not one problem per open
+-- station-slot. Understaffing presupposes an attempt to staff. ADR 0007.
+--
+-- A day on which the restaurant expects nobody — every station either closed or
+-- at a zero minimum — is neither unscheduled nor understaffed. It is a day off,
+-- which is the same reasoning the zero-minimum station already gets.
+computeStaffingProblems :: Repository -> (Day, Day) -> Schedule -> IO [Problem]
+computeStaffingProblems repo (from, to) sched = do
     stations <- repoListStations repo
     skillCtx <- repoLoadSkillCtx repo
     let slots  = generateDateRangeSlots defaultHours from to Set.empty
         closed = stationClosedSlots skillCtx slots
-    return
-        [ PUnderstaffed st t assigned required
-        | (st, station) <- stations
-        , let required = stationMinStaff station
-        , required > 0
-        , t <- slots
-        , not (Set.member (st, t) closed)
-        , let assigned = stationStaffCount st t sched
-        , assigned < required
-        ]
+        -- The station-slots the range is expected to have staffed.
+        expected =
+            [ (st, t, stationMinStaff station)
+            | (st, station) <- stations
+            , stationMinStaff station > 0
+            , t <- slots
+            , not (Set.member (st, t) closed)
+            ]
+        -- Any assignment at all counts as an attempt, including one onto a
+        -- zero-minimum station: the question is whether the day was worked on.
+        attempted   = Set.map (slotDate . assignSlot) (unSchedule sched)
+        expecting   = Set.fromList [slotDate t | (_, t, _) <- expected]
+        unscheduled = expecting `Set.difference` attempted
+    return $
+        map PUnscheduled (Set.toList unscheduled)
+            ++ [ PUnderstaffed st t assigned required
+               | (st, t, required) <- expected
+               , not (Set.member (slotDate t) unscheduled)
+               , let assigned = stationStaffCount st t sched
+               , assigned < required
+               ]
 
 -- | One selectable date range for the problem view, with a label a client can
 -- show without doing pay-period arithmetic of its own.

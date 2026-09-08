@@ -113,14 +113,16 @@ the confirmation handed to the list, and the terminal state for a draft id that 
 not exist. It mutates the database, so **re-run it against a fresh copy**.
 `e2e:calendar` walks four — the live month, a history snapshot, and both branches of
 the range guard. `e2e:dashboard` walks seven — the three horizon segments and their
-marks, the hours grid, a marked cell and its detail pane, switching horizon, and the
-count coming down live over SSE once a draft is committed over the current period. It
-mutates the database too.
+marks, the unscheduled-day baseline, switching horizon, the per-hour problems appearing
+live over SSE once a draft is committed over the current period, and a marked cell with
+its detail pane. It mutates the database too.
 
-**The demo fixture makes the problem view look alarming, and that is the fixture.**
-Its calendar is April 2026, which no horizon covers, so a demo-seeded database opens
-on roughly 630 understaffing problems per fortnight — every open station-slot, unstaffed.
-See `docs/STATUS.md` items 2a and 3 before concluding the page is broken.
+**A demo-seeded problem view opens on "not scheduled", and that is the fixture.** Its
+calendar is April 2026, which no horizon covers, so nobody is on any day in range. Each
+such day is reported once as unscheduled rather than as ~45 understaffings (ADR 0007), so
+the opening screen is 14 problems per fortnight, one badge per column, and **no hour
+cells** — there is nothing to click until something is committed over the period. See
+`docs/STATUS.md` item 3 before concluding the page is broken.
 
 To drive a different page, copy the closest of the three — each header lists the
 prerequisites it does not manage.
@@ -169,7 +171,7 @@ stack test --pedantic manars-kitchen:test:manars-kitchen-integration-test
 ```
 
 As of 2026-09-07: 400 unit examples, 0 failures, 1 pending (a known optimizer
-divergence, `docs/STATUS.md` item 6); 279 integration examples, 0 failures. The
+divergence, `docs/STATUS.md` item 6); 280 integration examples, 0 failures. The
 only warnings in a clean build are three `ld: warning: -U option is redundant`
 lines from the macOS linker.
 

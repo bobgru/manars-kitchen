@@ -6,8 +6,10 @@ page shipped, and with it the `ScheduleGrid` and `CommitDraftDialog` extractions
 old item 1 is gone from this file entirely. Item 1 is now the three pieces deliberately
 left out of the detail page. **Item 2, the problem view, is under way: pieces 1, 2 and 3 of
 5 are done** — `/` is the problem view, served by `GET /api/problems` and
-`GET /api/horizons` over a generalised validation core. Piece 4 is the worker and station
-views plus the `Station` zone label; piece 5 is Compromise.
+`GET /api/horizons` over a generalised validation core. The blocker in front of piece 4 is
+gone too: an unscheduled day is now its own kind of problem rather than 630 understaffings
+(ADR 0007). **Piece 4, the worker and station views plus the `Station` zone label, is next**;
+piece 5 is Compromise.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -217,8 +219,9 @@ three is in **ADR 0005**.
 The `/` dashboard becomes a visualization of **problems** across workers, stations and
 slots. **ADR 0004** is the design and the rejected alternatives; **ADR 0006** is what
 grilling it settled — the API shape, the `Problem` type, severity order, and which
-compromises are derivable. The vocabulary is in `CONTEXT.md` under "Problems". Read all
-three before starting; the shape is not obvious from the code.
+compromises are derivable; **ADR 0007** adds the fourth kind, an unscheduled day, and
+refines 0006's constructor count and severity order. The vocabulary is in `CONTEXT.md`
+under "Problems". Read all four before starting; the shape is not obvious from the code.
 
 Five pieces, in this order. Each is independently shippable.
 
@@ -279,6 +282,19 @@ Five pieces, in this order. Each is independently shippable.
 3. **The hours view at `/`, plus the horizon control.** One visualization end to end,
    replacing the ten-line `DashboardPage`. Days across the top, hours down the side. The
    first piece anyone can look at.
+3a. ~~**An unscheduled day is not understaffing.**~~ — shipped 2026-09-07 as
+   `PUnscheduled`, the fourth `Problem` constructor, ranked between violation and
+   understaffing. `computeUnderstaffing` became `computeStaffingProblems`, which decides per
+   day which of the two applies: any assignment at all on the day is the attempt to staff.
+   The demo fixture's opening screen went from 630 problems to 14. **ADR 0007** is the
+   decision and the rejected options. This was the item 2a that blocked piece 4.
+
+   Two consequences piece 4 inherits. `PUnscheduled` is the first **`ScopeDay`** problem
+   that actually exists, so each projection needs a place to put one — the hours view uses
+   the column header plus a sentence above the grid, and hatching rather than a tint. And it
+   is about **no worker and no station**, so a worker-row or station-row projection cannot
+   place it on a row at all; a per-column header or footer band is the shape that carries
+   over.
 4. **The worker and station views.** Same day columns, rows of workers and of
    stations-grouped-by-zone, so one date lines up vertically across all three panels. This
    is where the nullable **zone label on `Station`** lands, with its CLI verb and REST
@@ -310,34 +326,6 @@ compromises and why `CONTEXT.md`'s Compromise entry had to be corrected. Whether
 scheduler *should* honour it is a real open question, and a bigger one than it looks:
 `Domain.Shift` and `groupSlotsByShift` exist, so the data and the grouping are there and
 only the scoring is missing.
-
-### 2a. Does understaffing presuppose an attempt to staff? — open, found 2026-09-07
-
-**Decide this before piece 4.** Piece 3 made it visible: point the problem view at a pay
-period nobody has scheduled yet and it reports **630 understaffing problems per
-fortnight** — every open station-slot, because every open station-slot is empty. On the
-demo fixture, whose calendar is April 2026, that is the entire opening screen. Technically
-correct, and useless: the admin's situation is "I have not built this period yet", not
-"630 things are wrong".
-
-`CONTEXT.md` already draws the neighbouring line — a station whose minimum is zero is not
-understaffed by having nobody, it is simply not being staffed. The question is whether the
-same reasoning extends from a *station* to a *range*: is a day with no assignments at all
-understaffed, or unscheduled?
-
-Three options, none implemented:
-
-- **Leave it.** 630 is honest, and the horizon marks still tell you which period to look
-  at. Cheapest, and the counts stay comparable across periods.
-- **Report "not scheduled" as its own state** for a day with zero assignments, once per
-  day rather than once per station-slot. Needs a third `Problem` constructor and a cell
-  state, and it is a genuinely different fact from understaffing.
-- **Only report understaffing where the day has at least one assignment**, on the grounds
-  that understaffing presupposes an attempt. Smallest change; loses the ability to say
-  "nothing is scheduled" at all, which may be the more useful message.
-
-Whichever way, it changes `Service.Problems` and so belongs before the worker and station
-views project the same set twice more.
 
 ### 3. The demo is not representative of a working restaurant
 
@@ -467,10 +455,10 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   Nothing warns. Also absent: **calendar assignments**, drafts, pins, shifts,
   scheduler config and the pay-period config. So an export is reference data, not a
   database snapshot, and it is the wrong fixture for anything that reads the
-  calendar — a problem view built on it would report understaffing on every open
-  station-slot (because every minimum became 1) and no violations at all (because
-  there are no assignments). Found 2026-09-07 when a reimported export showed no
-  problems. Decide whether export is *meant* to be a full snapshot before adding
+  calendar — a problem view built on it reports every day in range as **unscheduled**
+  (because there are no assignments) and, once a day is touched, understaffing on
+  every open station-slot (because every minimum became 1), and no violations at all.
+  Found 2026-09-07 when a reimported export showed no problems. Decide whether export is *meant* to be a full snapshot before adding
   fields: if it is, the gap is a bug; if it is reference data by design, it should
   say so and `--demo` should stay the only way to get a populated calendar.
 - **Import does not refresh the GUI.** `Handlers.hs` publishes `import data`,
@@ -748,18 +736,13 @@ committed. Measured costs and caveats are in `dev/docker/README.md` §5.4 and
 
 ## Open questions
 
-Two are open as of 2026-09-07, and both want a decision rather than more code. The
+One is open as of 2026-09-07, and it wants a decision rather than more code. The
 named-schedules-vs-drafts question that used to sit here was settled on 2026-08-23 in
 favour of drafts — see ADR 0001. The draft workflow above is unblocked rather than
-deferred.
+deferred. "Does understaffing presuppose an attempt to staff?" was settled on 2026-09-07 —
+it does, see ADR 0007.
 
-**1. Does understaffing presuppose an attempt to staff?** Written up as item 2a, and it
-blocks piece 4 of item 2 — the worker and station views project the same problem set twice
-more, so the answer should land before they do. Short version: a pay period nobody has
-scheduled reports one understaffing problem per open station-slot, about 630 a fortnight,
-which is true and useless.
-
-**2. Should unfreeze be server-side state, or stay a CLI-session concept the web UI cannot
+**Should unfreeze be server-side state, or stay a CLI-session concept the web UI cannot
 reach?** Today it is the latter by accident rather than by decision. An unfreeze is an
 `IORef` in one CLI process; `POST /api/calendar/unfreeze` returns 204 and does nothing;
 and the freeze line is recomputed from the clock per call rather than being state anyone

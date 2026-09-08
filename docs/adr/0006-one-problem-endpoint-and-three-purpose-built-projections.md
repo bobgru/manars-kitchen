@@ -17,6 +17,9 @@ request, and the marks on the horizon control cannot disagree with the view they
 `PViolation` wraps the existing `DraftViolation` rather than re-modelling it. Severity
 orders `Violation > Understaffing > Compromise`.
 
+**Refined by ADR 0007**: there are four constructors, and the order is
+`Violation > Unscheduled > Understaffing > Compromise`.
+
 ## Considered Options
 
 **Three endpoints, one per projection**, was rejected because it is the mechanism by which

@@ -127,11 +127,24 @@ export default function DashboardPage() {
     [selected, freezeLine]
   );
 
-  // Day-scoped problems cannot sit in an hour cell. None exist yet; compromises
-  // in piece 5 will be the first, and this reports them rather than dropping them
-  // silently.
+  // A day nobody has staffed at all is one problem about the whole day, not a
+  // grid of empty cells, so it belongs in the column header. The server has
+  // already suppressed that day's per-slot understaffing — ADR 0007 — which is
+  // why those columns come through empty.
+  const unscheduledDays = useMemo(
+    () =>
+      new Set(
+        shown.filter((p) => p.kind === "unscheduled").map((p) => problemDay(p))
+      ),
+    [shown]
+  );
+
+  // Any other day-scoped problem cannot sit in an hour cell either. None exist
+  // yet; compromises in piece 5 may be the first, and this reports them rather
+  // than dropping them silently.
   const dayScoped = useMemo(
-    () => shown.filter((p) => problemHour(p) === null),
+    () =>
+      shown.filter((p) => problemHour(p) === null && p.kind !== "unscheduled"),
     [shown]
   );
 
@@ -182,6 +195,9 @@ export default function DashboardPage() {
         `${stationName(p.station)} — ${p.assigned ?? 0} of ${p.required ?? 0} ` +
         `staffed`
       );
+    }
+    if (p.kind === "unscheduled") {
+      return `${problemDay(p)} — nobody is scheduled on this day at all`;
     }
     return `${kindLabel(p.kind)} — ${stationName(p.station)}`;
   }
@@ -246,6 +262,19 @@ export default function DashboardPage() {
                 station meets its minimum.
               </p>
             )}
+            {/* Said once, in words, above the grid: "I have not built this period
+                yet" is a different situation from a list of things being wrong,
+                and it is the one the hatched columns below are reporting. */}
+            {unscheduledDays.size > 0 && (
+              <p className="msg-warn">
+                {unscheduledDays.size === columns.length
+                  ? `Nothing is scheduled in this range yet — none of these ` +
+                    `${columns.length} days has a single assignment.`
+                  : `${unscheduledDays.size} of these ${columns.length} days ` +
+                    `have no assignments at all, so their stations are reported ` +
+                    `as not scheduled rather than understaffed.`}
+              </p>
+            )}
             {dayScoped.length > 0 && (
               <p className="msg-warn">
                 {dayScoped.length} problem(s) affect whole days rather than single
@@ -264,6 +293,9 @@ export default function DashboardPage() {
                           [
                             c.weekend ? "calendar-col-weekend" : "",
                             c.frozen ? "calendar-col-frozen" : "",
+                            unscheduledDays.has(c.day)
+                              ? "calendar-col-unscheduled"
+                              : "",
                           ]
                             .filter(Boolean)
                             .join(" ") || undefined
@@ -272,6 +304,14 @@ export default function DashboardPage() {
                       >
                         {c.label}
                         {c.frozen ? " ❄" : ""}
+                        {unscheduledDays.has(c.day) && (
+                          /* The day's own problem, stated in words in the header
+                             it is about: an empty column otherwise reads as a day
+                             with nothing wrong. */
+                          <span className="problem-day-badge">
+                            {kindGlyph("unscheduled")} not scheduled
+                          </span>
+                        )}
                       </th>
                     ))}
                   </tr>
@@ -283,9 +323,13 @@ export default function DashboardPage() {
                       {columns.map((c) => {
                         const here = byCell.get(cellKey(c.day, h));
                         const closed = !c.open.has(h);
+                        const unscheduled = unscheduledDays.has(c.day);
                         const classes = ["problem-cell"];
                         if (c.weekend) classes.push("calendar-col-weekend");
                         if (closed && !here) classes.push("calendar-cell-closed");
+                        if (unscheduled && !closed && !here) {
+                          classes.push("problem-cell-unscheduled");
+                        }
                         const isOpen =
                           selectedCell?.day === c.day && selectedCell?.hour === h;
                         if (isOpen) classes.push("problem-cell-selected");
@@ -301,7 +345,9 @@ export default function DashboardPage() {
                                 ? here.map(describe).join("\n")
                                 : closed
                                   ? "Closed"
-                                  : undefined
+                                  : unscheduled
+                                    ? "Not scheduled: nobody is on this day at all"
+                                    : undefined
                             }
                             onClick={
                               here
@@ -325,6 +371,7 @@ export default function DashboardPage() {
             </div>
             <div className="calendar-legend">
               <span>! violates a hard rule</span>
+              <span>&#9675; not scheduled: nobody on that day at all</span>
               <span>&#9660; understaffed, below the station's minimum</span>
               <span>Number: how many problems in that hour</span>
               <span>Tinted column: weekend</span>

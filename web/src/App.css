@@ -721,6 +721,33 @@ th.calendar-col-frozen {
   cursor: pointer;
 }
 
+/*
+ * A day nobody has staffed. The header says "not scheduled" in words and the
+ * cells below are hatched — texture rather than hue, so the column still reads as
+ * different from a clear one without depending on colour vision.
+ */
+.calendar-col-unscheduled {
+  border-bottom: 2px solid #ffffff;
+}
+
+.problem-day-badge {
+  display: block;
+  color: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.problem-cell-unscheduled {
+  background: repeating-linear-gradient(
+    45deg,
+    #1a1a2e,
+    #1a1a2e 4px,
+    #2f3550 4px,
+    #2f3550 8px
+  );
+}
+
 .problem-cell-understaffed {
   background: #123048;
   color: #cfe8ff;

@@ -15,11 +15,12 @@
  *      **Checkpoint before copying** or the copy has an empty calendar.
  *
  *      Note what the demo gives this page: its committed calendar is April 2026,
- *      which **no horizon covers**, so every station-slot in the current and next
- *      pay periods is unstaffed and the opening view is wall-to-wall
- *      understaffing — around 630 problems per fortnight. That is the fixture,
- *      not the page. This script asserts on that baseline and then commits a
- *      draft over the current period to prove the count comes down.
+ *      which **no horizon covers**, so nobody is on any day of the current or next
+ *      pay period. The opening view is therefore one "not scheduled" day per
+ *      column and **no** hour cells — understaffing presupposes an attempt to
+ *      staff, so an untouched day is reported once instead of 45 times (ADR 0007).
+ *      This script asserts that baseline, then commits a draft over the current
+ *      period, which is what turns the day badges into per-hour problems.
  *   2. `stack exec manars-server -- /tmp/mk-dash.db` on port 8080.
  *   3. `npm run dev` in web/ on port 5173.
  *   4. `npx playwright install chromium` once.
@@ -85,15 +86,19 @@ await page.getByText(/Today/).first().waitFor();
 await page.locator("table.calendar-grid").waitFor();
 await step("p01-initial");
 
-// The demo's committed calendar is April 2026, which no horizon covers. So every
-// station-slot in range is unstaffed and the whole grid is understaffing. That is
-// the honest baseline for this fixture, and it is the state docs/STATUS.md
-// discusses under "understaffing presupposes an attempt to staff".
+// The demo's committed calendar is April 2026, which no horizon covers, so nobody
+// is on any day in range. Each such day is reported once as "not scheduled" and
+// its station-slots are not reported understaffed — ADR 0007. So the baseline is
+// day badges and an empty grid, not 630 marks.
+const initialBadges = await page.locator(".problem-day-badge").count();
+if (initialBadges === 0) fail("no 'not scheduled' badge on a period nobody staffed");
 const initialMarks = await page.locator(".problem-mark").count();
-if (initialMarks === 0) fail("no marked cells on a range with nothing scheduled");
-const initialUnderstaffed = await page.locator(".problem-cell-understaffed").count();
-if (initialUnderstaffed === 0) fail("nothing rendered as understaffed");
-console.log(`${initialMarks} marked cells, ${initialUnderstaffed} understaffed`);
+if (initialMarks !== 0) {
+  fail(`an unscheduled day should have no hour cells, saw ${initialMarks}`);
+}
+// The badge says it in words, not by colour or hatching alone.
+await page.getByText(/not scheduled/).first().waitFor();
+console.log(`${initialBadges} days reported as not scheduled, ${initialMarks} marks`);
 await shotOf(page.locator(".horizon-bar"), "p02-horizon-bar");
 
 // Every segment reports a count, which is what makes the control a mark as well
@@ -106,31 +111,13 @@ for (const key of ["Today", "2026-"]) {
   }
 }
 
-// --- The detail pane --------------------------------------------------------
-await page.locator(".problem-mark").first().click();
-await page.getByRole("heading", { name: /\d+ problem\(s\)/ }).waitFor();
-const items = await page.locator(".detail-section li").count();
-if (items === 0) fail("detail pane opened with no problems listed");
-const selectedCells = await page.locator(".problem-cell-selected").count();
-if (selectedCells !== 1) {
-  fail(`expected exactly one selected cell, got ${selectedCells}`);
-}
-// The pane says what is wrong in words, not just a glyph.
-await page.getByText(/staffed/).first().waitFor();
-console.log(`detail pane lists ${items} problem(s)`);
-await step("p03-detail-pane");
-await shotOf(page.locator(".detail-section").last(), "p04-detail-section");
-
-await page.getByRole("button", { name: "Close" }).click();
-await page.getByText(/Click a marked cell/).waitFor();
-
 // --- Switching horizon is a filter, not a refetch ---------------------------
 await segs.filter({ hasText: "Today" }).click();
 await page.getByRole("heading", { name: /^By hour/ }).waitFor();
 const todayCols = await page.locator("thead th").count();
 // One hour gutter plus exactly one day column.
 if (todayCols !== 2) fail(`Today should show one day column, saw ${todayCols - 1}`);
-await step("p05-today");
+await step("p03-today");
 
 // --- Staffing the period changes the answer, live over SSE ------------------
 const horizons = await api("/api/horizons");
@@ -162,18 +149,44 @@ if (committed.status !== 204) fail(`commit returned ${committed.status}`);
 // that rather than reloading by hand, because live refresh is part of what this
 // page promises: an approved absence or a revoked skill changes the answer without
 // anyone touching the calendar.
+//
+// Staffing the period is what converts "not scheduled" into per-hour problems: the
+// days have been worked on now, so their remaining gaps are understaffing.
 await page.waitForFunction(
-  (before) => document.querySelectorAll(".problem-mark").length !== before,
-  initialMarks,
-  { timeout: 20000 }
+  () => document.querySelectorAll(".problem-mark").length > 0,
+  null,
+  { timeout: 30000 }
 );
 const afterMarks = await page.locator(".problem-mark").count();
-console.log(`marked cells went ${initialMarks} -> ${afterMarks} after committing`);
-if (afterMarks >= initialMarks) {
-  fail(`staffing the period should reduce marks (${initialMarks} -> ${afterMarks})`);
+const afterBadges = await page.locator(".problem-day-badge").count();
+console.log(
+  `after committing: ${afterBadges} unscheduled days (was ${initialBadges}), ` +
+    `${afterMarks} marked cells (was ${initialMarks})`
+);
+if (afterBadges >= initialBadges) {
+  fail(`staffing the period should clear day badges (${initialBadges} -> ${afterBadges})`);
 }
-await step("p06-after-staffing");
-await shotOf(page.locator(".horizon-bar"), "p07-horizon-bar-after");
+await step("p04-after-staffing");
+await shotOf(page.locator(".horizon-bar"), "p05-horizon-bar-after");
+
+// --- The detail pane --------------------------------------------------------
+// Only reachable now: an unscheduled day has no cells to open.
+await page.locator(".problem-mark").first().click();
+await page.getByRole("heading", { name: /\d+ problem\(s\)/ }).waitFor();
+const items = await page.locator(".detail-section li").count();
+if (items === 0) fail("detail pane opened with no problems listed");
+const selectedCells = await page.locator(".problem-cell-selected").count();
+if (selectedCells !== 1) {
+  fail(`expected exactly one selected cell, got ${selectedCells}`);
+}
+// The pane says what is wrong in words, not just a glyph.
+await page.getByText(/staffed|scheduled|:/).first().waitFor();
+console.log(`detail pane lists ${items} problem(s)`);
+await step("p06-detail-pane");
+await shotOf(page.locator(".detail-section").last(), "p07-detail-section");
+
+await page.getByRole("button", { name: "Close" }).click();
+await page.getByText(/Click a marked cell/).waitFor();
 
 console.log(
   errors.length ? `CONSOLE ERRORS:\n${errors.join("\n")}` : "no unexpected console errors"

@@ -10,12 +10,16 @@ import type { Assignment, Slot } from "./calendar";
  * It is in the union because the server will start sending it without a version
  * bump, and a client that switched exhaustively today would break silently then.
  */
-export type ProblemKind = "violation" | "understaffed" | "compromise";
+export type ProblemKind =
+  | "violation"
+  | "unscheduled"
+  | "understaffed"
+  | "compromise";
 
 /**
- * What a problem is scoped to. Everything today is `slot`-scoped; `day` exists
- * because a worker over their pay-period hour limit is a fact about many stations
- * across many days.
+ * What a problem is scoped to. `unscheduled` is the one `day`-scoped kind so far;
+ * `day` also covers a worker over their pay-period hour limit, which is a fact
+ * about many stations across many days.
  */
 export interface ProblemScope {
   kind: "slot" | "day";
@@ -35,7 +39,8 @@ export interface ViolationDetail {
  *
  * `worker` and `station` are nullable because not every problem has both:
  * understaffing is a station-and-slot fact with nobody in it, which is the
- * problem. These two plus the scope are the envelope the projections filter on.
+ * problem, and an unscheduled day has neither. These two plus the scope are the
+ * envelope the projections filter on.
  */
 export interface Problem {
   kind: ProblemKind;
@@ -110,6 +115,8 @@ export function kindGlyph(kind: ProblemKind): string {
   switch (kind) {
     case "violation":
       return "!";
+    case "unscheduled":
+      return "○"; // empty circle: nobody on the day at all
     case "understaffed":
       return "▼"; // black down-pointing triangle: below minimum
     case "compromise":
@@ -121,6 +128,8 @@ export function kindLabel(kind: ProblemKind): string {
   switch (kind) {
     case "violation":
       return "Violation";
+    case "unscheduled":
+      return "Not scheduled";
     case "understaffed":
       return "Understaffed";
     case "compromise":

@@ -1358,8 +1358,9 @@ instance ToJSON StationReferencesResp where
 -- disagree.
 --
 -- @worker@ and @station@ are nullable because not every problem has both:
--- understaffing is a station-and-slot fact with no worker at all. This is the
--- envelope the three projections in ADR 0004 filter on.
+-- understaffing is a station-and-slot fact with no worker at all, and an
+-- unscheduled day has neither. This is the envelope the three projections in
+-- ADR 0004 filter on.
 newtype ProblemResp = ProblemResp Problem
     deriving (Eq, Show)
 
@@ -1376,15 +1377,18 @@ instance ToJSON ProblemResp where
 problemKindName :: Problem -> Text
 problemKindName (PViolation _)          = "violation"
 problemKindName (PUnderstaffed _ _ _ _) = "understaffed"
+problemKindName (PUnscheduled _)        = "unscheduled"
 
 -- | The kind-specific payload. A client switches on @kind@ to know which of
--- these to read.
+-- these to read. An unscheduled day adds nothing: the day is already in @scope@,
+-- and "nobody at all" has no counts to report.
 problemDetail :: Problem -> [Pair]
 problemDetail (PViolation v) = ["violation" .= v]
 problemDetail (PUnderstaffed _ _ assigned required) =
     [ "assigned" .= assigned
     , "required" .= required
     ]
+problemDetail (PUnscheduled _) = []
 
 scopeJson :: ProblemScope -> Value
 scopeJson (ScopeSlot t) = object ["kind" .= ("slot" :: Text), "slot" .= t]
@@ -1405,6 +1409,10 @@ instance FromJSON ProblemResp where
                 assigned <- v .: "assigned"
                 required <- v .: "required"
                 pure (ProblemResp (PUnderstaffed st slot assigned required))
+            "unscheduled" -> do
+                scope <- v .: "scope"
+                day   <- withObject "scope" (.: "day") scope
+                pure (ProblemResp (PUnscheduled day))
             other -> fail ("unknown problem kind: " ++ T.unpack other)
 
 -- | One horizon the problem view can be scoped to.

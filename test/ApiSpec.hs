@@ -653,20 +653,45 @@ spec = do
             Right problems <- runClientM (getProblemsC (Just from) (Just to)) env
             problems `shouldBe` []
 
-        it "reports understaffing for a station nobody is on" $
+        -- Understaffing presupposes an attempt to staff, so a day with no
+        -- assignments at all is unscheduled: one problem for the day rather than
+        -- one per open station-slot. ADR 0007.
+        it "reports a day nobody has touched once, as unscheduled" $
             withSeededApp $ \repo env -> do
                 _ <- SW.addStation repo "grill" 1 1
                 day <- fromToday 30
                 Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
-                let understaffed =
-                        [ (a, r) | ProblemResp (PUnderstaffed _ _ a r) <- problems ]
-                understaffed `shouldSatisfy` (not . null)
-                -- Nothing else in the range: no assignments means no violations.
-                length understaffed `shouldBe` length problems
-                all (== (0, 1)) understaffed `shouldBe` True
+                [d | ProblemResp (PUnscheduled d) <- problems] `shouldBe` [day]
+                -- The day has at least four open hours whatever weekday it lands
+                -- on, and still reports one problem: the unscheduled day stands in
+                -- for every station-slot inside it.
+                length problems `shouldBe` 1
+
+        it "reports understaffing on a day that has been staffed at all" $
+            withSeededApp $ \repo env -> do
+                staffed <- SW.addStation repo "grill" 1 1
+                empty <- SW.addStation repo "fryer" 2 2
+                day <- fromToday 30
+                -- One assignment is the attempt to staff. Committed directly
+                -- rather than generated, so the fixture cannot drift with the
+                -- scheduler.
+                let slot = Slot day (TimeOfDay 9 0 0) 3600
+                Cal.commitToCalendar repo day day "one hour on grill" Nothing
+                    (Schedule (Set.singleton (Assignment (WorkerId 1) staffed slot)))
+                Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
+                [d | ProblemResp (PUnscheduled d) <- problems] `shouldBe` []
+                let gaps =
+                        [ (a, r)
+                        | ProblemResp (PUnderstaffed st _ a r) <- problems
+                        , st == empty
+                        ]
+                gaps `shouldSatisfy` (not . null)
+                all (== (0, 2)) gaps `shouldBe` True
 
         -- A station whose minimum is zero is not understaffed by having nobody on
-        -- it. It is simply not being staffed. CONTEXT.md, "Understaffing".
+        -- it. It is simply not being staffed. CONTEXT.md, "Understaffing". A day on
+        -- which no station expects anybody is not unscheduled either, for the same
+        -- reason: nothing was expected of it.
         it "reports nothing for a station whose minimum is zero" $
             withSeededApp $ \repo env -> do
                 _ <- SW.addStation repo "prep" 0 2
