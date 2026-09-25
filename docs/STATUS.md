@@ -1,6 +1,15 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-25 · **item 2, the problem view, has pieces 1–4 of 5 done.**
+**Last updated:** 2026-09-25 (evening) · **item 2, the problem view, is complete: piece 5,
+Compromise, shipped** (ADR 0010) — three kinds per assignment, hideable with a remembered
+checkbox, and a `compromise` browser demo. Alongside it three ways the calendar could hold
+violations the scheduler never saw are closed: look-back hours were counted twice for a
+mid-period range, a two-period range was judged against one period, and a pin could sit
+beside a committed hour it made illegal. The CLI hours table counts hours worked now. One
+new finding is recorded under item 7: **the scheduler builds a multi-period draft under one
+period's caps.** The paragraph below is the morning's state and still describes the panels.
+
+**Earlier on 2026-09-25** · **item 2, the problem view, has pieces 1–4 of 5 done.**
 `/` now shows three panels over one problem set — by hour, by worker, and by station
 grouped by zone — as three row groups of one table so a date lines up vertically, with a
 cross-panel highlight when one problem is picked from the detail list. `Station` gained a
@@ -10,8 +19,8 @@ that work and are fixed: name resolution dropped shell quoting, so any quoted ar
 after a resolvable name silently did nothing; and `npm run e2e:dashboard` only passed on a
 Monday. **Piece 5, Compromise, is next.** Item 1 is the three pieces deliberately left out
 of the draft detail page. Also new on 2026-09-25: **a library of browser demos** in
-`web/demos/` — captioned Playwright walkthroughs launched with one command, two so far
-(`current-period`, `feature-tour`); see `demo/README.md`. They narrate rather than
+`web/demos/` — captioned Playwright walkthroughs launched with one command, three so far
+(`current-period`, `compromise`, `feature-tour`); see `demo/README.md`. They narrate rather than
 assert, and `--headless --shots` is how to check one still runs after a UI change. The demo fixtures (ADR 0008) are unchanged in shape:
 `demo/current-period.txt` is the one to open the web UI against.
 
@@ -158,9 +167,17 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at the three-panel problem view (2026-09-25)** — everything
-above, plus the zone label, the worker and station panels, the cross-panel highlight, and
-the quoting fix in name resolution. All of this was green, with `LANG` unset:
+**Verification baseline at Compromise (2026-09-25, evening)** — everything above, plus
+compromises, the three hour-counting fixes and the pin seed rule in ADR 0010, the CLI hours
+table, and the `compromise` demo. All of this was green, with `LANG` unset:
+
+- `stack clean && stack build --pedantic` — clean, no warnings.
+- 288 integration + 412 unit examples, 0 failures, 1 pending (the weekend divergence in
+  item 6), run sequentially — never two `stack test` invocations at once, see item 5.
+- `npm run e2e:dashboard` passes, now also checking the compromise filter; all three
+  browser demos complete every step headless.
+
+**The previous baseline, the same morning:**
 
 - `stack clean && stack build --pedantic` — clean, no warnings.
 - 284 integration + 407 unit examples, 0 failures, 1 pending (the weekend divergence in
@@ -332,6 +349,19 @@ Five pieces, in this order. Each is independently shippable.
    stations-grouped-by-zone, so one date lines up vertically across all three panels. This
    is where the nullable **zone label on `Station`** lands, with its CLI verb and REST
    route. Not coordinates; the floor plan is deferred in ADR 0004.
+5. ~~**Compromise**~~ — shipped 2026-09-25 as `PCompromise Assignment CompromiseKind`,
+   with `AuthorisedOvertime total cap`, `StationNotPreferred prefs` and `VarietyRepeat day`.
+   Judged in `Service.Problems.compromisesOf` over the same context and look-back as
+   violations (`Service.DraftValidation.judgementContext`), never for an assignment that is
+   a violation. `GET /api/problems` carries `kind: "compromise"`, the `assignment`, and a
+   `compromise` object whose own `kind` picks the sentence. The dashboard has a "Show
+   compromises" checkbox, on by default and remembered, that drops them from counts, panels
+   and detail pane together. Four `ApiSpec` examples, one per kind plus the violation
+   precedence. **ADR 0010** has the decisions and the rejected options. Volume on the demo
+   fixtures: 121 in the staffed week beside 7 violations, 236 over the tour's fortnight.
+
+   **Original wording follows.**
+
 5. **Compromise** — the three kinds from ADR 0006, added to the existing endpoint and
    picked up by views that already work. Last because it is the most judgement-heavy part
    and everything above is useful without it.
@@ -395,23 +425,24 @@ conflict` violations and 7 unscheduled days. The restaurant itself moved to
 `demo/restaurant.txt` and is `include`d, and dates accept `today` / `today+N` / `today-N`.
 **ADR 0008** is the decision; `demo/README.md` says which fixture to use for what.
 
-**Still open, found while verifying the above.**
+**Fixed 2026-09-25, both of the findings below; see ADR 0010.** `displayWorkerHours`
+counts distinct `(worker, slot)` pairs. The five consecutive-hours violations were two
+things: the scheduler's backward-only `needsBreak` could not see a pin ahead of the fill
+order as the hour too many (the scheduler now asks `wouldExceedConsecutive`, which looks
+both ways), and a draft seeded from a committed week plus a pin added afterwards carried
+the illegal run in the seed (a pin now displaces a calendar hour of the same worker's day
+that it makes illegal). The tour's two committed weeks report no violations at all now.
+The original findings follow for the record.
 
-- **`calendar hours` counts assignments, not hours worked.** It reported tony at 45h against
+- ~~**`calendar hours` counts assignments, not hours worked.**~~ It reported tony at 45h against
   a 40h cap with "5h overtime" on a calendar where the validator reports no violation, and
   the validator is right: 45 assignment rows, **33 distinct hours**. The demo's
   `station set-multi-hours` lets one worker cover two stations in the same hour, and the
-  display counts both. So the CLI's hours table overstates hours wherever multi-station
-  coverage exists, and disagrees with `exceedsPermittedHours` about who is in overtime —
-  the same family as commit `bc1d494`, this time in the display layer. `displayWorkerHours`
-  should count distinct `(worker, slot)` pairs. Small, self-contained, and it misleads
-  anyone reading the table.
-- **Five `consecutive hours` violations survive on the committed calendar**, four on Apr 6
-  and one on Apr 11 — the two days the tour **pins** Marco (`pin marco grill monday
-  morning`, `pin marco grill saturday midday`). A pinned assignment plus what the scheduler
-  adds around it appears to exceed the consecutive-hours ceiling, which would mean the pin
-  path does not ask the predicate the validator asks. Not caused by the pay-period config,
-  and worth its own investigation.
+  display counts both.
+- ~~**Five `consecutive hours` violations survive on the committed calendar**~~, four on Apr 6
+  and one on Apr 11 — the two days the tour **pins** Marco.
+
+**Still open, found while verifying the above.**
 - **The audit trail does not resolve relative dates.** `Audit.CommandMeta.classify` reads
   the raw command line and recognises a date by shape, so `draft create today today+6` is
   audited with empty `dateFrom` / `dateTo`. Display-only, so nothing malfunctions. See the
@@ -545,6 +576,18 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   8080, Vite on 5173, which drivers want a fresh database and which want a
   demo-seeded one, and the Playwright and zsh traps that cost time here. Verified
   on macOS only; the browser driver has never been run in the Linux container.
+- **`generateDraft` builds a multi-period draft under one period's hour caps.** Found
+  2026-09-25 while fixing the same defect in the validator (ADR 0010): `SchedulerContext`
+  holds one `schPeriodBounds`, the pay period containing the draft's first day, and
+  `workerPeriodHours` counts nothing outside it. So `draft create today today+13` on a
+  weekly period enforces caps in week one and none in week two. The validator now judges
+  per period (`Service.Context.payPeriodChunks`) and will report what this produces. The
+  fix is either generating one period at a time or carrying per-period hour counts in the
+  context; both change `canAssignSlot`'s inputs, so it wants a grill. Related to the
+  alternating-weekends gap below — both are the scheduler seeing less than the validator.
+- **Sixty-nine `alternating weekends` violations on the tour's Apr 20 – May 3 calendar**,
+  seen 2026-09-25 through `GET /api/problems`. That is the next bullet's gap made visible
+  by the problem view; noted here so nobody hunts for a new cause.
 - **`generateDraft` does not apply the alternating-weekends rule, but validation
   does.** `Service.Draft.generateDraft` passes `schPrevWeekendWorkers = Set.empty`,
   so `blockedByAlternateWeekend` never fires during generation, while

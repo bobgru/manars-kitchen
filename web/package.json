@@ -14,6 +14,7 @@
     "e2e:dashboard": "node e2e/dashboard.mjs",
     "demo": "zsh demos/run.sh",
     "demo:current-period": "zsh demos/run.sh current-period",
+    "demo:compromise": "zsh demos/run.sh compromise",
     "demo:feature-tour": "zsh demos/run.sh feature-tour"
   },
   "dependencies": {

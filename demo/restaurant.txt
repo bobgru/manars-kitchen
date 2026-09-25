@@ -205,6 +205,10 @@ worker set-prefs marco grill pizza sandwich beverage
 worker set-prefs lucia grill pizza sandwich beverage
 # Tony: grill + sandwich — prefers grill, sandwich
 worker set-prefs tony grill sandwich
+# Tony likes to rotate: the scheduler penalises putting him back on a station he
+# held in the last three days, and the problem view reports it as a compromise
+# when it happens anyway.
+worker set-variety tony on
 # Maria: pizza + beverage — prefers pizza, beverage
 worker set-prefs maria pizza beverage
 # Nina: beverage + register — prefers beverage

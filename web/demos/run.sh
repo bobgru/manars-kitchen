@@ -4,7 +4,7 @@
 #
 #   web/demos/run.sh <demo> [demo flags...]
 #
-#   <demo>          current-period | feature-tour   (a file in web/demos/)
+#   <demo>          current-period | compromise | feature-tour   (a file in web/demos/)
 #   demo flags      --auto [ms]  --record  --headless  --slow <ms>   (see lib.mjs)
 #
 # Needs a built project (`stack build`) and `npm install` plus
@@ -14,7 +14,7 @@ set -u
 
 DEMO="${1:-}"
 if [[ -z "$DEMO" ]]; then
-  echo "usage: web/demos/run.sh <current-period|feature-tour> [--auto [ms]] [--record] [--headless]" >&2
+  echo "usage: web/demos/run.sh <current-period|compromise|feature-tour> [--auto [ms]] [--record] [--headless]" >&2
   exit 2
 fi
 shift
@@ -24,6 +24,7 @@ cd "$ROOT"
 
 case "$DEMO" in
   current-period) FIXTURE="demo/current-period.txt" ;;
+  compromise)     FIXTURE="demo/current-period.txt" ;;
   feature-tour)   FIXTURE="demo/restaurant-setup.txt" ;;
   *)
     if [[ -f "web/demos/$DEMO.mjs" ]]; then

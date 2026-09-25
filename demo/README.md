@@ -37,6 +37,7 @@ cd web && npm run demo:current-period      # same thing, via npm
 | demo | fixture | what it shows |
 |---|---|---|
 | `current-period` | `current-period.txt` | The problem view over a staffed week: the horizon control, the three panels, picking a problem, the next period unscheduled, and a second sick call typed into the terminal that changes the view live. |
+| `compromise` | `current-period.txt` | What a compromise is and is not: the three kinds in the detail pane, hiding them to see only the hard problems, the worker panel as the answer to who is being asked to give ground most, and a preference changed in the terminal making its compromises vanish live. |
 | `feature-tour` | `restaurant-setup.txt` | The admin pages in turn — skills, stations and zones, workers, shifts — then drafts (the freeze-line refusal, create, generate, the detail page), the calendar for the tour's first week, and the terminal. |
 
 The launcher takes over ports 8080 and 5173, seeds the demo's fixture into a copy under
