@@ -14,6 +14,7 @@ Prerequisites:
 - [Stack](https://docs.haskellstack.org/) (GHC 9.10 / LTS 24.35)
 - [Node.js](https://nodejs.org/) (for building the web frontend)
 - Python 3 (used by the demo script)
+- Chromium for Playwright, for the browser demos: `cd web && npm install && npx playwright install chromium`, once
 
 ```
 make build          # compile library + CLI + server
@@ -32,6 +33,23 @@ then generates and reviews a multi-week schedule. On completion, the demo
 automatically exports `demo-export.json` which can be imported into an
 interactive session via `import demo-export.json`. Databases are stored
 in `demo-db/` (demos) and `run-db/` (interactive sessions).
+
+### Browser demos
+
+Scripted walkthroughs of the web UI, narrated by a caption banner across the
+top of the page. One command seeds the fixture, starts the servers, opens a
+browser window, and shuts everything down at the end:
+
+```
+web/demos/run.sh current-period      # a staffed week and a sick call: the problem view
+web/demos/run.sh compromise          # legal assignments that ignore a preference
+web/demos/run.sh feature-tour        # the admin pages, drafts, calendar, terminal
+```
+
+Press Enter to advance each step. Add `--auto` for timed steps (`--auto 5000`
+for five seconds each), `--record` to save a `.webm`, or `--headless --shots`
+to run without a window and save a screenshot per step. The demos take over
+ports 8080 and 5173. `demo/README.md` describes each demo and how to add one.
 
 ### Web interface
 
