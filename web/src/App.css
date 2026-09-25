@@ -778,3 +778,81 @@ th.calendar-col-frozen {
   color: #888;
   font-size: 0.8rem;
 }
+
+/*
+ * The three panels of the problem view are row groups of one table, so a date
+ * lines up vertically across them. Each opens with a group row: the row axis in
+ * the gutter, the title across the days. Bright text on the dark header fill, no
+ * hue carries meaning. Group and zone rows are not sticky; only the day header is.
+ */
+.problem-group th {
+  position: static;
+  background: #1f2a4a;
+  color: #ffffff;
+  font-weight: 700;
+  padding-top: 0.45rem;
+  padding-bottom: 0.3rem;
+}
+
+.problem-group-label {
+  text-align: right;
+}
+
+/* A zone heading inside the station panel: quieter than a panel heading. */
+.problem-zone th {
+  position: static;
+  background: #16213e;
+  color: #dddddd;
+  font-weight: normal;
+  font-style: italic;
+  text-align: left;
+}
+
+.problem-zone-count {
+  color: #999999;
+  font-style: normal;
+}
+
+/* Worker and station names in the gutter read left-to-right, unlike hours. */
+.problem-row-label {
+  text-align: left;
+  color: #cccccc;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Said in words as "(inactive)" too; the dimmer text is only a second cue. */
+.problem-row-inactive {
+  color: #999999;
+}
+
+/*
+ * A focused problem: its cells across the panels get a dashed outline, distinct
+ * from the solid outline of the selected cell, and the caption under the list
+ * says where it is in words.
+ */
+.problem-cell-focus {
+  outline: 2px dashed #ffffff;
+  outline-offset: -2px;
+}
+
+.problem-list li.problem-item {
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  border-radius: 3px;
+}
+
+.problem-list li.problem-item:hover {
+  background: #1f2a4a;
+}
+
+.problem-list li.problem-item-focus {
+  background: #1f2a4a;
+  color: #ffffff;
+}
+
+.problem-focus-caption {
+  color: #ffffff;
+  font-weight: 700;
+}

@@ -1,6 +1,7 @@
 /**
  * Drives the problem view at `/` in headless Chromium: the horizon control and
- * its marks, the hours grid, a marked cell, the detail pane, and the clear state.
+ * its marks, the three panels (by hour, by worker, by station grouped by zone), a
+ * marked cell in each, the detail pane, and the clear state.
  *
  * Prerequisites, none of which this script manages:
  *
@@ -66,7 +67,15 @@ const api = (path, init) =>
         headers: { ...(i?.headers ?? {}), Authorization: `Bearer ${token}` },
       });
       const text = await resp.text();
-      return { status: resp.status, body: text ? JSON.parse(text) : null };
+      // Error bodies are plain text; do not let one turn a failed assertion into
+      // an uncaught exception.
+      let body = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = text;
+      }
+      return { status: resp.status, body };
     },
     [path, init]
   );
@@ -84,6 +93,26 @@ const segCount = await segs.count();
 if (segCount !== 3) fail(`expected 3 horizon segments, got ${segCount}`);
 await page.getByText(/Today/).first().waitFor();
 await page.locator("table.calendar-grid").waitFor();
+
+// Three panels, three row groups of one table, so the day columns are shared and
+// one date lines up vertically. Each opens with its title in words.
+const panels = page.locator("tbody.problem-panel");
+const panelCount = await panels.count();
+if (panelCount !== 3) fail(`expected 3 panels, got ${panelCount}`);
+for (const title of [/^By hour$/, /^By worker/, /^By station/]) {
+  if ((await page.locator(".problem-group-title").filter({ hasText: title }).count()) !== 1) {
+    fail(`missing panel title ${title}`);
+  }
+}
+// The demo restaurant labels zones; busboy is left out so "Unassigned" shows too.
+for (const zone of ["Zone: hot line", "Zone: front", "Unassigned"]) {
+  if ((await page.locator(".problem-zone-title").filter({ hasText: zone }).count()) !== 1) {
+    fail(`missing zone heading "${zone}"`);
+  }
+}
+const zoneRows = await page.locator("tr.problem-zone").count();
+const workerRows = await page.locator('tbody[data-panel="worker"] tr').count() - 1;
+console.log(`3 panels: ${workerRows} worker rows, ${zoneRows} zone groups`);
 await step("p01-initial");
 
 // The demo's committed calendar is April 2026, which no horizon covers, so nobody
@@ -122,14 +151,18 @@ await step("p03-today");
 // --- Staffing the period changes the answer, live over SSE ------------------
 const horizons = await api("/api/horizons");
 const current = horizons.body.find((h) => h.key === "current-period");
-console.log(`current period is ${current.from}..${current.to}`);
+const today = horizons.body.find((h) => h.key === "today");
+console.log(`current period is ${current.from}..${current.to}, today ${today.from}`);
 await segs.filter({ hasText: current.label }).click();
 await page.getByRole("heading", { name: /^By hour/ }).waitFor();
 
+// From today, not from the period's start: dates before today are frozen, and a
+// REST caller cannot force past the freeze line, so a draft over the whole
+// period is a 409 on every day of the period but its first.
 const created = await api("/api/drafts", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ dateFrom: current.from, dateTo: current.to }),
+  body: JSON.stringify({ dateFrom: today.from, dateTo: current.to }),
 });
 if (created.status !== 200) fail(`draft create returned ${created.status}`);
 const did = created.body.id;
@@ -145,13 +178,47 @@ const committed = await api(`/api/drafts/${did}/commit`, {
 });
 if (committed.status !== 204) fail(`commit returned ${committed.status}`);
 
-// The commit publishes a calendar event and the page reloads itself. Asserting on
-// that rather than reloading by hand, because live refresh is part of what this
-// page promises: an approved absence or a revoked skill changes the answer without
-// anyone touching the calendar.
-//
-// Staffing the period is what converts "not scheduled" into per-hour problems: the
-// days have been worked on now, so their remaining gaps are understaffing.
+// The commit publishes a calendar event and the page reloads itself: the staffed
+// days lose their "not scheduled" badge. Asserting on that rather than reloading
+// by hand, because live refresh is part of what this page promises.
+await page.waitForFunction(
+  (n) => document.querySelectorAll(".problem-day-badge").length < n,
+  initialBadges,
+  { timeout: 30000 }
+);
+
+// --- The sick call ----------------------------------------------------------
+// Whether the scheduler leaves a station short over the remaining days depends
+// on the weekday this runs, so manufacture a problem that does not: approve an
+// absence for the busiest committed worker. That invalidates their assignments
+// without touching the calendar, which is the case ADR 0004 is built around, and
+// the page must pick it up from the absence event alone.
+const committedCal = await api(`/api/calendar?from=${today.from}&to=${current.to}`);
+const perWorker = new Map();
+for (const a of committedCal.body) perWorker.set(a.worker, (perWorker.get(a.worker) ?? 0) + 1);
+const [sickId, sickCount] = [...perWorker.entries()].sort((x, y) => y[1] - x[1])[0] ?? [];
+if (sickId === undefined) fail("the committed calendar has no assignments over REST");
+const typeCreated = await api("/api/absence-types", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ name: "e2e-sick", countsAgainstAllowance: false }),
+});
+if (typeCreated.status !== 204) fail(`absence-type create returned ${typeCreated.status}`);
+const exported = await api("/api/export");
+const sickType = exported.body.absenceTypes.find((t) => t.name === "e2e-sick");
+const requested = await api("/api/absences", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ workerId: sickId, typeId: sickType.id, from: today.from, to: current.to }),
+});
+if (requested.status !== 200) fail(`absence request returned ${requested.status}: ${requested.body}`);
+const approved = await api(`/api/absences/${requested.body.id}/approve`, { method: "POST" });
+if (approved.status !== 204) fail(`absence approve returned ${approved.status}`);
+console.log(`worker ${sickId} called in sick with ${sickCount} committed assignments`);
+
+// Staffing the period is what converts "not scheduled" into per-hour problems, and
+// the sick call guarantees there are some: every one of that worker's hours is
+// now an absence-conflict violation, naming a worker, a station and a slot.
 await page.waitForFunction(
   () => document.querySelectorAll(".problem-mark").length > 0,
   null,
@@ -168,6 +235,41 @@ if (afterBadges >= initialBadges) {
 }
 await step("p04-after-staffing");
 await shotOf(page.locator(".horizon-bar"), "p05-horizon-bar-after");
+
+// The worker and station panels are projections of the same set: one mark per
+// (worker, day) and per (station, day) pair that any problem in range names.
+const probs = await api(
+  `/api/problems?from=${current.from}&to=${current.to}`
+);
+const dayOf = (p) => (p.scope.kind === "slot" ? p.scope.slot.date : p.scope.day);
+const pairs = (field) =>
+  new Set(probs.body.filter((p) => p[field] !== null).map((p) => `${p[field]}|${dayOf(p)}`)).size;
+const workerMarks = await page.locator('tbody[data-panel="worker"] .problem-mark').count();
+const stationMarks = await page.locator('tbody[data-panel="station"] .problem-mark').count();
+console.log(
+  `worker panel: ${workerMarks} marks for ${pairs("worker")} (worker, day) pairs; ` +
+    `station panel: ${stationMarks} marks for ${pairs("station")} (station, day) pairs`
+);
+if (workerMarks !== pairs("worker")) fail("worker panel marks disagree with the problem set");
+if (stationMarks !== pairs("station")) fail("station panel marks disagree with the problem set");
+if (workerMarks === 0) fail("the sick call should mark the worker panel");
+if (stationMarks === 0) fail("the sick call should mark the station panel");
+
+// A cell in the station panel opens the same detail pane, captioned by row and day.
+await page.locator('tbody[data-panel="station"] .problem-mark').first().click();
+await page.getByRole("heading", { name: /on \d{4}-\d{2}-\d{2} — \d+ problem\(s\)/ }).waitFor();
+await shotOf(page.locator('tbody[data-panel="station"]'), "p05b-station-panel");
+await shotOf(page.locator('tbody[data-panel="worker"]'), "p05c-worker-panel");
+
+// Picking one problem outlines its cells across the panels and says where it is
+// in words — a violation names a worker, a station and an hour, so all three.
+await page.locator(".problem-item").first().click();
+await page.getByText(/^Showing: /).waitFor();
+const focused = await page.locator(".problem-cell-focus").count();
+if (focused !== 3) fail(`a violation should outline 3 cells across the panels, got ${focused}`);
+console.log(`focused problem outlines ${focused} cells`);
+await step("p05d-cross-panel-focus");
+await page.getByRole("button", { name: "Close" }).click();
 
 // --- The detail pane --------------------------------------------------------
 // Only reachable now: an unscheduled day has no cells to open.
