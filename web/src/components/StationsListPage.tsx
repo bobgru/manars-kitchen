@@ -130,6 +130,7 @@ export default function StationsListPage() {
           <thead>
             <tr>
               <th>Name</th>
+              <th>Zone</th>
               <th>Min Staff</th>
               <th>Max Staff</th>
               <th></th>
@@ -141,6 +142,7 @@ export default function StationsListPage() {
                 <td>
                   <Link to={`/stations/${encodeURIComponent(s.name)}`}>{s.name}</Link>
                 </td>
+                <td>{s.zone ?? <span className="text-muted">Unassigned</span>}</td>
                 <td>{s.minStaff}</td>
                 <td>{s.maxStaff}</td>
                 <td>

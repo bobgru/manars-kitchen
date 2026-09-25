@@ -15,6 +15,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Text as T
 import Repo.Types (Repository(..))
 import CLI.Commands (shellWords)
+import Utils (shellQuote)
 import Auth.Types (User(..), Username(..), userIdToWorkerId, userIsWorker)
 import Domain.Types (WorkerId(..), SkillId(..), StationId(..), Station(..), AbsenceTypeId(..))
 import Domain.Skill (Skill(..))
@@ -76,6 +77,8 @@ commandEntityMap =
     , (["station", "rename"],              [Resolve EStation, Skip])
     , (["station", "view"],                [Resolve EStation])
     , (["station", "set-hours"],           [Resolve EStation, Skip, Skip])
+    , (["station", "set-zone"],            [Resolve EStation, Skip])
+    , (["station", "clear-zone"],          [Resolve EStation])
     , (["station", "set-multi-hours"],     [Resolve EStation, Skip, Skip])
     , (["station", "close-day"],           [Resolve EStation, Skip])
     , (["station", "require-skill"],       [Resolve EStation, Resolve ESkill])
@@ -125,7 +128,10 @@ resolveInput repo ctxRef input = do
             case result of
                 Left err -> return (Left err)
                 Right resolvedArgs ->
-                    return (Right (unwords (prefix ++ resolvedArgs)))
+                    -- Re-quote on the way out: the words came from 'shellWords',
+                    -- so a plain 'unwords' would split "hot line" back into two
+                    -- tokens and the command would silently fail to parse.
+                    return (Right (unwords (map shellQuote (prefix ++ resolvedArgs))))
 
 -- | Resolve a list of arguments according to their specs.
 resolveArgs :: Repository -> SessionContext -> [ArgSpec] -> [String]

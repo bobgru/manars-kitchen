@@ -305,6 +305,12 @@ dispatchCommand env cmd = case cmd of
     StationCloseDay _arg _dayStr ->
         putStrLn "station close-day via RPC requires date-based closure. Not yet mapped."
 
+    StationSetZone _ _ ->
+        putStrLn "station set-zone not yet supported via RPC."
+
+    StationClearZone _ ->
+        putStrLn "station clear-zone not yet supported via RPC."
+
     StationSetMultiHours {} ->
         putStrLn "Multi-station hours not yet supported via RPC."
 

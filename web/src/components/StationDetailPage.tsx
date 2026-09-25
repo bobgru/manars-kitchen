@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router";
 import {
   fetchStations,
   renameStation,
+  setStationZone,
   type StationInfo,
 } from "../api/stations";
 import { useEntityEvents, renamedTo, type SSEEvent } from "../hooks/useSSE";
@@ -20,6 +21,10 @@ export default function StationDetailPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
 
+  const [editZone, setEditZone] = useState("");
+  const [savingZone, setSavingZone] = useState(false);
+  const [zoneMsg, setZoneMsg] = useState("");
+
   const loadData = useCallback(async () => {
     try {
       const sts = await fetchStations();
@@ -27,7 +32,10 @@ export default function StationDetailPage() {
       const current = sts.find(
         (s) => s.name.toLowerCase() === decodedName.toLowerCase()
       );
-      if (current) setEditName(current.name);
+      if (current) {
+        setEditName(current.name);
+        setEditZone(current.zone ?? "");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -87,6 +95,26 @@ export default function StationDetailPage() {
     }
   }
 
+  // Blank clears the zone; the server trims, so compare trimmed values to
+  // decide whether there is anything to save.
+  const zoneChanged = editZone.trim() !== (station.zone ?? "");
+
+  async function handleSaveZone() {
+    setSavingZone(true);
+    setZoneMsg("");
+    try {
+      const trimmed = editZone.trim();
+      await setStationZone(station!.name, trimmed === "" ? null : trimmed);
+      setZoneMsg("Saved");
+      await loadData();
+      setTimeout(() => setZoneMsg(""), 2000);
+    } catch (err) {
+      setZoneMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingZone(false);
+    }
+  }
+
   return (
     <div className="page">
       <Link to="/stations" className="back-link">
@@ -118,6 +146,37 @@ export default function StationDetailPage() {
               }
             >
               {saveMsg}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="detail-section">
+        <h3>Zone</h3>
+        <p className="text-muted">
+          Where in the kitchen this station is, such as "hot line" or "front".
+          Stations sharing a zone are grouped together in the problem view.
+          Leave blank for no zone.
+        </p>
+        <div className="form-row">
+          <input
+            className="form-input"
+            type="text"
+            placeholder="Unassigned"
+            value={editZone}
+            onChange={(e) => setEditZone(e.target.value)}
+            disabled={savingZone}
+          />
+          <button
+            className="btn"
+            onClick={handleSaveZone}
+            disabled={savingZone || !zoneChanged}
+          >
+            {savingZone ? "Saving..." : "Save"}
+          </button>
+          {zoneMsg && (
+            <span className={zoneMsg === "Saved" ? "msg-success" : "msg-error"}>
+              {zoneMsg}
             </span>
           )}
         </div>

@@ -146,6 +146,7 @@ data Repository = Repository
     , repoDeleteStation  :: StationId -> IO ()
     , repoListStations   :: IO [(StationId, Station)]
     , repoRenameStation  :: StationId -> Text -> IO ()
+    , repoSetStationZone :: StationId -> Maybe Text -> IO ()
 
       -- ---------------------------------------------------------------
       -- Skill context (relational data)

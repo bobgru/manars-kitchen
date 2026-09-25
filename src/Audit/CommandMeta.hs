@@ -150,6 +150,12 @@ classifyStation op rest = case op of
     "set-hours" -> case rest of
         (sid : _) -> (mutating etStation "set-hours") { cmEntityId = readMaybe sid }
         _         -> mutating etStation "set-hours"
+    "set-zone" -> case rest of
+        (sid : _) -> (mutating etStation "set-zone") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "set-zone"
+    "clear-zone" -> case rest of
+        (sid : _) -> (mutating etStation "clear-zone") { cmEntityId = readMaybe sid }
+        _         -> mutating etStation "clear-zone"
     "close-day" -> case rest of
         (sid : _) -> (mutating etStation "close-day") { cmEntityId = readMaybe sid }
         _         -> mutating etStation "close-day"

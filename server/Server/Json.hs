@@ -25,6 +25,7 @@ module Server.Json
     , CreateStationReq(..)
     , RenameStationReq(..)
     , SetStationHoursReq(..)
+    , SetStationZoneReq(..)
     , SetStationClosureReq(..)
     , CreateShiftReq(..)
       -- * Worker configuration
@@ -186,17 +187,18 @@ instance FromJSON Skill where
     parseJSON = withObject "Skill" $ \v ->
         Skill <$> v .: "name" <*> v .: "description"
 
--- | Station serialized as {name, minStaff, maxStaff}
+-- | Station serialized as {name, minStaff, maxStaff, zone}; @zone@ is null when unset.
 instance ToJSON Station where
     toJSON s = object
         [ "name"     .= stationName s
         , "minStaff" .= stationMinStaff s
         , "maxStaff" .= stationMaxStaff s
+        , "zone"     .= stationZone s
         ]
 
 instance FromJSON Station where
     parseJSON = withObject "Station" $ \v ->
-        Station <$> v .: "name" <*> v .: "minStaff" <*> v .: "maxStaff"
+        Station <$> v .: "name" <*> v .: "minStaff" <*> v .: "maxStaff" <*> v .:? "zone"
 
 -- | A station as returned by @GET \/api\/stations@: the domain 'Station' plus its
 --   storage id.
@@ -210,6 +212,7 @@ data StationResp = StationResp
     , stnName     :: !Text
     , stnMinStaff :: !Int
     , stnMaxStaff :: !Int
+    , stnZone     :: !(Maybe Text)
     } deriving (Show, Eq)
 
 instance ToJSON StationResp where
@@ -218,11 +221,13 @@ instance ToJSON StationResp where
         , "name"     .= stnName s
         , "minStaff" .= stnMinStaff s
         , "maxStaff" .= stnMaxStaff s
+        , "zone"     .= stnZone s
         ]
 
 instance FromJSON StationResp where
     parseJSON = withObject "StationResp" $ \v ->
         StationResp <$> v .: "id" <*> v .: "name" <*> v .: "minStaff" <*> v .: "maxStaff"
+                    <*> v .:? "zone"
 
 -- | Pair a station with its id for the list endpoint.
 stationResp :: StationId -> Station -> StationResp
@@ -231,6 +236,7 @@ stationResp (StationId i) st = StationResp
     , stnName     = stationName st
     , stnMinStaff = stationMinStaff st
     , stnMaxStaff = stationMaxStaff st
+    , stnZone     = stationZone st
     }
 
 -- | ShiftDef serialized as {name, start, end}
@@ -789,6 +795,19 @@ instance ToJSON SetStationHoursReq where
 instance FromJSON SetStationHoursReq where
     parseJSON = withObject "SetStationHoursReq" $ \v ->
         SetStationHoursReq <$> v .: "start" <*> v .: "end"
+
+-- | Body of @PUT \/api\/stations\/:name\/zone@. A null or blank @zone@ clears
+--   the label, so one route both sets and removes it.
+newtype SetStationZoneReq = SetStationZoneReq
+    { sszrZone :: Maybe Text
+    } deriving (Show)
+
+instance ToJSON SetStationZoneReq where
+    toJSON r = object ["zone" .= sszrZone r]
+
+instance FromJSON SetStationZoneReq where
+    parseJSON = withObject "SetStationZoneReq" $ \v ->
+        SetStationZoneReq <$> v .:? "zone"
 
 data SetStationClosureReq = SetStationClosureReq
     { sscrDay :: !DayOfWeek

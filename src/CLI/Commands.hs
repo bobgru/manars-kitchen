@@ -19,6 +19,8 @@ data Command
     | StationRename String String     -- ^ old-name new-name
     | StationView String              -- ^ name
     | StationSetHours String Int Int  -- ^ name start-hour end-hour
+    | StationSetZone String String    -- ^ name zone-label
+    | StationClearZone String         -- ^ name
     | StationCloseDay String String   -- ^ name day-of-week
     | StationSetMultiHours String Int Int  -- ^ name start-hour end-hour
     | StationRequireSkill String SkillId    -- ^ name skill-id
@@ -172,6 +174,8 @@ parseCommand input = case shellWords input of
     ["station", "view", name]      -> StationView name
     ["station", "set-hours", sid, sh, eh]
         | all isDigit' [sh, eh] -> StationSetHours sid (read sh) (read eh)
+    ["station", "set-zone", sid, zone] -> StationSetZone sid zone
+    ["station", "clear-zone", sid]     -> StationClearZone sid
     ["station", "close-day", sid, day]
         -> StationCloseDay sid day
     ["station", "set-multi-hours", sid, sh, eh]

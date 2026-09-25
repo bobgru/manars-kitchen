@@ -44,6 +44,11 @@ data Station = Station
     { stationName     :: !Text
     , stationMinStaff :: !Int
     , stationMaxStaff :: !Int
+      -- | Where in the kitchen the station is, as a free-text label such as
+      --   "hot line". Grouping only: stations sharing a zone sit together in
+      --   the problem view's station panel. Not a coordinate, and not an
+      --   entity — the floor plan is deferred in ADR 0004.
+    , stationZone     :: !(Maybe Text)
     } deriving (Eq, Ord, Show, Read)
 
 -- | Terminal unit: a skill, identified by an opaque ID.

@@ -59,6 +59,16 @@ station require-skill receiving receiving
 station require-skill register register
 station require-skill busboy busboy
 
+# Zones: where each station is. The problem view groups its station panel by
+# these; stations without one fall under "Unassigned" (busboy, deliberately, so
+# that group is exercised too).
+station set-zone grill "hot line"
+station set-zone pizza "hot line"
+station set-zone sandwich "cold line"
+station set-zone beverage front
+station set-zone register front
+station set-zone receiving back
+
 # Station operating hours
 station set-hours grill 10 17
 station set-hours pizza 11 16

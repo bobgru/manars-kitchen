@@ -75,6 +75,7 @@ mkSQLiteRepo path = do
         , repoDeleteStation  = sqlDeleteStation conn
         , repoListStations   = sqlListStations conn
         , repoRenameStation  = sqlRenameStation conn
+        , repoSetStationZone = sqlSetStationZone conn
         , repoSaveSkillCtx   = sqlSaveSkillCtx conn
         , repoLoadSkillCtx   = sqlLoadSkillCtx conn
         , repoSaveWorkerCtx  = sqlSaveWorkerCtx conn
@@ -350,13 +351,17 @@ sqlDeleteStation conn (StationId sid) = do
 
 sqlListStations :: Connection -> IO [(StationId, Station)]
 sqlListStations conn = do
-    rows <- query_ conn "SELECT id, name, min_staff, max_staff FROM stations ORDER BY id"
-        :: IO [(Int, Text, Int, Int)]
-    return [(StationId sid, Station name minS maxS) | (sid, name, minS, maxS) <- rows]
+    rows <- query_ conn "SELECT id, name, min_staff, max_staff, zone FROM stations ORDER BY id"
+        :: IO [(Int, Text, Int, Int, Maybe Text)]
+    return [(StationId sid, Station name minS maxS zone) | (sid, name, minS, maxS, zone) <- rows]
 
 sqlRenameStation :: Connection -> StationId -> Text -> IO ()
 sqlRenameStation conn (StationId sid) newName =
     execute conn "UPDATE stations SET name = ? WHERE id = ?" (newName, sid)
+
+sqlSetStationZone :: Connection -> StationId -> Maybe Text -> IO ()
+sqlSetStationZone conn (StationId sid) zone =
+    execute conn "UPDATE stations SET zone = ? WHERE id = ?" (zone, sid)
 
 -- =====================================================================
 -- Skill context (relational data — does NOT touch skills/stations tables)

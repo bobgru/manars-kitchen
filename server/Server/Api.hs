@@ -106,6 +106,8 @@ type RawAPI =
          :> ReqBody '[JSON] RenameStationReq :> PutNoContent
     :<|> "api" :> "stations" :> Capture "name" Text :> "hours"
          :> ReqBody '[JSON] SetStationHoursReq :> PutNoContent
+    :<|> "api" :> "stations" :> Capture "name" Text :> "zone"
+         :> ReqBody '[JSON] SetStationZoneReq :> PutNoContent
     :<|> "api" :> "stations" :> Capture "name" Text :> "closure"
          :> ReqBody '[JSON] SetStationClosureReq :> PutNoContent
 

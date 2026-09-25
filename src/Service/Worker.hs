@@ -16,6 +16,7 @@ module Service.Worker
     , removeStation
     , listStations
     , renameStation
+    , setStationZone
     , StationReferences(..)
     , checkStationReferences
     , isStationUnreferenced
@@ -263,6 +264,16 @@ safeDeleteStation repo sid = do
 
 renameStation :: Repository -> StationId -> Text -> IO ()
 renameStation repo sid newName = repoRenameStation repo sid newName
+
+-- | Set or clear a station's zone label. Whitespace is trimmed and an empty
+--   label means no zone, so there is one representation of "unassigned".
+setStationZone :: Repository -> StationId -> Maybe Text -> IO ()
+setStationZone repo sid zone = repoSetStationZone repo sid (normaliseZone zone)
+
+normaliseZone :: Maybe Text -> Maybe Text
+normaliseZone mz = case fmap T.strip mz of
+    Just z | not (T.null z) -> Just z
+    _                       -> Nothing
 
 -- -----------------------------------------------------------------
 -- Skill context (relational operations)

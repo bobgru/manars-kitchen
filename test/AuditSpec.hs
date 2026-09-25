@@ -291,6 +291,8 @@ spec = do
 
         -- Mutating commands
         testConsistency "station create grill"
+        testConsistency "station set-zone grill \"hot line\""
+        testConsistency "station clear-zone grill"
         testConsistency "skill create pastry"
         testConsistency "worker grant-skill 3 5"
         testConsistency "worker set-hours 3 40"

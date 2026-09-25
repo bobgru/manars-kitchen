@@ -46,6 +46,8 @@ import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo(..), CalendarCommit(..), AuditEntry(..))
 import Service.DraftValidation (DraftViolation(..))
 import Service.Auth (register)
+import CLI.Resolve (resolveInput, emptyContext)
+import Data.IORef (newIORef)
 import qualified Service.Worker as SW
 import qualified Service.Calendar as Cal
 import Servant.API (NoContent)
@@ -111,6 +113,7 @@ _deleteStationC     :: Text -> ClientM NoContent
 forceDeleteStationC :: Text -> ClientM NoContent
 _renameStationC     :: Text -> RenameStationReq -> ClientM NoContent
 setStationHoursC    :: Text -> SetStationHoursReq -> ClientM NoContent
+setStationZoneC     :: Text -> SetStationZoneReq -> ClientM NoContent
 _setStationClosureC :: Text -> SetStationClosureReq -> ClientM NoContent
 
 -- Shift CRUD
@@ -228,6 +231,7 @@ logoutC
     :<|> forceDeleteStationC
     :<|> _renameStationC
     :<|> setStationHoursC
+    :<|> setStationZoneC
     :<|> _setStationClosureC
     :<|> createShiftC
     :<|> deleteShiftC
@@ -1058,7 +1062,35 @@ spec = do
         it "list station reports the storage id" $ withSeededApp $ \repo env -> do
             StationId sid <- SW.addStation repo "grill" 1 2
             Right stations <- runClientM listStationsC env
-            stations `shouldBe` [StationResp sid "grill" 1 2]
+            stations `shouldBe` [StationResp sid "grill" 1 2 Nothing]
+
+        -- Name resolution tokenises with shell quoting and must put it back: a
+        -- quoted two-word argument after a resolvable name used to come out as
+        -- two words, so the command parsed as nothing and did nothing, silently.
+        it "resolving a station name keeps a quoted argument whole" $ withSeededApp $ \repo _env -> do
+            StationId sid <- SW.addStation repo "grill" 1 2
+            ctx <- newIORef emptyContext
+            resolved <- resolveInput repo ctx "station set-zone grill \"hot line\""
+            resolved `shouldBe` Right ("station set-zone " ++ show sid ++ " \"hot line\"")
+
+        -- The zone is a free-text grouping label for the problem view's station
+        -- panel. One route sets and clears it; blank means none, so a client
+        -- cannot create a zone that renders as an empty heading.
+        it "set station zone, trimmed, and clear it again" $ withSeededApp $ \repo env -> do
+            StationId sid <- SW.addStation repo "grill" 1 2
+            Right _ <- runClientM (setStationZoneC "grill" (SetStationZoneReq (Just "  hot line "))) env
+            Right withZone <- runClientM listStationsC env
+            withZone `shouldBe` [StationResp sid "grill" 1 2 (Just "hot line")]
+            Right _ <- runClientM (setStationZoneC "grill" (SetStationZoneReq (Just "   "))) env
+            Right blank <- runClientM listStationsC env
+            blank `shouldBe` [StationResp sid "grill" 1 2 Nothing]
+            Right _ <- runClientM (setStationZoneC "grill" (SetStationZoneReq (Just "front"))) env
+            Right _ <- runClientM (setStationZoneC "grill" (SetStationZoneReq Nothing)) env
+            Right cleared <- runClientM listStationsC env
+            cleared `shouldBe` [StationResp sid "grill" 1 2 Nothing]
+            cmds <- auditCommands env
+            cmds `shouldSatisfy` any ("station set-zone grill \"hot line\"" `isInfixOf`)
+            cmds `shouldSatisfy` any ("station clear-zone grill" `isInfixOf`)
 
     describe "Shift CRUD" $ do
         it "create and list shift" $ withTestApp $ \env -> do

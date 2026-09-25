@@ -189,7 +189,19 @@ A user who can be assigned to stations. A worker's identity *is* their user
 identity — `WorkerId` and `UserId` denote the same person.
 
 **Station**:
-A place in the kitchen that needs staffing, requiring particular skills.
+A place in the kitchen that needs staffing, requiring particular skills. May carry
+a **Zone**.
+
+**Zone**:
+A free-text label on a **Station** saying where in the kitchen it is — "hot line",
+"front", "back". It exists so the problem view's station panel can group stations
+that sit together, making a hot area visible as a block. Nullable; stations without
+one group under "Unassigned". Labels are trimmed and case-sensitive, and a zone has
+no existence apart from the stations that carry it: renaming one means retagging
+each station. Set with `station set-zone`, removed with `station clear-zone`, or
+`PUT /api/stations/:name/zone`.
+_Avoid_: treating it as a coordinate or a floor plan. That was deliberately
+deferred in ADR 0004; a zone says which stations are near each other, not where.
 
 **Skill**:
 A capability a worker holds and a station requires. Skills may imply other

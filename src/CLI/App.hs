@@ -961,7 +961,8 @@ handleCommand st cmd = case cmd of
         if null stations
             then putStrLn "  (no stations)"
             else mapM_ (\(_sid, station) ->
-                putStrLn ("  " ++ T.unpack (stationName station))
+                putStrLn ("  " ++ T.unpack (stationName station)
+                    ++ maybe "" (\z -> "  [" ++ T.unpack z ++ "]") (stationZone station))
                 ) stations
 
     StationDelete arg -> requireAdmin st $ withStationArg st arg $ \sid -> do
@@ -1010,6 +1011,19 @@ handleCommand st cmd = case cmd of
     StationSetHours arg sh eh -> requireAdmin st $ withStationArg st arg $ \sid -> do
         SW.setStationHours (asRepo st) sid sh eh
         putStrLn ("Set station hours: " ++ show sh ++ ":00-" ++ show eh ++ ":00")
+
+    StationSetZone arg zone -> requireAdmin st $ withStationArg st arg $ \sid ->
+        if null (T.unpack (T.strip (T.pack zone)))
+            then putStrLn "A zone label cannot be blank. Use 'station clear-zone' to remove one."
+            else do
+                SW.setStationZone (asRepo st) sid (Just (T.pack zone))
+                name <- lookupStationName (asRepo st) sid
+                putStrLn ("Set zone of " ++ name ++ " to \"" ++ T.unpack (T.strip (T.pack zone)) ++ "\"")
+
+    StationClearZone arg -> requireAdmin st $ withStationArg st arg $ \sid -> do
+        SW.setStationZone (asRepo st) sid Nothing
+        name <- lookupStationName (asRepo st) sid
+        putStrLn ("Cleared zone of " ++ name)
 
     StationSetMultiHours arg sh eh -> requireAdmin st $ withStationArg st arg $ \sid -> do
         SW.setMultiStationHours (asRepo st) sid sh eh
@@ -2251,6 +2265,8 @@ helpRegistry =
     , ("station",  False, "station list",                    "List stations")
     , ("station",  True,  "station remove <id>",             "Remove a station")
     , ("station",  True,  "station set-hours <id> <start> <end>", "Set station operating hours")
+    , ("station",  True,  "station set-zone <id> <zone>",    "Label the station's zone (e.g. \"hot line\")")
+    , ("station",  True,  "station clear-zone <id>",         "Remove the station's zone label")
     , ("station",  True,  "station close-day <id> <day>",    "Close station on day of week")
     , ("station",  True,  "station set-multi-hours <id> <start> <end>", "Set multi-station hours")
     , ("station",  True,  "station require-skill <sid> <skid>", "Require skill for station")

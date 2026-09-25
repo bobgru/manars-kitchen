@@ -43,7 +43,8 @@ statements =
       \  id INTEGER PRIMARY KEY AUTOINCREMENT,\
       \  name TEXT NOT NULL UNIQUE,\
       \  min_staff INTEGER NOT NULL DEFAULT 1,\
-      \  max_staff INTEGER NOT NULL DEFAULT 1\
+      \  max_staff INTEGER NOT NULL DEFAULT 1,\
+      \  zone TEXT\
       \)"
 
     , "CREATE TABLE IF NOT EXISTS station_required_skills (\
@@ -307,6 +308,9 @@ migrations =
     -- report. Fails harmlessly on a database created after the column joined
     -- the CREATE TABLE above.
     , "ALTER TABLE calendar_commits ADD COLUMN draft_id INTEGER"
+    -- The station's zone label, for the problem view's station panel. Same
+    -- idempotency story as the column above.
+    , "ALTER TABLE stations ADD COLUMN zone TEXT"
     ]
 
 -- | Try to execute a statement, silently ignoring errors (for idempotent migrations).

@@ -149,6 +149,7 @@ server execEnv cmdBus repo user =
     :<|> handleForceDeleteStation execEnv repo user
     :<|> handleRenameStation cmdBus repo user
     :<|> handleSetStationHours cmdBus repo user
+    :<|> handleSetStationZone cmdBus repo user
     :<|> handleSetStationClosure cmdBus repo user
     -- Shift CRUD
     :<|> handleCreateShift cmdBus repo user
@@ -618,6 +619,21 @@ handleSetStationHours cmdBus repo user name req = do
     sid <- resolveStationName repo name
     liftIO $ SW.setStationHours repo sid (sshrStart req) (sshrEnd req)
     logRest cmdBus user ("station set-hours " ++ shellQuote (T.unpack name) ++ " " ++ show (sshrStart req) ++ " " ++ show (sshrEnd req))
+    pure NoContent
+
+handleSetStationZone :: TopicBus CommandEvent -> Repository -> User -> Text -> SetStationZoneReq -> Handler NoContent
+handleSetStationZone cmdBus repo user name req = do
+    requireAdmin user
+    sid <- resolveStationName repo name
+    let zone = case fmap T.strip (sszrZone req) of
+            Just z | not (T.null z) -> Just z
+            _                       -> Nothing
+    liftIO $ SW.setStationZone repo sid zone
+    -- Logged as the CLI verb the change corresponds to, so the audit trail
+    -- reads the same whichever client made it.
+    logRest cmdBus user $ case zone of
+        Just z  -> "station set-zone " ++ shellQuote (T.unpack name) ++ " " ++ shellQuote (T.unpack z)
+        Nothing -> "station clear-zone " ++ shellQuote (T.unpack name)
     pure NoContent
 
 handleSetStationClosure :: TopicBus CommandEvent -> Repository -> User -> Text -> SetStationClosureReq -> Handler NoContent

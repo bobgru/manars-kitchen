@@ -198,6 +198,8 @@ station require-skill 1 1    # grill station requires grill skill
 station set-hours 1 10 17    # open 10am-5pm
 station set-multi-hours 1 10 12   # allow multi-station 10am-12pm
 station close-day 1 sunday        # closed Sundays
+station set-zone 1 "hot line"     # where it is; groups the problem view's station panel
+station clear-zone 1              # back to "Unassigned"
 ```
 
 ### 2. Configure workers

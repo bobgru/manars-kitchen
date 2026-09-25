@@ -533,6 +533,7 @@ displayStationView sid station sctx wctx workerNames skillNames =
         [ [T.unpack (stationName station) ++ " (" ++ show s ++ ")"]
         , ["  Min staff: " ++ show (stationMinStaff station)]
         , ["  Max staff: " ++ show (stationMaxStaff station)]
+        , ["  Zone: " ++ maybe "(none)" T.unpack (stationZone station)]
         , ["  " ++ hoursLine]
         , ["  Required skills: " ++ if null required then "(none)"
             else intercalate ", " [T.unpack (namedSkill skid) | skid <- required]]
