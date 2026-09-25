@@ -53,7 +53,7 @@ import qualified Service.Calendar as Cal
 import Servant.API (NoContent)
 import Server.Api (PublicAPI, api, fullApi)
 import Server.Json
-import Service.Problems (Problem(..), Horizon(..))
+import Service.Problems (Problem(..), Horizon(..), CompromiseKind(..))
 import Server.Auth (LoginReq(..), LoginResp(..), authHandler)
 import Server.EventStream (eventStreamApp)
 import Server.Execute (newExecuteEnv, ExecuteEnv(..))
@@ -723,6 +723,81 @@ spec = do
                         [ dvConstraint v | ProblemResp (PViolation v) <- problems ]
                 constraints `shouldSatisfy` (not . null)
                 all (== "skill qualification") constraints `shouldBe` True
+
+    -- Compromises: legal assignments that ignore a stated preference. ADR 0006
+    -- settled the three derivable kinds; each is committed directly so the
+    -- fixture cannot drift with the scheduler.
+    describe "GET /api/problems compromises" $ do
+        let commitOne repo day hour st w = do
+                let slot = Slot day (TimeOfDay hour 0 0) 3600
+                Cal.commitToCalendar repo day day "compromise fixture" Nothing
+                    (Schedule (Set.singleton (Assignment w st slot)))
+            compromisesIn problems =
+                [ (assignWorker a, k) | ProblemResp (PCompromise a k) <- problems ]
+            violationsIn problems =
+                [ dvConstraint v | ProblemResp (PViolation v) <- problems ]
+
+        -- The demo's admin: a zero-hour cap with overtime opted in. Every hour is
+        -- overtime, all of it permitted, so it is a compromise and not a violation.
+        it "reports permitted overtime as a compromise, never a violation" $
+            withSeededApp $ \repo env -> do
+                st <- SW.addStation repo "grill" 1 1
+                SW.setMaxHours repo (WorkerId 1) 0
+                _ <- SW.setOvertimeOptIn repo (WorkerId 1) True
+                day <- fromToday 30
+                commitOne repo day 9 st (WorkerId 1)
+                Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
+                violationsIn problems `shouldBe` []
+                compromisesIn problems `shouldBe` [(WorkerId 1, AuthorisedOvertime 3600 0)]
+
+        it "reports a station outside a non-empty preference list, and nothing for no list" $
+            withSeededApp $ \repo env -> do
+                grill <- SW.addStation repo "grill" 1 1
+                fryer <- SW.addStation repo "fryer" 1 1
+                SW.setStationPreferences repo (WorkerId 1) [grill]
+                -- The seeded app has one user; the second worker is registered here.
+                _ <- register repo "bob" "password" Normal False
+                day <- fromToday 30
+                let slot = Slot day (TimeOfDay 9 0 0) 3600
+                -- Worker 1 prefers grill and is on fryer; worker 2 stated nothing.
+                Cal.commitToCalendar repo day day "prefs" Nothing
+                    (Schedule (Set.fromList
+                        [ Assignment (WorkerId 1) fryer slot
+                        , Assignment (WorkerId 2) grill slot ]))
+                Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
+                compromisesIn problems `shouldBe` [(WorkerId 1, StationNotPreferred [grill])]
+
+        -- The window is the three days before, as the scheduler scores it, and the
+        -- look-back means a repeat of a committed day before the range counts.
+        it "reports a variety repeat against the day before the range" $
+            withSeededApp $ \repo env -> do
+                st <- SW.addStation repo "grill" 1 1
+                SW.setVarietyPreference repo (WorkerId 1) True
+                d1 <- fromToday 30
+                d2 <- fromToday 31
+                commitOne repo d1 9 st (WorkerId 1)
+                commitOne repo d2 9 st (WorkerId 1)
+                Right problems <- runClientM (getProblemsC (Just d2) (Just d2)) env
+                compromisesIn problems `shouldBe` [(WorkerId 1, VarietyRepeat d1)]
+                -- Judged over both days, only the second is a repeat.
+                Right both <- runClientM (getProblemsC (Just d1) (Just d2)) env
+                compromisesIn both `shouldBe` [(WorkerId 1, VarietyRepeat d1)]
+
+        -- A broken rule outranks a disappointed preference: an assignment that
+        -- is a violation is not also reported as a compromise.
+        it "does not report a compromise for an assignment that is a violation" $
+            withSeededApp $ \repo env -> do
+                _ <- SW.addSkill repo "grill" ""
+                grill <- SW.addStation repo "grill" 1 1
+                fryer <- SW.addStation repo "fryer" 1 1
+                SW.setStationRequiredSkills repo fryer (Set.singleton (SkillId 1))
+                SW.setStationPreferences repo (WorkerId 1) [grill]
+                day <- fromToday 30
+                -- Unqualified for fryer, and fryer is not preferred either.
+                commitOne repo day 9 fryer (WorkerId 1)
+                Right problems <- runClientM (getProblemsC (Just day) (Just day)) env
+                violationsIn problems `shouldBe` ["skill qualification"]
+                compromisesIn problems `shouldBe` []
 
     describe "GET /api/horizons" $ do
         it "returns today, the current period and the next" $

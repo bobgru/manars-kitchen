@@ -903,3 +903,16 @@ th.calendar-col-frozen {
   color: #ffffff;
   font-weight: 700;
 }
+
+/* The compromise filter above the problem grid: a checkbox and its sentence. */
+.problem-filter {
+  display: block;
+  margin: 0.25rem 0 0.5rem;
+  color: #cccccc;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.problem-filter input {
+  margin-right: 0.4rem;
+}

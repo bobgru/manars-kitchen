@@ -287,6 +287,22 @@ console.log(`focused problem outlines ${focused} cells`);
 await step("p05d-cross-panel-focus");
 await page.getByRole("button", { name: "Close" }).click();
 
+// --- Compromises are counted, and can be hidden --------------------------------
+// The sick call also puts the busiest worker's colleagues onto stations outside
+// their preference lists in the generated week, so the range holds compromises.
+const filter = page.getByRole("checkbox", { name: /Show compromises/ });
+if (!(await filter.isChecked())) fail("compromises should be shown by default");
+const withComp = await page.locator(".problem-mark").count();
+const compMarks = await page.locator(".problem-cell-compromise").count();
+await filter.uncheck();
+const without = await page.locator(".problem-mark").count();
+if ((await page.locator(".problem-cell-compromise").count()) !== 0) {
+  fail("hiding compromises left compromise cells behind");
+}
+if (compMarks > 0 && without >= withComp) fail("hiding compromises removed no marks");
+console.log(`compromises: ${compMarks} compromise-led cells; marks ${withComp} -> ${without} hidden`);
+await filter.check();
+
 // --- The detail pane --------------------------------------------------------
 // Only reachable now: an unscheduled day has no cells to open.
 await page.locator(".problem-mark").first().click();

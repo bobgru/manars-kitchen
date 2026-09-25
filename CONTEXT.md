@@ -54,7 +54,10 @@ documentation or a comment is stale, not a description of a surface that exists.
 
 **Pin**:
 A standing instruction that a worker occupies a station on a recurring weekly
-basis. Pins seed every draft and outrank the calendar when the two disagree.
+basis. Pins seed every draft and outrank the calendar when the two disagree —
+both on the same hour, and on a hour of the same worker's day that the pin's
+presence makes illegal (a run past the consecutive ceiling, a broken rest period,
+a day over its maximum), which yields to the pin. See ADR 0010.
 
 **What-if**:
 One hypothetical change an admin adds to a draft to see its effect — pin this
@@ -114,15 +117,23 @@ overtime", which is a different and much weaker claim.
 
 **Compromise**:
 The kind of **Problem** where an assignment is legal but ignores a stated
-preference — a worker's station preference, their wish for variety, their hour
-headroom, or **Authorised overtime**. Nothing is broken; someone did not get what
-they wanted.
+preference. Three kinds exist, one per assignment each: **Authorised overtime**, a
+station outside the worker's non-empty preference list, and a **Variety repeat**.
+Nothing is broken; someone did not get what they wanted. Never reported for an
+assignment that is a **Violation**, and hideable in the problem view because one
+opted-in overtime worker produces one per hour. See ADR 0006 and ADR 0010.
 _Avoid_: listing a worker's **shift preference** among these. The scheduler never
 reads `wcShiftPrefs` — it is stored, set, displayed and exported, and no scheduling
 code consults it — so an unhonoured shift preference is a missing feature rather
 than a compromise anyone made. See ADR 0006.
 _Avoid_: calling this a soft violation. Nothing is violated, so the word invites
 the reader to treat it as a **Violation**.
+
+**Variety repeat**:
+The **Compromise** where a worker who prefers variety is on a station they held
+within the three days before — the same window the scheduler penalises. Reported
+against the most recent such day, and across a range's start by way of the
+calendar look-back.
 
 **Understaffing**:
 The kind of **Problem** where a station has fewer assignments than its minimum
@@ -161,7 +172,10 @@ a commit touching frozen dates lands.
 
 **Pay period**:
 The interval that overtime and hour limits are measured over. Independent of
-draft date ranges, which may cover any span.
+draft date ranges, which may cover any span. A range that spans more than one is
+judged one period at a time, each against its own hours; see ADR 0010.
+_Avoid_: judging a two-period range under one context. The context holds one
+period, and the second period's hours would count for nothing.
 
 **Relative date**:
 A date argument written against today rather than as a calendar date — `today`,

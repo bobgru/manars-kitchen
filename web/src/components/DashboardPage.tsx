@@ -7,6 +7,7 @@ import {
   problemHour,
   kindGlyph,
   kindLabel,
+  fmtHours,
   type Horizon,
   type Problem,
 } from "../api/problems";
@@ -67,6 +68,17 @@ function byName<T extends { name: string }>(a: T, b: T): number {
   return a.name.localeCompare(b.name);
 }
 
+/** Remembered per browser, like the terminal's collapsed state. */
+const SHOW_COMPROMISES_KEY = "showCompromises";
+
+function readShowCompromises(): boolean {
+  try {
+    return localStorage.getItem(SHOW_COMPROMISES_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
 function sameCell(a: CellRef | null, b: CellRef): boolean {
   return a !== null && a.panel === b.panel && a.row === b.row && a.day === b.day;
 }
@@ -110,7 +122,12 @@ function cellsOf(p: Problem): CellRef[] {
 export default function DashboardPage() {
   const [horizons, setHorizons] = useState<Horizon[]>([]);
   const [selectedKey, setSelectedKey] = useState("current-period");
-  const [problems, setProblems] = useState<Problem[]>([]);
+  const [allProblems, setAllProblems] = useState<Problem[]>([]);
+  // A compromise is a problem by the glossary, so it counts. But an opted-in
+  // overtime worker generates one per hour, and a segment reading "60 problems"
+  // when two are violations hides the two. Off drops them from the counts, the
+  // panels and the detail pane at once.
+  const [showCompromises, setShowCompromises] = useState(readShowCompromises);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [stations, setStations] = useState<StationInfo[]>([]);
   const [freezeLine, setFreezeLine] = useState("");
@@ -143,12 +160,12 @@ export default function DashboardPage() {
       setStations(sts);
       setFreezeLine(freeze);
       if (hs.length === 0) {
-        setProblems([]);
+        setAllProblems([]);
         return;
       }
       const unionFrom = hs.reduce((a, h) => (h.from < a ? h.from : a), hs[0].from);
       const unionTo = hs.reduce((a, h) => (h.to > a ? h.to : a), hs[0].to);
-      setProblems(await fetchProblems(unionFrom, unionTo));
+      setAllProblems(await fetchProblems(unionFrom, unionTo));
       // The focused problem is an object from the previous result set; the
       // selected cell survives a reload because it is a position, but a problem
       // may no longer exist.
@@ -164,6 +181,23 @@ export default function DashboardPage() {
     setLoading(true);
     load();
   }, [load]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SHOW_COMPROMISES_KEY, showCompromises ? "1" : "0");
+    } catch {
+      // Storage unavailable: the choice just does not persist.
+    }
+  }, [showCompromises]);
+
+  const problems = useMemo(
+    () => (showCompromises ? allProblems : allProblems.filter((p) => p.kind !== "compromise")),
+    [allProblems, showCompromises]
+  );
+  const compromiseCount = useMemo(
+    () => allProblems.filter((p) => p.kind === "compromise").length,
+    [allProblems]
+  );
 
   // The problem set depends on far more than the calendar: approving an absence or
   // revoking a skill invalidates assignments without touching it. That is the
@@ -367,6 +401,27 @@ export default function DashboardPage() {
     if (p.kind === "unscheduled") {
       return `${problemDay(p)} — nobody is scheduled on this day at all`;
     }
+    if (p.kind === "compromise" && p.compromise) {
+      const who = `${workerName(p.worker)} at ${stationName(p.station)}`;
+      const c = p.compromise;
+      switch (c.kind) {
+        case "authorised-overtime":
+          return (
+            `${who} — authorised overtime: ${fmtHours(c.total)} this period ` +
+            `against a ${fmtHours(c.cap)} cap, which their overtime terms permit`
+          );
+        case "station-not-preferred":
+          return (
+            `${who} — station not preferred: prefers ` +
+            c.prefs.map((s) => stationName(s)).join(", ")
+          );
+        case "variety-repeat":
+          return (
+            `${who} — variety repeat: prefers to rotate, and was on ` +
+            `${stationName(p.station)} on ${c.repeats} too`
+          );
+      }
+    }
     return `${kindLabel(p.kind)} — ${stationName(p.station)}`;
   }
 
@@ -518,6 +573,23 @@ export default function DashboardPage() {
             <h3>
               By hour, worker and station — {selected.from} to {selected.to}
             </h3>
+            {/* Said as a checkbox with a count, so the reader knows what is
+                being hidden and how much of it. */}
+            <label className="problem-filter">
+              <input
+                type="checkbox"
+                checked={showCompromises}
+                onChange={(e) => {
+                  setShowCompromises(e.target.checked);
+                  setSelectedCell(null);
+                  setFocus(null);
+                }}
+              />{" "}
+              Show compromises ({compromiseCount} across all horizons) — legal
+              assignments that ignore a stated preference: authorised overtime, a
+              station outside the worker's list, or a repeat for someone who prefers
+              variety
+            </label>
             {shown.length === 0 && (
               <p className="msg-success">
                 Nothing wrong in this range. Every assignment holds and every
@@ -668,6 +740,7 @@ export default function DashboardPage() {
               <span>! violates a hard rule</span>
               <span>&#9675; not scheduled: nobody on that day at all</span>
               <span>&#9660; understaffed, below the station's minimum</span>
+              <span>~ compromise: legal, but against a stated preference</span>
               <span>Number: how many problems in that cell</span>
               <span>Hatched column: the day is not scheduled</span>
               <span>Tinted column: weekend</span>

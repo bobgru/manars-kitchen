@@ -102,7 +102,7 @@ import Export.JSON (ExportData)
 import Repo.Types (DraftInfo(..), CalendarCommit(..), AuditEntry(..))
 import Service.DraftValidation (DraftViolation(..))
 import Service.Problems
-    ( Problem(..), ProblemScope(..), Horizon(..)
+    ( Problem(..), ProblemScope(..), Horizon(..), CompromiseKind(..)
     , problemWorker, problemStation, problemScope, problemSeverity
     , problemEarliestDay
     )
@@ -1397,6 +1397,7 @@ problemKindName :: Problem -> Text
 problemKindName (PViolation _)          = "violation"
 problemKindName (PUnderstaffed _ _ _ _) = "understaffed"
 problemKindName (PUnscheduled _)        = "unscheduled"
+problemKindName (PCompromise _ _)       = "compromise"
 
 -- | The kind-specific payload. A client switches on @kind@ to know which of
 -- these to read. An unscheduled day adds nothing: the day is already in @scope@,
@@ -1408,6 +1409,36 @@ problemDetail (PUnderstaffed _ _ assigned required) =
     , "required" .= required
     ]
 problemDetail (PUnscheduled _) = []
+-- A compromise carries its assignment and a @compromise@ object whose own
+-- @kind@ picks the sentence. Hours are in seconds, like every duration here.
+problemDetail (PCompromise a k) =
+    [ "assignment" .= a
+    , "compromise" .= compromiseJson k
+    ]
+
+compromiseJson :: CompromiseKind -> Value
+compromiseJson (AuthorisedOvertime total cap) = object
+    [ "kind"  .= ("authorised-overtime" :: Text)
+    , "total" .= total
+    , "cap"   .= cap
+    ]
+compromiseJson (StationNotPreferred prefs) = object
+    [ "kind"  .= ("station-not-preferred" :: Text)
+    , "prefs" .= prefs
+    ]
+compromiseJson (VarietyRepeat d) = object
+    [ "kind"    .= ("variety-repeat" :: Text)
+    , "repeats" .= d
+    ]
+
+parseCompromise :: Value -> Parser CompromiseKind
+parseCompromise = withObject "compromise" $ \c -> do
+    kind <- c .: "kind" :: Parser Text
+    case kind of
+        "authorised-overtime"   -> AuthorisedOvertime <$> c .: "total" <*> c .: "cap"
+        "station-not-preferred" -> StationNotPreferred <$> c .: "prefs"
+        "variety-repeat"        -> VarietyRepeat <$> c .: "repeats"
+        other -> fail ("unknown compromise kind: " ++ T.unpack other)
 
 scopeJson :: ProblemScope -> Value
 scopeJson (ScopeSlot t) = object ["kind" .= ("slot" :: Text), "slot" .= t]
@@ -1432,6 +1463,10 @@ instance FromJSON ProblemResp where
                 scope <- v .: "scope"
                 day   <- withObject "scope" (.: "day") scope
                 pure (ProblemResp (PUnscheduled day))
+            "compromise" -> do
+                a <- v .: "assignment"
+                k <- v .: "compromise" >>= parseCompromise
+                pure (ProblemResp (PCompromise a k))
             other -> fail ("unknown problem kind: " ++ T.unpack other)
 
 -- | One horizon the problem view can be scoped to.

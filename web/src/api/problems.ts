@@ -6,9 +6,8 @@ import type { Assignment, Slot } from "./calendar";
  * a cell aggregates on, higher being more severe. Both come from the server so
  * that no client owns the ordering — see ADR 0006.
  *
- * `compromise` does not exist yet: it is piece 5 of item 2 in `docs/STATUS.md`.
- * It is in the union because the server will start sending it without a version
- * bump, and a client that switched exhaustively today would break silently then.
+ * `compromise` is a legal assignment that ignores a stated preference; see
+ * `CompromiseDetail` for the three kinds.
  */
 export type ProblemKind =
   | "violation"
@@ -35,6 +34,15 @@ export interface ViolationDetail {
 }
 
 /**
+ * Why a legal assignment is a compromise. `kind` picks the sentence; the rest is
+ * what the sentence needs. Durations are seconds, like every duration here.
+ */
+export type CompromiseDetail =
+  | { kind: "authorised-overtime"; total: number; cap: number }
+  | { kind: "station-not-preferred"; prefs: number[] }
+  | { kind: "variety-repeat"; repeats: string };
+
+/**
  * One thing wanting an admin's attention.
  *
  * `worker` and `station` are nullable because not every problem has both:
@@ -54,6 +62,17 @@ export interface Problem {
   /** Both present when `kind` is "understaffed". */
   assigned?: number;
   required?: number;
+  /** Both present when `kind` is "compromise". */
+  assignment?: Assignment;
+  compromise?: CompromiseDetail;
+}
+
+/** Seconds as a short hours string: 7200 is "2h", 5400 is "1h 30m". */
+export function fmtHours(seconds: number): string {
+  const mins = Math.round(seconds / 60);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
 }
 
 /**
