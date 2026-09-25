@@ -139,6 +139,15 @@ period. Same recipe as above, swapping the script.
 To drive a different page, copy the closest of the three — each header lists the
 prerequisites it does not manage.
 
+## Browser demos
+
+`web/demos/run.sh <current-period|feature-tour> [--auto [ms]] [--record] [--headless
+--shots]` is a one-command launch: it seeds the demo's fixture, starts the server and
+Vite, drives a captioned walkthrough, and tears down. Headed by default, which opens a
+window on the user's screen — use `--headless --shots` to check a demo without one and
+look at `web/demos/screenshots/`. `demo/README.md` lists the demos. They narrate; they
+do not assert.
+
 ## Run (agent path): the CLI
 
 `--demo <file>` replays one command per line against a database it wipes first

@@ -20,3 +20,5 @@ web/e2e/screenshots/
 .worktrees/
 skills-lock.json
 .agents/
+web/demos/recordings/
+web/demos/screenshots/

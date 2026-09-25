@@ -9,7 +9,10 @@ column plus editor on the Stations pages (ADR 0009). Two pre-existing bugs fell 
 that work and are fixed: name resolution dropped shell quoting, so any quoted argument
 after a resolvable name silently did nothing; and `npm run e2e:dashboard` only passed on a
 Monday. **Piece 5, Compromise, is next.** Item 1 is the three pieces deliberately left out
-of the draft detail page. The demo fixtures (ADR 0008) are unchanged in shape:
+of the draft detail page. Also new on 2026-09-25: **a library of browser demos** in
+`web/demos/` — captioned Playwright walkthroughs launched with one command, two so far
+(`current-period`, `feature-tour`); see `demo/README.md`. They narrate rather than
+assert, and `--headless --shots` is how to check one still runs after a UI change. The demo fixtures (ADR 0008) are unchanged in shape:
 `demo/current-period.txt` is the one to open the web UI against.
 
 Working notes for whoever (or whatever) picks this up next. This file is the

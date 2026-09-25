@@ -19,6 +19,35 @@ or when the behaviour under test depends on distinct millisecond timestamps.
 | `restaurant-setup.txt` | The feature tour: every CLI surface in order, against a **fixed historical week** (April 2026). The default for `--demo` with no file. |
 | `current-period.txt` | A restaurant whose calendar covers **today**. This is the fixture to use when looking at the web UI. |
 
+## Browser demos
+
+`web/demos/` holds scripted walkthroughs of the web UI, one file per demo, driven in
+Chromium with a caption banner across the top of the page saying what each step
+shows. They are for showing the app to someone, not for testing it — nothing in them
+asserts, and a step that fails is reported and skipped. The e2e drivers in
+`web/e2e/` are the tests.
+
+```bash
+web/demos/run.sh current-period            # seeds, starts servers, opens a window
+web/demos/run.sh feature-tour --auto       # timed steps instead of Enter
+web/demos/run.sh current-period --auto --record   # also saves a .webm
+cd web && npm run demo:current-period      # same thing, via npm
+```
+
+| demo | fixture | what it shows |
+|---|---|---|
+| `current-period` | `current-period.txt` | The problem view over a staffed week: the horizon control, the three panels, picking a problem, the next period unscheduled, and a second sick call typed into the terminal that changes the view live. |
+| `feature-tour` | `restaurant-setup.txt` | The admin pages in turn — skills, stations and zones, workers, shifts — then drafts (the freeze-line refusal, create, generate, the detail page), the calendar for the tour's first week, and the terminal. |
+
+The launcher takes over ports 8080 and 5173, seeds the demo's fixture into a copy under
+`/tmp`, and stops everything when the demo ends. Press Enter to advance a step; `--auto
+[ms]` advances on a timer; `--headless --shots` runs without a window and saves a
+screenshot per step under `web/demos/screenshots/`, which is how to check a demo still
+works after a UI change. All flags are documented at the top of `web/demos/lib.mjs`.
+
+To add a demo: copy the closest `.mjs`, keep it to a list of `step(...)` calls, and add
+its fixture mapping to `run.sh` and a row to the table above.
+
 ## Which fixture do I want?
 
 **Looking at the app?** `current-period.txt`. The problem view at `/` scopes
