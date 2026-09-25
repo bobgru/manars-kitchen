@@ -1,17 +1,16 @@
 # Project status and next steps
 
-**Last updated:** 2026-09-07 · the drafts surface is complete and the scheduler and draft
-validator no longer disagree about which assignments are legal. The `/drafts/:id` detail
-page shipped, and with it the `ScheduleGrid` and `CommitDraftDialog` extractions, so the
-old item 1 is gone from this file entirely. Item 1 is now the three pieces deliberately
-left out of the detail page. **Item 2, the problem view, is under way: pieces 1, 2 and 3 of
-5 are done** — `/` is the problem view, served by `GET /api/problems` and
-`GET /api/horizons` over a generalised validation core. The blocker in front of piece 4 is
-gone too: an unscheduled day is now its own kind of problem rather than 630 understaffings
-(ADR 0007). **Piece 4, the worker and station views plus the `Station` zone label, is next**;
-piece 5 is Compromise. The demo fixture was fixed the same day (ADR 0008): schedules now
-fill, and `demo/current-period.txt` puts a staffed restaurant under today's horizons, which
-is the fixture to open the web UI against.
+**Last updated:** 2026-09-25 · **item 2, the problem view, has pieces 1–4 of 5 done.**
+`/` now shows three panels over one problem set — by hour, by worker, and by station
+grouped by zone — as three row groups of one table so a date lines up vertically, with a
+cross-panel highlight when one problem is picked from the detail list. `Station` gained a
+nullable **zone** label with `station set-zone` / `station clear-zone`, a REST route, and a
+column plus editor on the Stations pages (ADR 0009). Two pre-existing bugs fell out of
+that work and are fixed: name resolution dropped shell quoting, so any quoted argument
+after a resolvable name silently did nothing; and `npm run e2e:dashboard` only passed on a
+Monday. **Piece 5, Compromise, is next.** Item 1 is the three pieces deliberately left out
+of the draft detail page. The demo fixtures (ADR 0008) are unchanged in shape:
+`demo/current-period.txt` is the one to open the web UI against.
 
 Working notes for whoever (or whatever) picks this up next. This file is the
 authoritative record of agreed next steps, deliberately kept in the repo so it
@@ -25,8 +24,9 @@ leaving a stale claim behind.
 
 ## Where things stand
 
-The admin web UI has pages for skills, stations, workers, shifts, drafts (list and
-detail), and a read-only calendar. The CLI remains a first-class client. See
+The admin web UI has the problem view at `/`, pages for skills, stations (with their
+zone), workers, shifts, drafts (list and detail), and a read-only calendar. The CLI
+remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
 
@@ -154,21 +154,22 @@ a rename command: the reference is an ID in some grammars and a name in others.
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
 
-**Verification baseline at the draft detail page** — everything above, plus the
-service-layer and optimizer moves, the structured-rename and SSE role-filtering work,
-the named-schedule removal, and the whole drafts surface. All of this was green, with
-`LANG` unset:
+**Verification baseline at the three-panel problem view (2026-09-25)** — everything
+above, plus the zone label, the worker and station panels, the cross-panel highlight, and
+the quoting fix in name resolution. All of this was green, with `LANG` unset:
 
-- `stack clean && stack build --pedantic` — clean. The detail page itself changed no
-  `.hs` file and was verified warm on that basis; the hour-rule fix on 2026-09-07 did, and
-  took the full clean gate.
-- 279 integration + 400 unit examples, 0 failures, 1 pending (the weekend divergence in
+- `stack clean && stack build --pedantic` — clean, no warnings.
+- 284 integration + 407 unit examples, 0 failures, 1 pending (the weekend divergence in
   item 6), run sequentially — never two `stack test` invocations at once, see item 5.
 - `cd web && npm run build` — clean
 - `cd web && npm run lint` — clean, 0 problems
-- `npm run e2e:drafts` (fresh DB), `npm run e2e:draft-detail` and `npm run e2e:calendar`
-  (both demo-seeded) — all pass, no unexpected console errors
-- demo runs end to end, exit 0
+- `npm run e2e:dashboard` (demo-seeded from the tour) — passes on a Friday, which it
+  could not before; no unexpected console errors. The Stations list and detail pages were
+  driven live too: zone column, trimmed save, clear back to Unassigned.
+- both demo fixtures replay end to end, exit 0, and every `station set-zone` line in
+  `demo/restaurant.txt` now takes effect.
+- Not re-run this time: `e2e:drafts`, `e2e:draft-detail`, `e2e:calendar`. None of their
+  pages changed.
 
 **`npm run lint` is now clean — keep it that way.** The 5 errors that used to live
 in `web/src/hooks/useSSE.tsx` and `web/src/App.tsx` are fixed: the SSE provider
@@ -297,6 +298,32 @@ Five pieces, in this order. Each is independently shippable.
    is about **no worker and no station**, so a worker-row or station-row projection cannot
    place it on a row at all; a per-column header or footer band is the shape that carries
    over.
+4. ~~**The worker and station views.**~~ — shipped 2026-09-25 in three commits: the zone
+   label end to end, the two panels, and the cross-panel highlight. **ADR 0009** records
+   what grilling settled — a zone is a free-text label on the station rather than an
+   entity, two verbs rather than a sentinel, one table with three row groups rather than
+   three tables, a row for every active worker and every station rather than only the
+   troubled ones, and words rather than outline colours for the highlight. Things the next
+   piece inherits:
+
+   - `DashboardPage.tsx` indexes the shown problems three ways (`byCell`, `byWorkerDay`,
+     `byStationDay`) and one `renderCell` draws every cell; a `CellRef` is
+     `{panel, row, day}`. A compromise with a worker, a station and a slot needs no new
+     plumbing — it lands in all three panels the moment the server sends it, and
+     `problem-cell-compromise` already exists in the CSS.
+   - A **day-scoped problem that names a worker** now has a cell, in the worker row. The
+     hours panel still cannot show it and the notice above the grid says so. One naming
+     neither worker nor station is still reported in words only.
+   - `npm run e2e:dashboard` manufactures its problems with a **sick call** after
+     committing a draft from today, so it runs on any weekday and asserts that the worker
+     and station panels agree with `GET /api/problems` pair for pair. Keep that assertion
+     when compromises arrive; it is what proves the projections are of one set.
+   - The station panel groups by `zone`; the demo restaurant labels six stations and leaves
+     `busboy` unassigned on purpose. Export does not carry zones — see the export entry in
+     item 7 before adding it.
+
+   **Original wording follows.**
+
 4. **The worker and station views.** Same day columns, rows of workers and of
    stations-grouped-by-zone, so one date lines up vertically across all three panels. This
    is where the nullable **zone label on `Station`** lands, with its CLI verb and REST
@@ -541,7 +568,11 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   resolution happens in `resolveInput` (`src/CLI/App.hs:147`) before
   `parseCommand`, and an unresolved name takes a path that reports nothing. This
   means a typo in `demo/restaurant-setup.txt` is invisible: the line is skipped and
-  the replay still ends with `Replay complete.` Found 2026-09-06.
+  the replay still ends with `Replay complete.` Found 2026-09-06. **A line that
+  resolves but then fails to parse is just as silent** — that is how the quoting bug
+  fixed on 2026-09-25 (ADR 0009) went unnoticed: `station set-zone grill "hot line"`
+  replayed as five words, parsed as nothing, printed nothing. A replay that reports
+  "unrecognised command" per line would have caught both.
 - **The container is now verified on the Linux x86_64 laptop too** (2026-08-30,
   natively, not under emulation). Every claim the previous entry listed as expected
   held: `dpkg --print-architecture` = `amd64` resolved node/stack/awscli/worktrunk

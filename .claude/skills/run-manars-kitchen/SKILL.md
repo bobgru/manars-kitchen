@@ -112,10 +112,17 @@ week, the resulting replaced-calendar warning, committing from the detail page a
 the confirmation handed to the list, and the terminal state for a draft id that does
 not exist. It mutates the database, so **re-run it against a fresh copy**.
 `e2e:calendar` walks four — the live month, a history snapshot, and both branches of
-the range guard. `e2e:dashboard` walks seven — the three horizon segments and their
-marks, the unscheduled-day baseline, switching horizon, the per-hour problems appearing
-live over SSE once a draft is committed over the current period, and a marked cell with
-its detail pane. It mutates the database too.
+the range guard. `e2e:dashboard` walks nine — the three horizon segments and their
+marks, the three panels (by hour, by worker, by station grouped by zone) and the
+unscheduled-day baseline, switching horizon, a draft committed from **today** to the end
+of the period, then a **sick call** — an absence approved after the commit — whose
+violations appear live over SSE in all three panels, a marked cell in the station panel
+with its detail pane, and picking one problem to outline its cells across the panels. It
+asserts that the worker and station panels agree with `GET /api/problems` pair for pair.
+It mutates the database too. It drafts from today rather than the period's start because
+earlier dates are frozen and a REST caller cannot force past the freeze line; and it
+manufactures the sick call because whether the scheduler leaves a station short over the
+remaining days depends on the weekday, and the driver must not.
 
 **Seeded from the tour, the problem view opens on "not scheduled", and that is the
 fixture.** `restaurant-setup.txt`'s calendar is April 2026, which no horizon covers, so
