@@ -22,6 +22,7 @@ import {
   reveal,
   navigate,
   horizons,
+  terminalCollapsed,
 } from "./lib.mjs";
 
 const { browser, context, page } = await launch("Feature tour: the admin pages");
@@ -31,10 +32,13 @@ const { next } = await horizons(page);
 await step(
   page,
   "The app opens on the problem view. This fixture's calendar is April 2026, so every day in range is 'not scheduled'.",
-  null,
+  async () => {
+    await terminalCollapsed(page, true);
+  },
   "The problem view scopes to today, this pay period and the next. Nothing here is " +
     "wrong with the restaurant; nothing has been built for these dates yet, and the view " +
-    "says so once per day rather than once per open station-slot."
+    "says so once per day rather than once per open station-slot. The terminal at the " +
+    "bottom is collapsed to its bar for now."
 );
 
 await step(
@@ -190,6 +194,7 @@ await step(
   page,
   "The terminal is the full CLI. Ask it about the freeze line, and list the drafts.",
   async () => {
+    await terminalCollapsed(page, false);
     await reveal(page.locator(".terminal"));
     await terminal(page, "calendar freeze-status");
     await terminal(page, "draft list");

@@ -169,8 +169,16 @@ export async function step(page, text, action, sub = "") {
   await pause();
 }
 
+/** Collapse the embedded terminal to its bar, or expand it, if not already so. */
+export async function terminalCollapsed(page, collapsed) {
+  const toggle = page.locator(".terminal-toggle");
+  const expanded = (await toggle.getAttribute("aria-expanded")) === "true";
+  if (expanded === collapsed) await toggle.click();
+}
+
 /** Type a command into the embedded web terminal and wait for its output. */
 export async function terminal(page, command) {
+  await terminalCollapsed(page, false);
   const input = page.locator(".terminal-input");
   const before = await page.locator(".terminal-line").count();
   await input.click();

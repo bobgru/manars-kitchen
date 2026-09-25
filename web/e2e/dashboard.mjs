@@ -87,6 +87,22 @@ await page.getByRole("button", { name: /log ?in/i }).click();
 await page.getByRole("heading", { name: "Problems" }).waitFor();
 console.log("logged in, landed on the problem view");
 
+// --- The terminal collapses to a bar, and the choice sticks ------------------
+const toggle = page.getByRole("button", { name: /Terminal/ });
+if ((await toggle.getAttribute("aria-expanded")) !== "true") fail("terminal should open expanded");
+const pageHeightOpen = await page.locator(".app-page").evaluate((el) => el.clientHeight);
+await toggle.click();
+if ((await toggle.getAttribute("aria-expanded")) !== "false") fail("toggle did not collapse");
+if (await page.locator(".terminal").isVisible()) fail("terminal body still visible when collapsed");
+const pageHeightCollapsed = await page.locator(".app-page").evaluate((el) => el.clientHeight);
+if (pageHeightCollapsed <= pageHeightOpen) fail("collapsing the terminal gave the page no room");
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.getByRole("heading", { name: "Problems" }).waitFor();
+if ((await toggle.getAttribute("aria-expanded")) !== "false") fail("collapsed state was not remembered");
+await toggle.click();
+if (!(await page.locator(".terminal-input").isVisible())) fail("terminal did not expand again");
+console.log(`terminal collapses (page ${pageHeightOpen} -> ${pageHeightCollapsed}px) and remembers it`);
+
 // --- The horizon control ----------------------------------------------------
 const segs = page.locator(".horizon-seg");
 const segCount = await segs.count();

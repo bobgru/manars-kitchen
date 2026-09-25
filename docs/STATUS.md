@@ -28,8 +28,9 @@ leaving a stale claim behind.
 ## Where things stand
 
 The admin web UI has the problem view at `/`, pages for skills, stations (with their
-zone), workers, shifts, drafts (list and detail), and a read-only calendar. The CLI
-remains a first-class client. See
+zone), workers, shifts, drafts (list and detail), and a read-only calendar. The embedded
+terminal collapses to a one-line bar (the choice is remembered per browser), which is
+what the browser demos do for their graphics steps. The CLI remains a first-class client. See
 `openspec/web-interface-roadmap.md` for the intended sequence and
 `openspec/changes/archive/` for what has shipped (33 changes).
 

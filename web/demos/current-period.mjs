@@ -22,6 +22,7 @@ import {
   navigate,
   horizons,
   plusDays,
+  terminalCollapsed,
 } from "./lib.mjs";
 
 const { browser, context, page } = await launch("Current period: the sick call");
@@ -33,9 +34,12 @@ const sickTo = plusDays(today, 3);
 await step(
   page,
   "This is the problem view: what is wrong with the committed calendar, right now.",
-  null,
+  async () => {
+    await terminalCollapsed(page, true);
+  },
   `The horizon control offers today, this pay period (${current.from} to ${current.to}) ` +
-    `and the next. Everything below is scoped to the selected one.`
+    `and the next. Everything below is scoped to the selected one. The terminal is ` +
+    `collapsed to its bar at the bottom to give the view the room; it comes back later.`
 );
 
 await step(
@@ -126,6 +130,7 @@ await step(
   "Back to this period. Now a second sick call, live, from the terminal.",
   async () => {
     await page.locator(".horizon-seg").filter({ hasText: current.label }).click();
+    await terminalCollapsed(page, false);
     await reveal(page.locator(".terminal"));
   },
   "The embedded terminal is the same CLI an admin uses at a shell. The browser and the " +

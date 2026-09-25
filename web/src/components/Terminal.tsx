@@ -5,6 +5,9 @@ import { useAllEvents } from "../hooks/useSSE";
 
 interface TerminalProps {
   onSessionExpired: () => void;
+  /** Collapsed to a one-line bar; the history and input stay mounted, just hidden. */
+  collapsed: boolean;
+  onToggle: () => void;
 }
 
 interface OutputLine {
@@ -12,7 +15,7 @@ interface OutputLine {
   text: string;
 }
 
-export default function Terminal({ onSessionExpired }: TerminalProps) {
+export default function Terminal({ onSessionExpired, collapsed, onToggle }: TerminalProps) {
   const [lines, setLines] = useState<OutputLine[]>([]);
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
@@ -117,12 +120,47 @@ export default function Terminal({ onSessionExpired }: TerminalProps) {
     }
   }
 
+  // The last thing the terminal said, for the collapsed bar: the final non-empty
+  // line of the last output, so a command can be fired, the panel collapsed, and
+  // its answer still read.
+  const lastLine = (() => {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].type === "command") return `> ${lines[i].text}`;
+      const text = lines[i].text.trim().split("\n").filter(Boolean).pop();
+      if (text) return text;
+    }
+    return "";
+  })();
+
   return (
-    <div
-      className="terminal"
-      ref={scrollRef}
-      onClick={() => inputRef.current?.focus()}
-    >
+    <div className={collapsed ? "terminal-panel terminal-panel-collapsed" : "terminal-panel"}>
+      {/* The bar is the toggle: a real button with a word and a glyph, so the
+          state is never carried by colour or by an icon alone. */}
+      <div className="terminal-bar">
+        <button
+          type="button"
+          className="terminal-toggle"
+          aria-expanded={!collapsed}
+          aria-controls="terminal-body"
+          onClick={onToggle}
+          title={collapsed ? "Show the terminal" : "Collapse the terminal to a bar"}
+        >
+          {collapsed ? "▸ Terminal" : "▾ Terminal"}
+        </button>
+        {collapsed && (
+          <span className="terminal-last" title={lastLine || undefined}>
+            {lastLine || "CLI commands run here; expand to type one."}
+          </span>
+        )}
+      </div>
+      {/* Hidden, not unmounted, so history, scroll position and focus survive. */}
+      <div
+        id="terminal-body"
+        className="terminal"
+        hidden={collapsed}
+        ref={scrollRef}
+        onClick={() => inputRef.current?.focus()}
+      >
       <div className="terminal-content">
         {lines.map((line, i) => (
           <pre
@@ -148,6 +186,7 @@ export default function Terminal({ onSessionExpired }: TerminalProps) {
           />
           {loading && <span className="terminal-spinner" />}
         </div>
+      </div>
       </div>
     </div>
   );
