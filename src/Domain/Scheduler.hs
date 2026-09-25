@@ -418,7 +418,9 @@ canAssignSlot ctx allowOT w st slot sched =
     skillOk
     && isWorkerAvailable w (slotDate slot) (schAbsenceCtx ctx)
     && slotAvailable
-    && not (needsBreak cfg w slot sched)
+    -- Both directions, not only backwards: a pinned hour later in the day can
+    -- be the hour too many of the run this assignment would complete.
+    && not (wouldExceedConsecutive cfg w slot sched)
     && not (violatesRestPeriod cfg w slot sched)
     && not (blockedByAlternateWeekend ctx w slot)
     && not avoidBlocked

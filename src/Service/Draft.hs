@@ -35,10 +35,13 @@ import Domain.Scheduler
     )
 import Service.Optimize (optimizeSchedule)
 import Service.PubSub (TopicBus, ProgressEvent)
-import Domain.Worker (WorkerContext(..))
+import Domain.Worker
+    ( WorkerContext(..), wouldExceedConsecutive, violatesRestPeriod, wouldExceedDailyTotal )
+import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Shift (defaultShifts)
 import Domain.Skill (stationClosedSlots)
 import Domain.Pin (expandPins)
+import Domain.Schedule (assign)
 import Domain.Calendar (generateDateRangeSlots, defaultHours)
 import Repo.Types (Repository(..), DraftInfo(..))
 import Service.Context (loadValidationContext)
@@ -132,27 +135,45 @@ seedDraft repo dateFrom dateTo = do
     calSched <- Cal.loadCalendarSlice repo dateFrom dateTo
     shifts <- repoLoadShifts repo
     pins <- repoLoadPins repo
+    cfg <- repoLoadSchedulerConfig repo
     let activeShifts = case shifts of
             [] -> defaultShifts
             ss -> ss
         slots = generateDateRangeSlots defaultHours dateFrom dateTo Set.empty
         pinSched = expandPins activeShifts slots pins
-    return (mergePinCalendar calSched pinSched)
+    return (mergePinCalendar cfg calSched pinSched)
 
 -- | Merge calendar and pin schedules with pin precedence.
--- Conflict key: worker_id + slot_date + slot_start.
--- When a conflict exists, the pin assignment wins.
-mergePinCalendar :: Schedule -> Schedule -> Schedule
-mergePinCalendar (Schedule calAssigns) (Schedule pinAssigns) =
-    let -- Build a map keyed by (worker_id, date, start_time) for calendar entries
-        calMap = Map.fromList
-            [ (conflictKey a, a) | a <- Set.toList calAssigns ]
-        -- Build a map for pin entries (these override)
-        pinMap = Map.fromList
-            [ (conflictKey a, a) | a <- Set.toList pinAssigns ]
-        -- Pins override calendar entries on the same conflict key
-        merged = Map.union pinMap calMap
-    in Schedule (Set.fromList (Map.elems merged))
+--
+-- Precedence means two things. On the same (worker, date, start) the pin
+-- replaces the calendar entry. And on a day where a worker has a pin, a calendar
+-- entry of theirs that the pin's presence makes illegal — a run of hours past the
+-- consecutive ceiling, a broken rest period, a day over its maximum — yields to
+-- the pin. The second rule exists because a pin added after a week was committed
+-- lands beside hours that were legal without it, and the scheduler never
+-- revisits what it was seeded with: the seed itself carried the violation, and
+-- no legality check on the hours the scheduler adds afterwards could remove it.
+--
+-- Days and workers without a pin are untouched; this is about what a pin
+-- displaces, not a re-validation of the calendar.
+mergePinCalendar :: SchedulerConfig -> Schedule -> Schedule -> Schedule
+mergePinCalendar cfg (Schedule calAssigns) (Schedule pinAssigns) =
+    let pinKeys = Set.map conflictKey pinAssigns
+        pinnedDays = Set.map (\a -> (assignWorker a, slotDate (assignSlot a))) pinAssigns
+        -- Calendar entries not replaced outright, in time order so that the
+        -- proximity checks see a day the way the scheduler would have built it.
+        survivors = [ a | a <- Set.toList calAssigns, not (Set.member (conflictKey a) pinKeys) ]
+        nearPin a = Set.member (assignWorker a, slotDate (assignSlot a)) pinnedDays
+        legalBeside sched a =
+            let w = assignWorker a
+                s = assignSlot a
+            in not (wouldExceedConsecutive cfg w s sched)
+            && not (violatesRestPeriod cfg w s sched)
+            && not (wouldExceedDailyTotal cfg a sched)
+        place sched a
+            | not (nearPin a) || legalBeside sched a = assign a sched
+            | otherwise = sched
+    in foldl place (Schedule pinAssigns) survivors
   where
     conflictKey a =
         let s = assignSlot a

@@ -21,6 +21,7 @@ module Domain.Worker
     , wouldExceedDailyRegular
     , wouldExceedDailyTotal
     , needsBreak
+    , wouldExceedConsecutive
     , violatesRestPeriod
       -- * Seniority
     , workerSeniority
@@ -301,6 +302,33 @@ needsBreak cfg w slot sched =
                then 1 + countBack (n - 1) prev
                else 0
     in countBack maxCons startTime >= maxCons
+
+-- | Would /adding/ this slot create a run of consecutive hours that breaks the
+--   ceiling anywhere in the run — not only at this slot?
+--
+--   'needsBreak' looks backwards only: it asks whether this slot would be the
+--   hour too many. That is the right question for a validator judging an
+--   assignment, and it was the right question for a scheduler filling a day in
+--   time order, until pins existed. A pinned assignment is already in the
+--   schedule /ahead/ of the hours the scheduler fills before it, so filling the
+--   hour just before a pin can complete a run whose hour too many is the pin —
+--   which no backward check from the hour being filled will see. This counts the
+--   run through the slot in both directions and refuses if, once joined, some
+--   hour in it would have the ceiling's worth of hours before it.
+wouldExceedConsecutive :: SchedulerConfig -> WorkerId -> Slot -> Schedule -> Bool
+wouldExceedConsecutive cfg w slot sched =
+    let maxCons = maxConsecutiveFromCfg cfg
+        day = slotDate slot
+        startTime = timeOfDayToTime (slotStart slot)
+        dayAssignments = Set.filter (\a -> assignWorker a == w) (byDay day sched)
+        startTimes = Set.fromList
+            [ timeOfDayToTime (slotStart (assignSlot a)) | a <- Set.toList dayAssignments ]
+        run step t =
+            let next = t + step
+            in if Set.member next startTimes then 1 + run step next else 0 :: Int
+        hoursBefore = run (-3600) startTime
+        hoursAfter  = run 3600 startTime
+    in hoursBefore + hoursAfter >= maxCons
 
 -- | Would assigning a worker to this slot violate the minimum rest period?
 -- Checks that at least minRestHours hours have elapsed since the worker's
@@ -725,6 +753,25 @@ spec = do
                         emptySchedule [9, 10, 11, 12, 14, 15, 16]
                 slot = mkTestSlot (fromGregorian 2026 5 4) 17
             in needsBreak defaultConfig tw_alice slot sched `shouldBe` False
+
+        -- The scheduler's question, with a pin already in place later in the
+        -- day: 9-11 are filled, 13 is pinned, and 12 is being considered. Adding
+        -- it joins a five-hour run whose hour too many is the pin.
+        it "wouldExceedConsecutive sees a run completed by a later pinned hour" $
+            let sched = foldl (\s h -> assign (Assignment tw_alice tst_grill
+                            (mkTestSlot (fromGregorian 2026 5 4) h)) s)
+                        emptySchedule [9, 10, 11, 13]
+                slot = mkTestSlot (fromGregorian 2026 5 4) 12
+            in (needsBreak defaultConfig tw_alice slot sched,
+                wouldExceedConsecutive defaultConfig tw_alice slot sched)
+                    `shouldBe` (False, True)
+
+        it "wouldExceedConsecutive allows a run that stays under the ceiling" $
+            let sched = foldl (\s h -> assign (Assignment tw_alice tst_grill
+                            (mkTestSlot (fromGregorian 2026 5 4) h)) s)
+                        emptySchedule [9, 10, 12]
+                slot = mkTestSlot (fromGregorian 2026 5 4) 11
+            in wouldExceedConsecutive defaultConfig tw_alice slot sched `shouldBe` False
 
         it "needsBreak is False for a different worker" $
             let sched = foldl (\s h -> assign (Assignment tw_alice tst_grill

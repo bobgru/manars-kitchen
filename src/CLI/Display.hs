@@ -310,9 +310,12 @@ displayWorkerHours wNames maxHours (Schedule as)
     | otherwise =
         let asList = Set.toList as
             workers = sort $ nub [assignWorker a | a <- asList]
-            -- Compute total scheduled hours per worker
-            workerHrs w = sum [slotDuration (assignSlot a)
-                              | a <- asList, assignWorker a == w]
+            -- Hours worked, not assignment rows: one worker covering two
+            -- stations in the same hour (multi-station coverage) is one hour,
+            -- which is how 'workerPeriodHours' and the validator count it.
+            workerHrs w = sum [ slotDuration s
+                              | s <- Set.toList (Set.fromList
+                                    [assignSlot a | a <- asList, assignWorker a == w]) ]
             -- Column widths
             nameW = maximum (6 : [length (lookupWorker wNames w) | w <- workers]) + 1
             colW = 12

@@ -28,6 +28,7 @@ import Service.DraftValidation
     , calendarReplacedUnder
     )
 import qualified Service.Calendar as Cal
+import qualified Service.Worker as SW
 import qualified Service.Draft as Draft
 
 import System.Directory (removeFile, doesFileExist)
@@ -280,6 +281,47 @@ spec = do
                     sched = mkSchedule [mkAssignment 5 1 (may 4) 9]
                 violations <- validateSchedule repo (from, to) sched
                 violations `shouldBe` []
+
+        -- The look-back schedule and the committed-hours-outside-the-range map
+        -- both cover the days of the pay period before the range. Counting those
+        -- days in both charged them twice, so a worker exactly at their cap over
+        -- the week was reported over it whenever the range started mid-period.
+        it "counts calendar hours before a mid-period range once, not twice" $
+            withTestRepo $ \repo -> do
+                _ <- SW.addStation repo "grill" 1 1
+                SW.setMaxHours repo (WorkerId 1) (40 * 3600)
+                -- Two blocks of four with a gap, so no daily or consecutive rule
+                -- fires and only the period-hours rule is in play.
+                let hoursOn d = [ mkAssignment 1 1 d h | h <- [6, 7, 8, 9, 11, 12, 13, 14] ]
+                -- Mon 4 and Tue 5 May are committed: 16 hours inside the week.
+                Cal.commitToCalendar repo (may 4) (may 5) "start of week" Nothing
+                    (mkSchedule (hoursOn (may 4) ++ hoursOn (may 5)))
+                -- Wed to Fri under judgement: 24 more, for exactly 40.
+                let sched = mkSchedule (concatMap hoursOn [may 6, may 7, may 8])
+                violations <- validateSchedule repo (may 6, may 10) sched
+                [ dvConstraint v | v <- violations ] `shouldBe` []
+                -- One more hour is over, so the rule itself still fires.
+                let over = mkSchedule (mkAssignment 1 1 (may 9) 6 : concatMap hoursOn [may 6, may 7, may 8])
+                overV <- validateSchedule repo (may 6, may 10) over
+                [ dvConstraint v | v <- overV ] `shouldSatisfy` elem "period hours"
+
+        -- The context holds one pay period. Judged in one go, a two-week range
+        -- read the second week against the first week's hours, so an over-cap
+        -- second week reported nothing.
+        it "judges each pay period of a two-week range against its own hours" $
+            withTestRepo $ \repo -> do
+                _ <- SW.addStation repo "grill" 1 1
+                SW.setMaxHours repo (WorkerId 1) (40 * 3600)
+                let hoursOn d = [ mkAssignment 1 1 d h | h <- [6, 7, 8, 9, 11, 12, 13, 14] ]
+                    -- Week of May 4: eight hours. Week of May 11: forty-four.
+                    week1 = hoursOn (may 4)
+                    week2 = concatMap hoursOn [may 11, may 12, may 13, may 14, may 15]
+                            ++ [ mkAssignment 1 1 (may 16) h | h <- [6, 7, 8, 9] ]
+                violations <- validateSchedule repo (may 4, may 17) (mkSchedule (week1 ++ week2))
+                let dates = [ slotDate (assignSlot (dvAssignment v)) | v <- violations ]
+                [ dvConstraint v | v <- violations ] `shouldSatisfy` all (== "period hours")
+                length violations `shouldBe` 44
+                dates `shouldSatisfy` all (>= may 11)
 
         it "returns no violations for an empty schedule" $
             withTestRepo $ \repo -> do

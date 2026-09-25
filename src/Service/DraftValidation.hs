@@ -13,6 +13,7 @@ module Service.DraftValidation
     , pruneDraftViolations
       -- * The generalised core
     , validateSchedule
+    , judgementContext
     ) where
 
 import qualified Data.Set as Set
@@ -24,7 +25,7 @@ import Domain.Types
     )
 import Domain.Schedule (bySlot)
 import Domain.Scheduler (SchedulerContext(..), blockedByAlternateWeekend)
-import Service.Context (loadValidationContext)
+import Service.Context (loadValidationContextExcluding, payPeriodChunks)
 import Domain.Skill (qualified)
 import Domain.Worker
     ( violatesRestPeriod, needsBreak
@@ -199,22 +200,45 @@ pruneDraftViolations repo draftId = do
 -- /inside/ the range, which is the asymmetry 'calendarReplacedUnder' exists to
 -- work around.
 validateSchedule :: Repository -> (Day, Day) -> Schedule -> IO [DraftViolation]
-validateSchedule repo (from, to) sched = do
-    let assignments = Set.toList (unSchedule sched)
-    if null assignments
-        then return []
-        else do
-            lookBackSched <- Cal.loadCalendarSlice repo
-                                 (addDays (-7) from) (addDays (-1) from)
-            ctx <- loadValidationContext repo (from, to)
-                       (buildLookBackContext lookBackSched)
-            let combined = Schedule (Set.union (unSchedule lookBackSched)
-                                               (unSchedule sched))
-            return
-                [ v
-                | a <- assignments
-                , Just v <- [validateAssignment ctx a combined]
-                ]
+validateSchedule repo range sched
+    | Set.null (unSchedule sched) = return []
+    | otherwise = do
+        -- One context per pay period the range touches: the hour rules measure
+        -- against the context's period, so a two-week range judged in one go
+        -- would read week two against week one's hours.
+        chunks <- payPeriodChunks repo range
+        concat <$> mapM judgeChunk chunks
+  where
+    judgeChunk chunk@(cFrom, cTo) = do
+        let inChunk a = let d = slotDate (assignSlot a) in d >= cFrom && d <= cTo
+            part = Schedule (Set.filter inChunk (unSchedule sched))
+            assignments = Set.toList (unSchedule part)
+        if null assignments
+            then return []
+            else do
+                (ctx, combined) <- judgementContext repo chunk part
+                return
+                    [ v
+                    | a <- assignments
+                    , Just v <- [validateAssignment ctx a combined]
+                    ]
+
+-- | The context for judging a schedule over a range, and the schedule joined
+--   with the seven days of calendar before it.
+--
+--   Shared by 'validateSchedule' and by 'Service.Problems', which judges the
+--   same schedule for compromises and must see the same look-back — a variety
+--   repeat on the range's first day is a repeat of something in the calendar
+--   before it. The look-back days are excluded from the context's calendar hours
+--   because they are in the joined schedule; see 'loadValidationContextExcluding'.
+judgementContext :: Repository -> (Day, Day) -> Schedule -> IO (SchedulerContext, Schedule)
+judgementContext repo (from, to) sched = do
+    let lookBackFrom = addDays (-7) from
+    lookBackSched <- Cal.loadCalendarSlice repo lookBackFrom (addDays (-1) from)
+    ctx <- loadValidationContextExcluding repo (from, to) (lookBackFrom, to)
+               (buildLookBackContext lookBackSched)
+    let combined = Schedule (Set.union (unSchedule lookBackSched) (unSchedule sched))
+    return (ctx, combined)
 
 -- | The shared body of 'computeDraftViolations' and 'pruneDraftViolations'.
 -- Returns the draft's assignments alongside the violations so a caller that

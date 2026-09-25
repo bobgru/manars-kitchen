@@ -12,7 +12,9 @@
 -- same would be the opposite error.
 module Service.Context
     ( loadValidationContext
+    , loadValidationContextExcluding
     , calendarHoursOutside
+    , payPeriodChunks
     ) where
 
 import Data.Map.Strict (Map)
@@ -47,7 +49,28 @@ loadValidationContext
     -> (Day, Day)              -- ^ Inclusive range being judged or built.
     -> Set.Set WorkerId        -- ^ Workers who worked the previous weekend.
     -> IO SchedulerContext
-loadValidationContext repo (from, to) prevWeekendWorkers = do
+loadValidationContext repo range prevWeekendWorkers =
+    loadValidationContextExcluding repo range range prevWeekendWorkers
+
+-- | 'loadValidationContext', but excluding a wider range than the one being
+--   judged from 'schCalendarHours'.
+--
+--   The validator joins a seven-day calendar look-back onto the schedule it
+--   judges, so that rest and consecutive-hour rules can see across the range's
+--   start. Those look-back days are then /in the schedule/, and if they also fall
+--   inside the pay period they must not be counted again through the calendar
+--   hours map — which is exactly what happened when the exclusion was the range
+--   alone: a mid-period draft charged the period's earlier days twice, and a
+--   worker exactly at their cap was reported over it. The caller that joins the
+--   look-back passes the look-back's start here.
+loadValidationContextExcluding
+    :: Repository
+    -> (Day, Day)              -- ^ Inclusive range being judged or built.
+    -> (Day, Day)              -- ^ Inclusive range whose calendar hours the
+                               --   caller supplies itself, so they are excluded.
+    -> Set.Set WorkerId        -- ^ Workers who worked the previous weekend.
+    -> IO SchedulerContext
+loadValidationContextExcluding repo (from, _to) excluded prevWeekendWorkers = do
     skillCtx   <- repoLoadSkillCtx repo
     workerCtx  <- repoLoadWorkerCtx repo
     absenceCtx <- repoLoadAbsenceCtx repo
@@ -56,7 +79,7 @@ loadValidationContext repo (from, to) prevWeekendWorkers = do
     mPpc       <- repoLoadPayPeriodConfig repo
     let ppc = maybe defaultPayPeriodConfig id mPpc
         bounds@(periodStart, periodEnd) = payPeriodBounds ppc from
-    calHrs <- calendarHoursOutside repo workerCtx (periodStart, periodEnd) (from, to)
+    calHrs <- calendarHoursOutside repo workerCtx (periodStart, periodEnd) excluded
     return SchedulerContext
         { schSkillCtx    = skillCtx
         , schWorkerCtx   = workerCtx
@@ -70,6 +93,26 @@ loadValidationContext repo (from, to) prevWeekendWorkers = do
         , schPeriodBounds = bounds
         , schCalendarHours = calHrs
         }
+
+-- | An inclusive date range cut at pay-period boundaries, in order.
+--
+-- A 'SchedulerContext' holds one pay period, the one containing the range's
+-- start, and every hour rule measures against it. An assignment in a later
+-- period therefore adds nothing to the count and is judged on the first
+-- period's total, which is the wrong period and usually the wrong answer.
+-- Anything judging a range that may span periods judges each chunk with its own
+-- context. The problem view's request covers the current period and the next,
+-- so it always spans two.
+payPeriodChunks :: Repository -> (Day, Day) -> IO [(Day, Day)]
+payPeriodChunks repo (from, to) = do
+    mPpc <- repoLoadPayPeriodConfig repo
+    let ppc = maybe defaultPayPeriodConfig id mPpc
+        go d | d > to = []
+             | otherwise =
+                 let (_, endExcl) = payPeriodBounds ppc d
+                     chunkTo = min to (addDays (-1) endExcl)
+                 in (d, chunkTo) : go (addDays 1 chunkTo)
+    return (go from)
 
 -- | Committed calendar hours per worker inside a pay period but outside a given
 -- range, with exempt workers filtered out.

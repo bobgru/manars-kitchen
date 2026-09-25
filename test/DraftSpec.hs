@@ -17,7 +17,7 @@ import Domain.Types
     )
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo(..))
-import Domain.SchedulerConfig (SchedulerConfig(..))
+import Domain.SchedulerConfig (SchedulerConfig(..), defaultConfig)
 import qualified Service.Draft as Draft
 import qualified Service.Calendar as Cal
 import qualified Service.FreezeLine as Freeze
@@ -114,7 +114,7 @@ spec = do
                     [ mkAssignment 1 1 (apr 6) 9
                     , mkAssignment 2 1 (apr 6) 10
                     ]
-                merged = Draft.mergePinCalendar calSched pinSched
+                merged = Draft.mergePinCalendar defaultConfig calSched pinSched
             merged `shouldBe` pinSched
 
         it "no pins returns only calendar assignments" $ do
@@ -123,7 +123,7 @@ spec = do
                     , mkAssignment 2 2 (apr 7) 10
                     ]
                 pinSched = Schedule Set.empty
-                merged = Draft.mergePinCalendar calSched pinSched
+                merged = Draft.mergePinCalendar defaultConfig calSched pinSched
             merged `shouldBe` calSched
 
         it "conflicting pin and calendar returns pin version" $ do
@@ -132,7 +132,7 @@ spec = do
             -- Conflict key: (Worker 1, Apr 6, 9:00) -> pin wins
             let calSched = mkSchedule [ mkAssignment 1 2 (apr 6) 9 ]
                 pinSched = mkSchedule [ mkAssignment 1 1 (apr 6) 9 ]
-                merged = Draft.mergePinCalendar calSched pinSched
+                merged = Draft.mergePinCalendar defaultConfig calSched pinSched
             merged `shouldBe` pinSched
 
         it "non-conflicting assignments returns union" $ do
@@ -141,11 +141,28 @@ spec = do
             -- No conflict (different workers)
             let calSched = mkSchedule [ mkAssignment 1 2 (apr 6) 9 ]
                 pinSched = mkSchedule [ mkAssignment 2 1 (apr 6) 9 ]
-                merged = Draft.mergePinCalendar calSched pinSched
+                merged = Draft.mergePinCalendar defaultConfig calSched pinSched
                 expected = mkSchedule
                     [ mkAssignment 1 2 (apr 6) 9
                     , mkAssignment 2 1 (apr 6) 9
                     ]
+            merged `shouldBe` expected
+
+        -- The tour's case: week 1 was committed, then Marco was pinned to the
+        -- grill for the morning shift. His committed 10:00 on another station is
+        -- now the fifth consecutive hour, and it yields to the pin; his 12:00,
+        -- after a gap, stays. Another worker's day is not re-judged at all.
+        it "a calendar hour that a pin makes the hour too many yields to the pin" $ do
+            let calSched = mkSchedule
+                    [ mkAssignment 1 7 (apr 6) 10
+                    , mkAssignment 1 7 (apr 6) 12
+                    , mkAssignment 2 7 (apr 6) 10
+                    ]
+                pinSched = mkSchedule [ mkAssignment 1 1 (apr 6) h | h <- [6, 7, 8, 9] ]
+                merged = Draft.mergePinCalendar defaultConfig calSched pinSched
+                expected = mkSchedule
+                    ( [ mkAssignment 1 1 (apr 6) h | h <- [6, 7, 8, 9] ]
+                      ++ [ mkAssignment 1 7 (apr 6) 12, mkAssignment 2 7 (apr 6) 10 ] )
             merged `shouldBe` expected
 
     -- ---------------------------------------------------------------
