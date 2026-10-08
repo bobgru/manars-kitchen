@@ -356,7 +356,6 @@ hBaseCtx = SchedulerContext hSkillCtx hWorkerCtx emptyAbsenceContext
     (Set.fromList [hw_alice, hw_bob, hw_carol])
     Set.empty
     []
-    Set.empty
     defaultConfig
     (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
     Map.empty

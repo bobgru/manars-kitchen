@@ -23,7 +23,7 @@ import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo, CalendarCommit(..))
 import Service.DraftValidation
     ( DraftViolation(..)
-    , validateAssignment, buildLookBackContext, validateSchedule
+    , validateAssignment, validateSchedule
     , computeDraftViolations, pruneDraftViolations, isDraftStale
     , calendarReplacedUnder
     )
@@ -161,8 +161,8 @@ testWorkerCtx = WorkerContext
     }
 
 -- | Build a SchedulerContext for validation tests.
-mkValidationCtx :: Set.Set WorkerId -> SchedulerContext
-mkValidationCtx prevWeekendWorkers = SchedulerContext
+mkValidationCtx :: SchedulerContext
+mkValidationCtx = SchedulerContext
     { schSkillCtx    = testSkillCtx
     , schWorkerCtx   = testWorkerCtx
     , schAbsenceCtx  = emptyAbsenceContext
@@ -170,7 +170,6 @@ mkValidationCtx prevWeekendWorkers = SchedulerContext
     , schWorkers     = Set.empty
     , schClosedSlots = Set.empty
     , schShifts      = []
-    , schPrevWeekendWorkers = prevWeekendWorkers
     , schConfig      = defaultConfig
     , schPeriodBounds = (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
     , schCalendarHours = Map.empty
@@ -183,26 +182,33 @@ spec = do
     -- ---------------------------------------------------------------
     describe "validateAssignment" $ do
         it "detects alternating-weekend violation from look-back" $ do
-            -- Marco worked Apr 25-26 weekend (Sat-Sun) in calendar
-            let lookBackSched = mkSchedule
+            -- Marco worked Apr 25-26 weekend (Sat-Sun) in calendar, and the
+            -- look-back is joined onto the schedule under judgement.
+            let draftAssign = mkAssignment 5 1 (may 2) 9   -- Marco, Sat May 2
+                combined = mkSchedule
                     [ mkAssignment 5 1 (apr 25) 9   -- Marco, Sat Apr 25
                     , mkAssignment 5 1 (apr 26) 9   -- Marco, Sun Apr 26
-                    ]
-                prevWeekend = buildLookBackContext lookBackSched
-                ctx = mkValidationCtx prevWeekend
-                -- Marco assigned to May 2 (Saturday) in draft
-                draftAssign = mkAssignment 5 1 (may 2) 9
-                combined = mkSchedule
-                    [ mkAssignment 5 1 (apr 25) 9
-                    , mkAssignment 5 1 (apr 26) 9
                     , draftAssign
                     ]
-            -- Marco should be in prevWeekendWorkers
-            Set.member w_marco prevWeekend `shouldBe` True
-            -- Validation should detect alternating weekend violation
-            case validateAssignment ctx draftAssign combined of
+            case validateAssignment mkValidationCtx draftAssign combined of
                 Nothing -> expectationFailure "Expected alternating weekend violation"
                 Just v  -> dvConstraint v `shouldBe` "alternating weekends"
+
+        -- The second weekend of a range is judged against the first, which
+        -- is in the schedule itself rather than in any look-back.
+        it "judges a second weekend against the first inside the schedule" $ do
+            let secondSat = mkAssignment 5 1 (may 9) 9    -- Marco, Sat May 9
+                combined = mkSchedule
+                    [ mkAssignment 5 1 (may 3) 9          -- Marco, Sun May 3
+                    , secondSat
+                    ]
+            fmap dvConstraint (validateAssignment mkValidationCtx secondSat combined)
+                `shouldBe` Just "alternating weekends"
+
+        it "does not block the weekend two weeks after one worked" $ do
+            let laterSat = mkAssignment 5 1 (may 16) 9
+                combined = mkSchedule [mkAssignment 5 1 (may 2) 9, laterSat]
+            validateAssignment mkValidationCtx laterSat combined `shouldBe` Nothing
 
         it "detects rest-period violation using look-back" $ do
             -- Lucia worked until 22:00 on Apr 30 in calendar
@@ -212,13 +218,13 @@ spec = do
                 draftAssign = Assignment w_lucia st_grill
                     (Slot (may 1) (TimeOfDay 5 0 0) 3600)  -- 05:00 -> 7h gap < 8h min rest
                 combined = Schedule (Set.fromList [lookBackAssign, draftAssign])
-                ctx = mkValidationCtx Set.empty
+                ctx = mkValidationCtx
             case validateAssignment ctx draftAssign combined of
                 Nothing -> expectationFailure "Expected rest period violation"
                 Just v  -> dvConstraint v `shouldBe` "rest period"
 
         it "passes when no constraints are violated" $ do
-            let ctx = mkValidationCtx Set.empty
+            let ctx = mkValidationCtx
                 -- Marco assigned to Monday grill at 9am — no issues
                 draftAssign = mkAssignment 5 1 (may 4) 9  -- Monday
                 combined = mkSchedule [draftAssign]
@@ -230,7 +236,7 @@ spec = do
         -- one of those assignments a hard-constraint violation, because
         -- `wouldBeOvertime` knows nothing about overtime models or opt-ins.
         it "permits authorised overtime past a zero-hour cap" $ do
-            let base = mkValidationCtx Set.empty
+            let base = mkValidationCtx
                 wctx = (schWorkerCtx base)
                     { wcMaxPeriodHours = Map.singleton w_marco 0
                     , wcOvertimeOptIn  = Set.singleton w_marco
@@ -241,7 +247,7 @@ spec = do
             validateAssignment ctx draftAssign combined `shouldBe` Nothing
 
         it "reports unauthorised overtime past a zero-hour cap" $ do
-            let base = mkValidationCtx Set.empty
+            let base = mkValidationCtx
                 wctx = (schWorkerCtx base)
                     { wcMaxPeriodHours = Map.singleton w_marco 0
                     , wcOvertimeOptIn  = Set.empty
@@ -257,7 +263,7 @@ spec = do
         -- 8-hour regular threshold where the scheduler's overtime pass applies
         -- the 16-hour ceiling, so a legal 9-hour overtime day was a violation.
         it "permits a nine-hour day, which is overtime and not a breach" $ do
-            let ctx = mkValidationCtx Set.empty
+            let ctx = mkValidationCtx
                 -- Nine hours in three-hour blocks: the four-hour consecutive
                 -- limit is a separate rule and would otherwise fire first.
                 dayAssigns =
@@ -266,9 +272,6 @@ spec = do
             length dayAssigns `shouldBe` 9
             validateAssignment ctx (last dayAssigns) combined `shouldBe` Nothing
 
-    -- ---------------------------------------------------------------
-    -- Unit tests for buildLookBackContext
-    -- ---------------------------------------------------------------
     -- ---------------------------------------------------------------
     -- The generalised core: a Schedule plus a range, no draft involved.
     -- This is what lets the calendar be validated as ADR 0004's virtual
@@ -337,22 +340,6 @@ spec = do
                 let sched = mkSchedule [mkAssignment 5 1 (may 4) 9]
                 violations <- validateSchedule repo (may 4, may 8) sched
                 map dvConstraint violations `shouldBe` ["absence conflict"]
-
-    describe "buildLookBackContext" $ do
-        it "extracts weekend workers from schedule" $ do
-            let sched = mkSchedule
-                    [ mkAssignment 5 1 (apr 25) 9   -- Saturday
-                    , mkAssignment 5 1 (apr 26) 9   -- Sunday
-                    , mkAssignment 8 1 (apr 24) 9   -- Friday (not weekend)
-                    ]
-            buildLookBackContext sched `shouldBe` Set.singleton w_marco
-
-        it "returns empty for weekday-only schedule" $ do
-            let sched = mkSchedule
-                    [ mkAssignment 5 1 (apr 27) 9   -- Monday
-                    , mkAssignment 8 1 (apr 28) 9   -- Tuesday
-                    ]
-            buildLookBackContext sched `shouldBe` Set.empty
 
     -- ---------------------------------------------------------------
     -- Integration tests for pruneDraftViolations

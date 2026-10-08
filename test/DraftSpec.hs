@@ -18,6 +18,7 @@ import Domain.Types
 import Repo.SQLite (mkSQLiteRepo)
 import Repo.Types (Repository(..), DraftInfo(..))
 import Domain.SchedulerConfig (SchedulerConfig(..), defaultConfig)
+import Domain.Scheduler (ScheduleResult(..))
 import qualified Service.Draft as Draft
 import qualified Service.Calendar as Cal
 import qualified Service.FreezeLine as Freeze
@@ -347,6 +348,33 @@ spec = do
                                         , d >= from, d <= to ]
                                 hoursIn (apr 6) (apr 12) `shouldSatisfy` (\h -> h > 0 && h <= 10)
                                 hoursIn (apr 13) (apr 19) `shouldSatisfy` (\h -> h > 0 && h <= 10)
+
+        -- The seven days of calendar before the draft join the seed, so the
+        -- rules that look across days see them: a worker who worked the
+        -- weekend before the draft is kept off the draft's first weekend.
+        -- They are context, not material, so none of them end up in the draft.
+        it "sees the calendar week before the draft and keeps it out of the draft" $
+            withTestRepo $ \repo -> do
+                _ <- SW.addStation repo "grill" 1 1
+                let w1 = WorkerId 1
+                    worked = mkSchedule [ mkAssignment 1 1 (apr 4) 9     -- Sat
+                                        , mkAssignment 1 1 (apr 5) 9 ]   -- Sun
+                Cal.commitToCalendar repo (apr 4) (apr 5) "weekend before" Nothing worked
+                bus <- newTopicBus
+                result <- createForced repo (apr 6) (apr 12)             -- Mon-Sun
+                case result of
+                    Left err -> expectationFailure err
+                    Right did -> do
+                        genResult <- Draft.generateDraft repo did (Just (Set.singleton w1)) bus
+                        case genResult of
+                            Left err -> expectationFailure err
+                            Right r  -> do
+                                sched <- repoLoadDraftAssignments repo did
+                                let dates sc = Set.map (slotDate . assignSlot) (unSchedule sc)
+                                Set.member (apr 6) (dates sched) `shouldBe` True
+                                Set.filter (< apr 6) (dates sched) `shouldBe` Set.empty
+                                Set.filter (< apr 6) (dates (srSchedule r)) `shouldBe` Set.empty
+                                Set.filter (>= apr 11) (dates sched) `shouldBe` Set.empty
 
         -- With the optimizer on, generate must still fill the draft and return
         -- at the configured limit rather than the 30s default. Apr 6-10 2026 is

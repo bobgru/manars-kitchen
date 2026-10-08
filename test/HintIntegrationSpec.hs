@@ -79,7 +79,6 @@ testCtx = SchedulerContext
     , schWorkers = Set.fromList [w1, w2]
     , schClosedSlots = Set.empty
     , schShifts = []
-    , schPrevWeekendWorkers = Set.empty
     , schConfig = defaultConfig
     , schPeriodBounds = (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
     , schCalendarHours = Map.empty

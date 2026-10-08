@@ -173,9 +173,24 @@ a commit touching frozen dates lands.
 **Pay period**:
 The interval that overtime and hour limits are measured over. Independent of
 draft date ranges, which may cover any span. A range that spans more than one is
-judged one period at a time, each against its own hours; see ADR 0010.
-_Avoid_: judging a two-period range under one context. The context holds one
-period, and the second period's hours would count for nothing.
+judged, and generated, one period at a time, each against its own hours; see
+ADR 0010 and ADR 0011.
+_Avoid_: judging or building a two-period range under one context. The context
+holds one period, and the second period's hours would count for nothing — or,
+when building, would be charged against the first period's total.
+
+**Look-back**:
+The seven days of committed calendar before a range, joined onto the schedule
+being judged or built so that the rules that look across days — rest period,
+consecutive hours, alternating weekends, **Variety repeat** — see across the
+range's start. Context, not material: generation strips it before a draft is
+saved, and its hours are left out of the committed-hours map because the
+schedule already holds them. The validator has always had one; the scheduler
+gained its own in ADR 0011, and the alternating-weekends rule now reads the
+previous weekend from the schedule rather than from a set computed once.
+_Avoid_: a rule that consults a fact about "before the range" through any channel
+but the schedule. Such a fact describes the first day only, and is wrong for every
+later day of a range that is longer than the fact's horizon.
 
 **Relative date**:
 A date argument written against today rather than as a calendar date — `today`,

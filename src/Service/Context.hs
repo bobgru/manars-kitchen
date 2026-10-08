@@ -6,10 +6,9 @@
 -- violation for something the scheduler was entitled to do; see ADR 0005 and
 -- ADR 0006. A single loader is the structural fix.
 --
--- What it does /not/ decide is the three fields the two callers legitimately
--- differ on — the slots to fill, the closed station-slots, and the
--- previous-weekend workers. Those are arguments, because pretending they are the
--- same would be the opposite error.
+-- What it does /not/ decide is the two fields the two callers legitimately
+-- differ on — the slots to fill and the closed station-slots. A caller that
+-- builds fills them in; a caller that judges leaves them empty.
 module Service.Context
     ( loadValidationContext
     , loadValidationContextExcluding
@@ -41,36 +40,35 @@ import qualified Service.Calendar as Cal
 -- but /outside/ the range being judged, so the caller's own schedule supplies the
 -- rest and nothing is counted twice.
 --
--- 'schSlots', 'schClosedSlots' and 'schWorkers' come back empty and
--- 'schPrevWeekendWorkers' comes back as given. A caller that needs slots fills
--- them in; a caller that judges existing assignments does not need them.
+-- 'schSlots', 'schClosedSlots' and 'schWorkers' come back empty. A caller that
+-- needs slots fills them in; a caller that judges existing assignments does
+-- not need them.
 loadValidationContext
     :: Repository
     -> (Day, Day)              -- ^ Inclusive range being judged or built.
-    -> Set.Set WorkerId        -- ^ Workers who worked the previous weekend.
     -> IO SchedulerContext
-loadValidationContext repo range prevWeekendWorkers =
-    loadValidationContextExcluding repo range range prevWeekendWorkers
+loadValidationContext repo range =
+    loadValidationContextExcluding repo range range
 
 -- | 'loadValidationContext', but excluding a wider range than the one being
 --   judged from 'schCalendarHours'.
 --
---   The validator joins a seven-day calendar look-back onto the schedule it
---   judges, so that rest and consecutive-hour rules can see across the range's
---   start. Those look-back days are then /in the schedule/, and if they also fall
---   inside the pay period they must not be counted again through the calendar
---   hours map — which is exactly what happened when the exclusion was the range
---   alone: a mid-period draft charged the period's earlier days twice, and a
---   worker exactly at their cap was reported over it. The caller that joins the
---   look-back passes the look-back's start here.
+--   The validator and the generator both join a seven-day calendar look-back
+--   onto the schedule they work over, so that rest, consecutive-hour and
+--   alternating-weekend rules can see across the range's start. Those look-back
+--   days are then /in the schedule/, and if they also fall inside the pay period
+--   they must not be counted again through the calendar hours map — which is
+--   exactly what happened when the exclusion was the range alone: a mid-period
+--   draft charged the period's earlier days twice, and a worker exactly at their
+--   cap was reported over it. The caller that joins the look-back passes the
+--   look-back's start here.
 loadValidationContextExcluding
     :: Repository
     -> (Day, Day)              -- ^ Inclusive range being judged or built.
     -> (Day, Day)              -- ^ Inclusive range whose calendar hours the
                                --   caller supplies itself, so they are excluded.
-    -> Set.Set WorkerId        -- ^ Workers who worked the previous weekend.
     -> IO SchedulerContext
-loadValidationContextExcluding repo (from, _to) excluded prevWeekendWorkers = do
+loadValidationContextExcluding repo (from, _to) excluded = do
     skillCtx   <- repoLoadSkillCtx repo
     workerCtx  <- repoLoadWorkerCtx repo
     absenceCtx <- repoLoadAbsenceCtx repo
@@ -88,7 +86,6 @@ loadValidationContextExcluding repo (from, _to) excluded prevWeekendWorkers = do
         , schWorkers     = Set.empty
         , schClosedSlots = Set.empty
         , schShifts      = shifts
-        , schPrevWeekendWorkers = prevWeekendWorkers
         , schConfig      = cfg
         , schPeriodBounds = bounds
         , schCalendarHours = calHrs

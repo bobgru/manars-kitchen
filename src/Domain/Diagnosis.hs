@@ -264,7 +264,7 @@ dTightWorkerCtx = dWorkerCtx
 
 dBaseCtx :: SchedulerContext
 dBaseCtx = SchedulerContext dSkillCtx dWorkerCtx emptyAbsenceContext
-    [dMondaySlot] (Set.fromList [dw_alice, dw_bob, dw_carol]) Set.empty [] Set.empty defaultConfig
+    [dMondaySlot] (Set.fromList [dw_alice, dw_bob, dw_carol]) Set.empty [] defaultConfig
     (fromGregorian 2026 5 4, fromGregorian 2026 5 11) Map.empty
 
 spec :: Spec

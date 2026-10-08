@@ -179,9 +179,12 @@ stack exec manars-cli -- --demo demo/restaurant-setup.txt --no-delay
 stack exec manars-cli -- --demo demo/current-period.txt --no-delay
 ```
 
-Both end with `Replay complete.`. The tour's drafts now generate 395–410 assignments
-with 0–11 unfilled each (they used to collapse to 212/154 in the second week of a
-pay period — see `docs/STATUS.md` item 3). `current-period.txt` staffs the current
+Both end with `Replay complete.`. The tour's drafts generate 404–409 assignments with
+0–10 unfilled each, except the two that follow a committed week: those land near
+340 / 60, because the alternating-weekends rule keeps everyone who worked the
+committed weekend off the next one and the fixture has no weekend-only workers (ADR
+0011). They used to collapse to 212/154 in the second week of a pay period — see
+`docs/STATUS.md` item 3. `current-period.txt` staffs the current
 period and leaves the next empty on purpose. Use `stack exec` rather than
 `make demo` — see Gotchas.
 
@@ -206,8 +209,8 @@ stack test --pedantic manars-kitchen:test:manars-kitchen-unit-test
 stack test --pedantic manars-kitchen:test:manars-kitchen-integration-test
 ```
 
-As of 2026-09-07: 407 unit examples, 0 failures, 1 pending (a known optimizer
-divergence, `docs/STATUS.md` item 6); 280 integration examples, 0 failures. The
+As of 2026-10-08: 417 unit examples, 0 failures, 1 pending (a known optimizer
+divergence, `docs/STATUS.md` item 6); 288 integration examples, 0 failures. The
 only warnings in a clean build are three `ld: warning: -U option is redundant`
 lines from the macOS linker.
 

@@ -3,7 +3,6 @@ module Service.DraftValidation
       DraftViolation(..)
       -- * Validation
     , validateAssignment
-    , buildLookBackContext
       -- * Validating a draft against the calendar
       --
       -- $draftValidation
@@ -17,11 +16,10 @@ module Service.DraftValidation
     ) where
 
 import qualified Data.Set as Set
-import Data.Time (Day, DayOfWeek(..), addDays, dayOfWeek)
+import Data.Time (Day, addDays)
 
 import Domain.Types
-    ( WorkerId
-    , Slot(..), Assignment(..), Schedule(..)
+    ( Slot(..), Assignment(..), Schedule(..)
     )
 import Domain.Schedule (bySlot)
 import Domain.Scheduler (SchedulerContext(..), blockedByAlternateWeekend)
@@ -51,9 +49,9 @@ validateAssignment ctx a sched
         Just (DraftViolation a "skill qualification" "worker not qualified for station")
     | not (isWorkerAvailable w (slotDate slot) (schAbsenceCtx ctx)) =
         Just (DraftViolation a "absence conflict" "worker has approved absence on this date")
-    | blockedByAlternateWeekend ctx w slot =
+    | blockedByAlternateWeekend ctx w slot sched =
         Just (DraftViolation a "alternating weekends"
-            "worked previous weekend in calendar")
+            "worked the previous weekend")
     -- Both hour rules use the *permissive* envelope, the one the scheduler
     -- applies when overtime is allowed. Using the strict rules here reported
     -- every legitimately-authorised overtime assignment as breaking a hard
@@ -84,17 +82,6 @@ validateAssignment ctx a sched
         let othersAtSlot = Set.map assignWorker (bySlot slot sched)
             withoutSelf  = Set.delete w othersAtSlot
         in workerAvoidsAt wctx w withoutSelf
-
--- | Build previous-weekend workers set from a calendar look-back schedule.
--- The look-back covers 7 days before the draft start date.
-buildLookBackContext :: Schedule -> Set.Set WorkerId
-buildLookBackContext (Schedule as) =
-    Set.fromList
-        [ assignWorker a
-        | a <- Set.toList as
-        , let dow = dayOfWeek (slotDate (assignSlot a))
-        , dow == Saturday || dow == Sunday
-        ]
 
 -- $draftValidation
 --
@@ -193,10 +180,9 @@ pruneDraftViolations repo draftId = do
 -- rather than a draft, so the calendar can be fed through it as ADR 0004's
 -- \"virtual default draft\" — there is deliberately no default draft /row/.
 --
--- The look-back is the seven days of calendar before the range. It supplies the
--- previous-weekend workers the alternating-weekends rule needs, and it joins the
--- schedule under judgement so that rest-period and consecutive-hour rules can see
--- across the boundary. Note what it does /not/ do: it never looks at the calendar
+-- The look-back is the seven days of calendar before the range. It joins the
+-- schedule under judgement so that the alternating-weekends, rest-period and
+-- consecutive-hour rules can see across the boundary. Note what it does /not/ do: it never looks at the calendar
 -- /inside/ the range, which is the asymmetry 'calendarReplacedUnder' exists to
 -- work around.
 validateSchedule :: Repository -> (Day, Day) -> Schedule -> IO [DraftViolation]
@@ -236,7 +222,6 @@ judgementContext repo (from, to) sched = do
     let lookBackFrom = addDays (-7) from
     lookBackSched <- Cal.loadCalendarSlice repo lookBackFrom (addDays (-1) from)
     ctx <- loadValidationContextExcluding repo (from, to) (lookBackFrom, to)
-               (buildLookBackContext lookBackSched)
     let combined = Schedule (Set.union (unSchedule lookBackSched) (unSchedule sched))
     return (ctx, combined)
 

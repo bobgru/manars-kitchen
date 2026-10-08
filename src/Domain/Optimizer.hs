@@ -189,7 +189,13 @@ proposeSwaps (Schedule assignments) randoms =
 hillClimbStep :: SchedulerContext -> Schedule -> Double -> [Double]
               -> (Schedule, Double)
 hillClimbStep ctx sched currentScore randoms =
-    let swaps = proposeSwaps sched randoms
+    let -- Only the slots being built are up for swapping. The schedule also
+        -- carries the calendar look-back and any earlier pay period, which
+        -- are context for the rules, not material.
+        own = Set.fromList (schSlots ctx)
+        swappable = Schedule (Set.filter (\a -> Set.member (assignSlot a) own)
+                                         (unSchedule sched))
+        swaps = proposeSwaps swappable randoms
     in go swaps sched currentScore
   where
     -- BangPatterns on s and score prevent thunk buildup when iterating
@@ -271,7 +277,7 @@ optWorkerCtx = WorkerContext
 optMkCtx :: [Slot] -> Set WorkerId -> SchedulerContext
 optMkCtx slots workers = SchedulerContext
     optBasicSkillCtx optWorkerCtx emptyAbsenceContext
-    slots workers Set.empty [] Set.empty defaultConfig
+    slots workers Set.empty [] defaultConfig
     (fromGregorian 2026 5 4, fromGregorian 2026 5 11) Map.empty
 
 spec :: Spec

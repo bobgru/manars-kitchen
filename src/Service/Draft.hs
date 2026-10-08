@@ -25,7 +25,7 @@ import Control.Monad (foldM)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
-import Data.Time (Day, DiffTime)
+import Data.Time (Day, DiffTime, addDays)
 
 import Domain.Types
     ( WorkerId, WorkerStatus(..), Slot(..), Assignment(..), Schedule(..)
@@ -45,7 +45,7 @@ import Domain.Pin (expandPins)
 import Domain.Schedule (assign)
 import Domain.Calendar (generateDateRangeSlots, defaultHours)
 import Repo.Types (Repository(..), DraftInfo(..))
-import Service.Context (loadValidationContext, payPeriodChunks)
+import Service.Context (loadValidationContextExcluding, payPeriodChunks)
 import qualified Service.Calendar as Cal
 import qualified Service.FreezeLine as Freeze
 
@@ -218,27 +218,37 @@ generateDraft repo draftId mWorkers progressBus = do
                 dateTo   = diDateTo draft
             workers <- maybe (activeWorkerIds repo) return mWorkers
             seed <- repoLoadDraftAssignments repo draftId
+            -- The seven days of calendar before the draft join the seed, as
+            -- they join the schedule the validator judges: a draft starting
+            -- Monday must see Sunday's closing shift for the rest rule, and
+            -- last weekend for the alternating-weekends rule. They are in the
+            -- seed so the optimizer preserves them, and are stripped before
+            -- the draft is saved.
+            let lookBackFrom = addDays (-7) dateFrom
+            lookBack <- Cal.loadCalendarSlice repo lookBackFrom (addDays (-1) dateFrom)
+            let seeded = Schedule (Set.union (unSchedule lookBack) (unSchedule seed))
             -- One build per pay period the range touches, in order. The
             -- context holds one period and every hour rule measures against
-            -- it, so a two-week draft built in one go had week two's caps
-            -- enforced against week one's hours — which is to say not at all.
-            -- Each period's build is seeded with everything built so far, so
-            -- rest and consecutive-hour rules see across the boundary and the
-            -- optimizer leaves the earlier periods alone.
+            -- it, so a two-week draft built in one go judged week two against
+            -- week one's total. Each period's build is seeded with everything
+            -- built so far, so cross-boundary rules see the previous period
+            -- and the optimizer leaves it alone.
             chunks <- payPeriodChunks repo (dateFrom, dateTo)
-            result <- foldM (generatePeriod workers)
-                            (ScheduleResult seed [] Map.empty) chunks
+            built <- foldM (generatePeriod workers lookBackFrom)
+                           (ScheduleResult seeded [] Map.empty) chunks
+            let inDraft a = slotDate (assignSlot a) >= dateFrom
+                result = built
+                    { srSchedule = Schedule (Set.filter inDraft (unSchedule (srSchedule built))) }
             repoSaveDraftAssignments repo draftId (srSchedule result)
             return (Right result)
   where
-    generatePeriod workers acc chunk@(cFrom, cTo) = do
+    generatePeriod workers lookBackFrom acc chunk@(cFrom, cTo) = do
         let slots = generateDateRangeSlots defaultHours cFrom cTo Set.empty
         -- The shared loader decides the pay-period bounds and the calendar
-        -- hours; this caller supplies only what is genuinely its own. Note
-        -- `schPrevWeekendWorkers` stays empty here: generation does not apply
-        -- the alternating-weekends rule, though validation does. That
-        -- asymmetry is deliberate for now and recorded in docs/STATUS.md.
-        base <- loadValidationContext repo chunk Set.empty
+        -- hours; this caller supplies only what is genuinely its own. The
+        -- look-back and every earlier period are in the seed, so their hours
+        -- must not be counted again through the calendar hours map.
+        base <- loadValidationContextExcluding repo chunk (lookBackFrom, cTo)
         let ctx = base
                 { schSlots       = slots
                 , schWorkers     = workers

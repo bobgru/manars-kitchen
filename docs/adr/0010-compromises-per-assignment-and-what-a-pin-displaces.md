@@ -73,7 +73,7 @@ scheduler got its own predicate, `wouldExceedConsecutive`, and the validator kep
 context whose period is the draft's first, so a two-period draft has its hour caps enforced
 in the first period only. The validator now reports what that produces, honestly. Fixing
 generation means building per period or carrying period-aware hour counts; it is recorded
-in `docs/STATUS.md` rather than done here.
+in `docs/STATUS.md` rather than done here. *Done on 2026-10-08, per period: ADR 0011.*
 
 **`calendar hours` now counts hours worked**, distinct (worker, slot) pairs, not assignment
 rows, so multi-station coverage no longer shows as overtime the validator does not report.

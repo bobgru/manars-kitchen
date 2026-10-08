@@ -64,10 +64,6 @@ data SchedulerContext = SchedulerContext
       -- Used by the hint system to temporarily close stations.
     , schShifts :: ![ShiftDef]
       -- ^ Shift definitions. If empty, 'defaultShifts' is used.
-    , schPrevWeekendWorkers :: !(Set WorkerId)
-      -- ^ Workers who worked the previous weekend. Used to enforce
-      -- the alternating-weekends-off rule: these workers are not
-      -- assigned to weekend slots unless they are weekend-only.
     , schConfig :: !SchedulerConfig
       -- ^ Scoring weights and rule thresholds.
     , schPeriodBounds :: !(Day, Day)
@@ -422,7 +418,7 @@ canAssignSlot ctx allowOT w st slot sched =
     -- be the hour too many of the run this assignment would complete.
     && not (wouldExceedConsecutive cfg w slot sched)
     && not (violatesRestPeriod cfg w slot sched)
-    && not (blockedByAlternateWeekend ctx w slot)
+    && not (blockedByAlternateWeekend ctx w slot sched)
     && not avoidBlocked
     && weeklyOk && dailyOk
   where
@@ -473,16 +469,31 @@ hasMentorAtSlot ctx w slot sched =
     in any (\o -> workerSeniority wctx o > mySeniority) others
 
 -- | Check the alternating-weekends-off rule.
--- A worker who worked the previous weekend may not work this weekend
--- unless they are weekend-only.
-blockedByAlternateWeekend :: SchedulerContext -> WorkerId -> Slot -> Bool
-blockedByAlternateWeekend ctx w slot =
-    let dow = dayOfWeek (slotDate slot)
-        isWeekendSlot = dow == Saturday || dow == Sunday
+-- A worker who worked the weekend one week before this slot may not work
+-- this weekend unless they are weekend-only.
+--
+-- The previous weekend is read from the schedule, like every other rule
+-- that looks across days. The schedule under judgement or construction
+-- carries the seven days of calendar before its range (see
+-- 'Service.DraftValidation.judgementContext' and 'Service.Draft.generateDraft'),
+-- so the first weekend sees the calendar and every later weekend sees the
+-- one before it in the same schedule. A static set of previous-weekend
+-- workers, which this replaced, could only ever describe the first weekend.
+blockedByAlternateWeekend :: SchedulerContext -> WorkerId -> Slot -> Schedule -> Bool
+blockedByAlternateWeekend ctx w slot sched =
+    let d = slotDate slot
         wctx = schWorkerCtx ctx
         isWeekendOnlyWorker = Set.member w (wcWeekendOnly wctx)
-        workedPrevWeekend = Set.member w (schPrevWeekendWorkers ctx)
-    in isWeekendSlot && workedPrevWeekend && not isWeekendOnlyWorker
+        prevWeekend = case dayOfWeek d of
+            Saturday -> Just (addDays (-7) d, addDays (-6) d)
+            Sunday   -> Just (addDays (-8) d, addDays (-7) d)
+            _        -> Nothing
+        workedPrevWeekend (sat, sun) =
+            any (\a -> let ad = slotDate (assignSlot a) in ad == sat || ad == sun)
+                (Set.toList (byWorker w sched))
+    in case prevWeekend of
+        Nothing -> False
+        Just wk -> not isWeekendOnlyWorker && workedPrevWeekend wk
 
 -- ---------------------------------------------------------------------
 -- Phase 2: Retry unfilled with overtime (slot-level)
@@ -902,7 +913,7 @@ schTestBounds :: (Day, Day)
 schTestBounds = (fromGregorian 2026 5 4, fromGregorian 2026 5 11)
 
 schMkCtx :: SkillContext -> WorkerContext -> AbsenceContext -> [Slot] -> Set WorkerId -> SchedulerContext
-schMkCtx sk wk ac slots workers = SchedulerContext sk wk ac slots workers Set.empty [] Set.empty defaultConfig schTestBounds Map.empty
+schMkCtx sk wk ac slots workers = SchedulerContext sk wk ac slots workers Set.empty [] defaultConfig schTestBounds Map.empty
 
 spec :: Spec
 spec = do
@@ -1086,40 +1097,56 @@ spec = do
             Set.size prepAssignments `shouldSatisfy` (>= 1)
 
     describe "Alternating weekends off" $ do
+        -- The previous weekend is whatever the schedule already holds: here a
+        -- seeded Saturday May 2 shift of bob's, standing in for the calendar
+        -- look-back generation joins to its seed.
+        let bobWorkedMay2 = assign (Assignment schw_bob schst_grill
+                                (schMkSlot (fromGregorian 2026 5 2) 9)) emptySchedule
+            satSlot = schMkSlot (fromGregorian 2026 5 9) 9   -- Saturday
+            sunSlot = schMkSlot (fromGregorian 2026 5 10) 9  -- Sunday
+            twoWeeksOn = schMkSlot (fromGregorian 2026 5 16) 9
+
         it "blocks a worker who worked the previous weekend" $ do
-            -- Saturday slot; bob worked last weekend
-            let satSlot = schMkSlot (fromGregorian 2026 5 9) 9  -- Saturday
-                ctx = (schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
-                        [satSlot] (Set.fromList [schw_bob, schw_carol]))
-                    { schPrevWeekendWorkers = Set.singleton schw_bob }
-                result = buildSchedule ctx
-                sched = srSchedule result
-                bobAssignments = byWorker schw_bob sched
-            -- bob should NOT be assigned (he worked last weekend)
-            Set.size bobAssignments `shouldBe` 0
+            let ctx = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [satSlot] (Set.fromList [schw_bob, schw_carol])
+                sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
+            Set.size (byWorkerSlot schw_bob satSlot sched) `shouldBe` 0
+
+        it "counts a Saturday eight days before a Sunday as the previous weekend" $ do
+            let ctx = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [sunSlot] (Set.fromList [schw_bob, schw_carol])
+                sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
+            Set.size (byWorkerSlot schw_bob sunSlot sched) `shouldBe` 0
+
+        it "does not block the weekend after that" $ do
+            let ctx = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [twoWeeksOn] (Set.fromList [schw_bob])
+                sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
+            Set.size (byWorkerSlot schw_bob twoWeeksOn sched) `shouldSatisfy` (>= 1)
+
+        -- A range holding two weekends: the second is judged against the
+        -- first, which is in the schedule being built, not in any look-back.
+        it "alternates across two weekends inside one build" $ do
+            let ctx = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [satSlot, twoWeeksOn] (Set.fromList [schw_bob])
+                sched = srSchedule (buildSchedule ctx)
+                worked s = Set.size (byWorkerSlot schw_bob s sched)
+            worked satSlot `shouldBe` 1
+            worked twoWeeksOn `shouldBe` 0
 
         it "allows weekend-only workers despite previous weekend" $ do
-            let satSlot = schMkSlot (fromGregorian 2026 5 9) 9
-                weekendOnlyCtx = schRelaxedWorkerCtx
+            let weekendOnlyCtx = schRelaxedWorkerCtx
                     { wcWeekendOnly = Set.singleton schw_bob }
-                ctx = (schMkCtx schBasicSkillCtx weekendOnlyCtx emptyAbsenceContext
-                        [satSlot] (Set.fromList [schw_bob, schw_carol]))
-                    { schPrevWeekendWorkers = Set.singleton schw_bob }
-                result = buildSchedule ctx
-                sched = srSchedule result
-                bobAssignments = byWorker schw_bob sched
-            -- bob IS weekend-only, so he should still be assigned
-            Set.size bobAssignments `shouldSatisfy` (>= 1)
+                ctx = schMkCtx schBasicSkillCtx weekendOnlyCtx emptyAbsenceContext
+                        [satSlot] (Set.fromList [schw_bob, schw_carol])
+                sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
+            Set.size (byWorkerSlot schw_bob satSlot sched) `shouldSatisfy` (>= 1)
 
         it "does not block workers on weekdays" $ do
-            -- Monday slot; bob worked last weekend — should still work Monday
-            let ctx = (schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
-                        [schMondaySlot] (Set.fromList [schw_bob, schw_carol]))
-                    { schPrevWeekendWorkers = Set.singleton schw_bob }
-                result = buildSchedule ctx
-                sched = srSchedule result
-                bobAssignments = byWorker schw_bob sched
-            Set.size bobAssignments `shouldSatisfy` (>= 1)
+            let ctx = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [schMondaySlot] (Set.fromList [schw_bob, schw_carol])
+                sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
+            Set.size (byWorkerSlot schw_bob schMondaySlot sched) `shouldSatisfy` (>= 1)
 
     describe "Employment status: Phase 2 does not auto-assign overtime to manual-only workers" $ do
         it "OTManualOnly worker is skipped for auto-overtime" $ do
