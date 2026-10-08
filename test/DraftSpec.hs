@@ -320,6 +320,34 @@ spec = do
                             count <- readEventCount
                             count `shouldBe` 0
 
+        -- The pay period is weekly from a Monday, so Apr 6-19 is two periods.
+        -- The context holds one period, so a single build over both weeks
+        -- enforced the cap in week one and nothing in week two; generation
+        -- now builds one period at a time. 10 hours for one worker on a
+        -- 1-1 station is far below what the daily rules alone would allow.
+        it "enforces hour caps in every pay period of a multi-period draft" $
+            withTestRepo $ \repo -> do
+                _ <- SW.addStation repo "grill" 1 1
+                SW.setMaxHours repo (WorkerId 1) (10 * 3600)
+                bus <- newTopicBus
+                result <- createForced repo (apr 6) (apr 19)
+                case result of
+                    Left err -> expectationFailure err
+                    Right did -> do
+                        genResult <- Draft.generateDraft repo did
+                                        (Just (Set.singleton (WorkerId 1))) bus
+                        case genResult of
+                            Left err -> expectationFailure err
+                            Right _  -> do
+                                sched <- repoLoadDraftAssignments repo did
+                                let hoursIn from to = Set.size $ Set.fromList
+                                        [ assignSlot a
+                                        | a <- Set.toList (unSchedule sched)
+                                        , let d = slotDate (assignSlot a)
+                                        , d >= from, d <= to ]
+                                hoursIn (apr 6) (apr 12) `shouldSatisfy` (\h -> h > 0 && h <= 10)
+                                hoursIn (apr 13) (apr 19) `shouldSatisfy` (\h -> h > 0 && h <= 10)
+
         -- With the optimizer on, generate must still fill the draft and return
         -- at the configured limit rather than the 30s default. Apr 6-10 2026 is
         -- Mon-Fri: see the pending test below for why the range stops at Friday.

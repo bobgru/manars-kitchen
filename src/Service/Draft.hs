@@ -21,6 +21,7 @@ module Service.Draft
     , computeCalendarHours
     ) where
 
+import Control.Monad (foldM)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
@@ -44,7 +45,7 @@ import Domain.Pin (expandPins)
 import Domain.Schedule (assign)
 import Domain.Calendar (generateDateRangeSlots, defaultHours)
 import Repo.Types (Repository(..), DraftInfo(..))
-import Service.Context (loadValidationContext)
+import Service.Context (loadValidationContext, payPeriodChunks)
 import qualified Service.Calendar as Cal
 import qualified Service.FreezeLine as Freeze
 
@@ -217,21 +218,39 @@ generateDraft repo draftId mWorkers progressBus = do
                 dateTo   = diDateTo draft
             workers <- maybe (activeWorkerIds repo) return mWorkers
             seed <- repoLoadDraftAssignments repo draftId
-            let slots = generateDateRangeSlots defaultHours dateFrom dateTo Set.empty
-            -- The shared loader decides the pay-period bounds and the calendar
-            -- hours; this caller supplies only what is genuinely its own. Note
-            -- `schPrevWeekendWorkers` stays empty here: generation does not apply
-            -- the alternating-weekends rule, though validation does. That
-            -- asymmetry is deliberate for now and recorded in docs/STATUS.md.
-            base <- loadValidationContext repo (dateFrom, dateTo) Set.empty
-            let ctx = base
-                    { schSlots       = slots
-                    , schWorkers     = workers
-                    , schClosedSlots = stationClosedSlots (schSkillCtx base) slots
-                    }
-            result <- optimizeSchedule ctx seed progressBus
+            -- One build per pay period the range touches, in order. The
+            -- context holds one period and every hour rule measures against
+            -- it, so a two-week draft built in one go had week two's caps
+            -- enforced against week one's hours — which is to say not at all.
+            -- Each period's build is seeded with everything built so far, so
+            -- rest and consecutive-hour rules see across the boundary and the
+            -- optimizer leaves the earlier periods alone.
+            chunks <- payPeriodChunks repo (dateFrom, dateTo)
+            result <- foldM (generatePeriod workers)
+                            (ScheduleResult seed [] Map.empty) chunks
             repoSaveDraftAssignments repo draftId (srSchedule result)
             return (Right result)
+  where
+    generatePeriod workers acc chunk@(cFrom, cTo) = do
+        let slots = generateDateRangeSlots defaultHours cFrom cTo Set.empty
+        -- The shared loader decides the pay-period bounds and the calendar
+        -- hours; this caller supplies only what is genuinely its own. Note
+        -- `schPrevWeekendWorkers` stays empty here: generation does not apply
+        -- the alternating-weekends rule, though validation does. That
+        -- asymmetry is deliberate for now and recorded in docs/STATUS.md.
+        base <- loadValidationContext repo chunk Set.empty
+        let ctx = base
+                { schSlots       = slots
+                , schWorkers     = workers
+                , schClosedSlots = stationClosedSlots (schSkillCtx base) slots
+                }
+        r <- optimizeSchedule ctx (srSchedule acc) progressBus
+        -- Overtime is per period, so the maps add rather than overwrite.
+        return ScheduleResult
+            { srSchedule = srSchedule r
+            , srUnfilled = srUnfilled acc ++ srUnfilled r
+            , srOvertime = Map.unionWith (+) (srOvertime acc) (srOvertime r)
+            }
 
 -- | Commit a draft to the calendar: load draft assignments, call
 -- commitToCalendar, delete the draft and every what-if session saved against it.
