@@ -1,6 +1,17 @@
 # Project status and next steps
 
-**Last updated:** 2026-10-10 (evening) · **The grid layouts and the pivot control** shipped:
+**Last updated:** 2026-10-10 (night) · **A what-if session belongs to the draft** (ADR 0013),
+which closes item 1. The `what_if_sessions` table is keyed by draft alone, migrated from the
+per-login `hint_sessions`; `GET /api/drafts/:id/what-ifs` returns the session in the CLI's
+words and the draft page lists it under the grid; editing is admin-only over HTTP and the
+ownership checks are gone; `apply` over HTTP is 501 instead of a silent delete; the web
+terminal runs under the caller's real login session; `draft open` resumes a saved session
+without asking when stdin is not a terminal. Four new integration examples and a driver
+step. Debt left behind is in item 7 under "What-if sessions". The next items are the demo
+findings in item 3 and the backlog in item 7; nothing is decided-and-waiting any more, so
+the next piece wants a short grill. The paragraph below is the evening's state.
+
+**2026-10-10 (evening)** · **The grid layouts and the pivot control** shipped:
 `workers-days` and `stations-days` join `hours-days` as named presets of `ScheduleGrid`, a
 chip in the entity-rowed layouts is a run of consecutive hours (`10–14 grill`) that breaks
 wherever its diff state or violation mark changes, and the choice is a segmented control
@@ -266,26 +277,12 @@ One standing gotcha when you verify:
 
 ## Next steps
 
-### 1. Draft-page follow-ons — decided 2026-09-06, in progress
+### 1. (closed 2026-10-10) Draft-page follow-ons
 
-The `/drafts/:id` detail page shipped, which completed the drafts surface. Three pieces
-were deliberately deferred out of it, each independently shippable. The reasoning for all
-three is in **ADR 0005**. The commit diff shipped on 2026-10-10 — the "On commit" line,
-the `+` and struck-through `−` chips, and the same sentence in the commit dialog; the
-glossary's **Commit diff** entry says what it means. The grid layouts and the pivot
-control shipped the same day — `workers-days` and `stations-days` as named presets, a
-chip per run of hours, the choice in the URL as `?layout=` on both pages; glossary entry
-**Grid layout**. One remains:
-
-- **A draft's what-if sessions are not readable over REST.** `GET /api/hints` requires
-  *both* `sessionId` and `draftId` and 400s otherwise; the browser has no session id, and
-  nothing lists sessions. The web terminal's hardcoded `SessionId 0` (`Execute.hs:63`) would
-  report its own what-ifs while a CLI session's — the ones `draft open` resumes — stayed
-  invisible, so the detail page says nothing about them rather than saying something wrong.
-  **This is a design question before it is an endpoint**: decide whose session a browser
-  means. Until then the Discard modal promises to destroy a what-if session the UI never
-  shows.
-
+All three pieces deferred out of ADR 0005 shipped on 2026-10-10: the commit diff, the grid
+layouts with the pivot control, and the what-if session on the draft page (ADR 0013).
+Glossary entries **Commit diff**, **Grid layout** and **What-if session** say what they
+mean. The number is kept so the cross-references in this document stay true.
 
 ### 2. The problem view — designed 2026-08-30, grilled 2026-09-07, in progress
 
@@ -634,6 +631,17 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   to 17:00 and workers with hours left exist. The hours staffed are not a shift block
   either. Found 2026-10-10; not diagnosed. Start from how the Sunday closings of pizza,
   sandwich and busboy interact with the shift-block fill in `Domain.Scheduler`.
+- **What-if sessions, debt left by ADR 0013.** The `/api/hints` and `/rpc/what-if`
+  routes accept a `sessionId` and ignore it; delete the field once nothing sends it.
+  `apply` over HTTP and RPC is 501: the apply logic is a hundred lines in `CLI.App`
+  (`WhatIfApply`) that case over six hint kinds and rebuild the session, and it wants to
+  move into a `Service.WhatIf` both the CLI and the servers call. `what-if` in the
+  remote-CLI mode still prints "not yet supported". The web terminal's what-if flow has
+  never been exercised: each command runs in a fresh `AppState`, so a what-if typed there
+  is saved and the next command starts from the saved session, which is probably right
+  but is untested. Finally, the draft page lists what-ifs but cannot draw the schedule
+  they produce, because that schedule is rebuilt in a CLI session and never stored;
+  drawing it needs a service that builds the session server-side.
 - **The what-if and hint sessions build their own `SchedulerContext`.** Three sites in
   `src/CLI/App.hs` (around lines 546, 658 and 1735) use the draft's range as the pay
   period, an empty committed-hours map, and no look-back — so a what-if judges hours over

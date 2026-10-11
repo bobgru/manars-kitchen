@@ -106,9 +106,10 @@ cp demo-db/demo.db /tmp/mk-detail.db
 (stack exec manars-server -- /tmp/mk-detail.db > /tmp/mk-server.log 2>&1 &)
 ```
 
-`e2e:draft-detail` walks seven states — the pin-seeded draft, the generated grid with
+`e2e:draft-detail` walks eight states — the pin-seeded draft, the generated grid with
 its commit diff (all adds on a fresh week), manufactured violations with a flagged
-chip, a sibling draft committed over the same week, the resulting replaced-calendar
+chip, the draft's what-if session (empty, then one what-if added over REST and read
+back in words, and `apply` answering 501), a sibling draft committed over the same week, the resulting replaced-calendar
 warning with the diff now showing drops that reconcile with the struck-through chips
 and with the dialog, committing from the detail page and the confirmation handed to
 the list, and the terminal state for a draft id that does not exist. It mutates the database, so **re-run it against a fresh copy**.
@@ -213,7 +214,7 @@ stack test --pedantic manars-kitchen:test:manars-kitchen-integration-test
 ```
 
 As of 2026-10-10: 421 unit examples, 0 failures, 1 pending (a known optimizer
-divergence, `docs/STATUS.md` item 6); 288 integration examples, 0 failures. The
+divergence, `docs/STATUS.md` item 6); 292 integration examples, 0 failures. The
 only warnings in a clean build are three `ld: warning: -U option is redundant`
 lines from the macOS linker.
 

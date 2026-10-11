@@ -375,7 +375,9 @@ historical dates.
 
 ### 8. What-if exploration
 
-Within a draft session, the **what-if** system lets you explore
+A draft has one **what-if session**, whoever types into it and from whichever client
+(ADR 0013); it goes when the draft is committed or discarded, and the draft's page in the
+browser lists it. Within a draft session, the **what-if** system lets you explore
 hypothetical changes without modifying any real data:
 
 ```

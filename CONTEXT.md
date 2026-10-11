@@ -91,7 +91,14 @@ a draft's assignments by hand; there is no direct assign/unassign on a draft.
 
 **What-if session**:
 The accumulated, persisted what-ifs for one draft, replayable and rebasable
-against later changes to the underlying data.
+against later changes to the underlying data. It belongs to the draft — one per
+draft, whoever typed it, from the CLI or the browser — and goes when the draft is
+committed or discarded. Read over REST as `GET /api/drafts/:id/what-ifs`, each
+entry in the words the CLI prints; shown on the draft's page as a list, not drawn
+into the grid, because the schedule a what-if produces is rebuilt in a CLI session
+and not stored. Editing one is an admin action. See ADR 0013.
+_Avoid_: keying anything about a what-if by login session. That was the state
+before ADR 0013, and it lost work on every re-login.
 
 **Hint**:
 One automated suggestion the system derives from a schedule it could not fill —
