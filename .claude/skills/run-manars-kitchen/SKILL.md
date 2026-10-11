@@ -112,8 +112,9 @@ chip, a sibling draft committed over the same week, the resulting replaced-calen
 warning with the diff now showing drops that reconcile with the struck-through chips
 and with the dialog, committing from the detail page and the confirmation handed to
 the list, and the terminal state for a draft id that does not exist. It mutates the database, so **re-run it against a fresh copy**.
-`e2e:calendar` walks four — the live month, a history snapshot, and both branches of
-the range guard. `e2e:dashboard` walks nine — the three horizon segments and their
+`e2e:calendar` walks six — the live month, the workers × days and stations × days
+layouts with the choice read back from the URL, a history snapshot, and both branches
+of the range guard. `e2e:dashboard` walks nine — the three horizon segments and their
 marks, the three panels (by hour, by worker, by station grouped by zone) and the
 unscheduled-day baseline, switching horizon, a draft committed from **today** to the end
 of the period, then a **sick call** — an absence approved after the commit — whose

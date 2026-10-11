@@ -12,7 +12,15 @@ import {
 } from "../api/calendar";
 import { useEntityEvents } from "../hooks/useSSE";
 import ScheduleGrid from "./ScheduleGrid";
-import { formatDay, parseDay, rangeProblem } from "../lib/grid";
+import GridLayoutControl from "./GridLayoutControl";
+import {
+  formatDay,
+  parseDay,
+  rangeProblem,
+  parseLayout,
+  DEFAULT_LAYOUT,
+  type GridLayout,
+} from "../lib/grid";
 
 function coerceDay(raw: string | null, fallback: string): string {
   return raw && parseDay(raw) ? raw : fallback;
@@ -31,6 +39,7 @@ export default function CalendarPage() {
   const defaults = useMemo(currentMonthRange, []);
   const from = coerceDay(searchParams.get("from"), defaults.from);
   const to = coerceDay(searchParams.get("to"), defaults.to);
+  const layout = parseLayout(searchParams.get("layout"));
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [history, setHistory] = useState<CalendarCommit[]>([]);
@@ -99,7 +108,16 @@ export default function CalendarPage() {
 
   function changeRange(next: { from?: string; to?: string }) {
     setSnapshot(null);
-    setSearchParams({ from: next.from ?? from, to: next.to ?? to });
+    setSearchParams(withLayout({ from: next.from ?? from, to: next.to ?? to }, layout));
+  }
+
+  /** The default layout is left off the URL so plain links stay plain. */
+  function withLayout(params: Record<string, string>, l: GridLayout): Record<string, string> {
+    return l === DEFAULT_LAYOUT ? params : { ...params, layout: l };
+  }
+
+  function changeLayout(l: GridLayout) {
+    setSearchParams(withLayout({ from, to }, l), { replace: true });
   }
 
   async function handleViewSnapshot(commit: CalendarCommit) {
@@ -149,6 +167,7 @@ export default function CalendarPage() {
         <span className="text-muted">
           {shown.length} assignment{shown.length === 1 ? "" : "s"}
         </span>
+        <GridLayoutControl value={layout} onChange={changeLayout} />
       </div>
 
       <div className="detail-section">
@@ -182,7 +201,7 @@ export default function CalendarPage() {
               </p>
             )}
             <ScheduleGrid
-              layout="hours-days"
+              layout={layout}
               assignments={shown}
               from={gridFrom}
               to={gridTo}

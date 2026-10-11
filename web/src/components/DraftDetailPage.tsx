@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, useNavigate, Link } from "react-router";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router";
 import {
   fetchDraft,
   fetchDraftAssignments,
@@ -17,6 +17,7 @@ import {
 } from "../api/calendar";
 import { useEntityEvents } from "../hooks/useSSE";
 import ScheduleGrid from "./ScheduleGrid";
+import GridLayoutControl from "./GridLayoutControl";
 import CommitDraftDialog from "./CommitDraftDialog";
 import {
   assignmentKey,
@@ -24,6 +25,9 @@ import {
   pad2,
   diffAgainstCalendar,
   describeCommitDiff,
+  parseLayout,
+  DEFAULT_LAYOUT,
+  type GridLayout,
 } from "../lib/grid";
 
 const EMPTY_NAMES: NameMaps = { workers: new Map(), stations: new Map() };
@@ -47,6 +51,13 @@ export default function DraftDetailPage() {
   const { id: rawId } = useParams<{ id: string }>();
   const draftId = Number(rawId);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const layout = parseLayout(searchParams.get("layout"));
+
+  /** In the URL like the calendar's range, so a view can be linked to. */
+  function changeLayout(l: GridLayout) {
+    setSearchParams(l === DEFAULT_LAYOUT ? {} : { layout: l }, { replace: true });
+  }
 
   const [draft, setDraft] = useState<DraftInfo | null>(null);
   const [detail, setDetail] = useState<DraftAssignments | null>(null);
@@ -265,16 +276,19 @@ export default function DraftDetailPage() {
             Nothing in this draft yet. Generate to fill it.
           </p>
         ) : (
-          <ScheduleGrid
-            layout="hours-days"
-            assignments={detail.assignments}
-            from={draft.dateFrom}
-            to={draft.dateTo}
-            names={names}
-            freezeLine={freezeLine}
-            markFor={markFor}
-            baseline={calendar ?? undefined}
-          />
+          <>
+            <GridLayoutControl value={layout} onChange={changeLayout} />
+            <ScheduleGrid
+              layout={layout}
+              assignments={detail.assignments}
+              from={draft.dateFrom}
+              to={draft.dateTo}
+              names={names}
+              freezeLine={freezeLine}
+              markFor={markFor}
+              baseline={calendar ?? undefined}
+            />
+          </>
         )}
       </div>
 

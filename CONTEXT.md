@@ -42,6 +42,19 @@ from the calendar; that is refused unless forced (`draft commit --force`,
 `POST /api/drafts/:id/commit/force`), and recoverable from the history snapshot
 either way. Overlapping siblings are never auto-discarded.
 
+**Grid layout**:
+Which two coordinates of an assignment the schedule grid puts on its axes. A named
+preset — *hours × days*, *workers × days*, *stations × days* — not a free pair of axes,
+because what an empty cell means depends on the axes and is most of what the grid
+knows: closed or unstaffed in hours × days, "not scheduled that day" in workers × days,
+"nobody there that day" in stations × days. Days are always the columns. In the two
+entity-rowed layouts a chip is a *run*: consecutive hours of one worker at one station
+that share a diff state and a mark, written `10–14 grill`. Chosen with the pivot
+control and kept in the URL as `?layout=`, the way the calendar keeps its range; the
+default is left off. See ADR 0005.
+_Avoid_: adding a layout by adding an axis parameter. Add a preset and say what its
+empty cell means.
+
 **Commit diff**:
 What a **Commit** would do to the **Calendar** over the draft's own range, assignment
 by assignment: *added* (in the draft, not on the calendar), *unchanged* (in both), or

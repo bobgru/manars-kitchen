@@ -1,6 +1,14 @@
 # Project status and next steps
 
-**Last updated:** 2026-10-10 (later) · **The commit diff** shipped on the draft detail page:
+**Last updated:** 2026-10-10 (evening) · **The grid layouts and the pivot control** shipped:
+`workers-days` and `stations-days` join `hours-days` as named presets of `ScheduleGrid`, a
+chip in the entity-rowed layouts is a run of consecutive hours (`10–14 grill`) that breaks
+wherever its diff state or violation mark changes, and the choice is a segmented control
+on both the calendar and the draft page with the layout in the URL as `?layout=`, the
+default left off. Both drivers assert it. Item 1 has one piece left: whose what-if session
+a browser means, which is a design question. The paragraph below is the afternoon's state.
+
+**2026-10-10 (later)** · **The commit diff** shipped on the draft detail page:
 "On commit: adds A, keeps U, drops D" against the calendar as it is now, a `+` on every
 chip the calendar lacks, the calendar's own chips the draft lacks drawn struck through
 with a `−`, and the sentence repeated in the commit dialog. `npm run e2e:draft-detail`
@@ -264,15 +272,11 @@ The `/drafts/:id` detail page shipped, which completed the drafts surface. Three
 were deliberately deferred out of it, each independently shippable. The reasoning for all
 three is in **ADR 0005**. The commit diff shipped on 2026-10-10 — the "On commit" line,
 the `+` and struck-through `−` chips, and the same sentence in the commit dialog; the
-glossary's **Commit diff** entry says what it means. Two remain:
+glossary's **Commit diff** entry says what it means. The grid layouts and the pivot
+control shipped the same day — `workers-days` and `stations-days` as named presets, a
+chip per run of hours, the choice in the URL as `?layout=` on both pages; glossary entry
+**Grid layout**. One remains:
 
-- **The remaining grid layouts and the pivot control.** `ScheduleGrid` takes a `layout`
-  prop whose type is `GridLayout`, today a single `"hours-days"`. The agreed direction is
-  *named presets*, not a generic `(rowAxis, colAxis)` pair — empty-cell meaning is
-  axis-dependent and is most of what the component knows, so a generic version would hand
-  that decision back to every caller. Candidates: `workers-days`, `stations-days`. When the
-  second one lands, add the control and put the choice in the URL (`?layout=workers-days`),
-  the way `CalendarPage` already keeps `from`/`to` in `useSearchParams`.
 - **A draft's what-if sessions are not readable over REST.** `GET /api/hints` requires
   *both* `sessionId` and `draftId` and 400s otherwise; the browser has no session id, and
   nothing lists sessions. The web terminal's hardcoded `SessionId 0` (`Execute.hs:63`) would

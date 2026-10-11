@@ -298,6 +298,22 @@ await page.locator(".modal").getByText(/Adds \d+, keeps \d+, drops \d+\./).waitF
 await shotOf(page.locator(".modal"), "d05c-commit-dialog-diff");
 await page.getByRole("button", { name: "Cancel" }).click();
 
+// The diff and the marks survive the pivot: a run chip is struck through or
+// flagged exactly as its hours were, because a run breaks wherever its state or
+// mark changes.
+await page.getByRole("button", { name: "Workers × days" }).click();
+await page.locator('table.calendar-grid[data-layout="workers-days"]').waitFor();
+if (!page.url().includes("layout=workers-days")) fail(`layout not in the URL: ${page.url()}`);
+if ((await page.locator(".calendar-chip-dropped").count()) === 0) {
+  fail("workers x days lost the dropped chips");
+}
+if ((await page.locator(".calendar-chip-flagged").count()) === 0) {
+  fail("workers x days lost the flagged chips");
+}
+await step("d05d-workers-days");
+await page.getByRole("button", { name: "Hours × days" }).click();
+await page.locator('table.calendar-grid[data-layout="hours-days"]').waitFor();
+
 // --- Commit from the detail page -------------------------------------------
 // The draft is deleted by this, so the page has to navigate and hand its
 // confirmation to the list.

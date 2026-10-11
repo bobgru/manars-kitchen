@@ -76,6 +76,44 @@ const frozen = await page.locator("th.calendar-col-frozen").count();
 if (frozen === 0) fail("no column marked frozen in a month that is entirely past");
 await step("c01-live-month");
 
+// --- The pivot: the other two layouts, and the choice in the URL -------------
+// Workers x days: a row per worker who appears, a chip per run of hours. The
+// 1020-odd hour chips collapse into runs, so there are fewer of them and each
+// says "10–14 grill" rather than "marco grill" in a 10:00 row.
+await page.getByRole("button", { name: "Workers × days" }).click();
+await page.locator('table.calendar-grid[data-layout="workers-days"]').waitFor();
+if (!page.url().includes("layout=workers-days")) {
+  fail(`layout not in the URL after picking it: ${page.url()}`);
+}
+const workerRows = await page.locator('table.calendar-grid[data-layout="workers-days"] tbody tr').count();
+if (workerRows === 0) fail("workers x days drew no rows");
+const runChips = await page.locator(".calendar-chip").count();
+if (runChips === 0 || runChips >= chips) {
+  fail(`expected fewer run chips than ${chips} hour chips, saw ${runChips}`);
+}
+const sample = await page.locator(".calendar-chip").first().textContent();
+if (!/^\d{2}–\d{2} /.test(sample)) fail(`a run chip should start with an hour range, got "${sample}"`);
+console.log(`workers x days: ${workerRows} rows, ${runChips} run chips, e.g. "${sample}"`);
+await step("c01b-workers-days");
+
+// Stations x days by URL alone, which is what a linked view is.
+await page.goto(
+  "http://localhost:5173/calendar?from=2026-04-01&to=2026-04-30&layout=stations-days",
+  { waitUntil: "domcontentloaded" }
+);
+await page.locator('table.calendar-grid[data-layout="stations-days"]').waitFor();
+const stationRows = await page.locator('table.calendar-grid[data-layout="stations-days"] tbody tr').count();
+if (stationRows === 0) fail("stations x days drew no rows");
+const pressed = await page.getByRole("button", { name: "Stations × days" }).getAttribute("aria-pressed");
+if (pressed !== "true") fail("the URL's layout is not the pressed segment");
+console.log(`stations x days: ${stationRows} rows`);
+await step("c01c-stations-days");
+
+// Back to the default, which leaves the URL plain.
+await page.getByRole("button", { name: "Hours × days" }).click();
+await page.locator('table.calendar-grid[data-layout="hours-days"]').waitFor();
+if (page.url().includes("layout=")) fail(`default layout should be left off the URL: ${page.url()}`);
+
 // --- Commit history and a snapshot ------------------------------------------
 await page.getByRole("heading", { name: "Commit history" }).waitFor();
 const history = await page.getByRole("button", { name: "View snapshot" }).count();

@@ -709,6 +709,41 @@
   background: #1a2744;
 }
 
+/* The row gutter when rows are workers or stations rather than hours. */
+.calendar-row-name {
+  color: #e8e8e8;
+}
+
+/*
+ * The grid's pivot: one segment per named layout. The pressed segment is bold
+ * with a brighter border, and carries aria-pressed; no hue alone.
+ */
+.layout-bar {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.layout-seg {
+  background: #16213e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  color: #e8e8e8;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.layout-seg:hover {
+  background: #1d2b4d;
+}
+
+.layout-seg-on {
+  background: #0f3460;
+  border-color: #5390d9;
+  font-weight: 700;
+}
+
 /* Weekend day columns, and dates at or behind the freeze line. */
 .calendar-col-weekend {
   background: #191926;

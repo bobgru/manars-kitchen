@@ -26,9 +26,23 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
  * A named preset rather than a free `(rowAxis, colAxis)` pair, because
  * empty-cell meaning is axis-dependent and is most of what the grid knows: in
  * hours x days a cell is closed, unstaffed or staffed, and in a worker-rowed
- * layout "closed" means nothing. See ADR 0005.
+ * layout "closed" means nothing. See ADR 0005. Days are always the columns;
+ * the other eleven ordered pairs are transposes, or drop time.
  */
-export type GridLayout = "hours-days";
+export type GridLayout = "hours-days" | "workers-days" | "stations-days";
+
+export const GRID_LAYOUTS: { id: GridLayout; label: string }[] = [
+  { id: "hours-days", label: "Hours × days" },
+  { id: "workers-days", label: "Workers × days" },
+  { id: "stations-days", label: "Stations × days" },
+];
+
+export const DEFAULT_LAYOUT: GridLayout = "hours-days";
+
+/** Read a layout off the URL; anything unrecognised is the default, not an error. */
+export function parseLayout(raw: string | null): GridLayout {
+  return GRID_LAYOUTS.some((l) => l.id === raw) ? (raw as GridLayout) : DEFAULT_LAYOUT;
+}
 
 /** A day column: its open hours, plus whether it is a weekend or frozen. */
 export interface Column {

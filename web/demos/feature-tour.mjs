@@ -181,6 +181,18 @@ await step(
 
 await step(
   page,
+  "The same draft by worker: a row per person, a chip per run of hours at a station.",
+  async () => {
+    await page.getByRole("button", { name: "Workers × days" }).click();
+    await page.locator('table.calendar-grid[data-layout="workers-days"]').waitFor();
+    await reveal(page.locator("table.calendar-grid"));
+  },
+  "Three named layouts — hours, workers or stations down the side, days across — " +
+    "and the choice sits in the URL, so a view can be linked to."
+);
+
+await step(
+  page,
   "The calendar: what has actually been committed, for any date range.",
   async () => {
     await navigate(page, "Calendar");
