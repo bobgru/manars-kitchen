@@ -3,10 +3,12 @@ import { useParams, useNavigate, useSearchParams, Link } from "react-router";
 import {
   fetchDraft,
   fetchDraftAssignments,
+  fetchDraftWhatIfs,
   generateDraft,
   describeCommit,
   type DraftInfo,
   type DraftAssignments,
+  type WhatIf,
 } from "../api/drafts";
 import {
   fetchNameMaps,
@@ -69,6 +71,8 @@ export default function DraftDetailPage() {
    * rather than comparing it with an empty calendar and calling everything new.
    */
   const [calendar, setCalendar] = useState<Assignment[] | null>(null);
+  /** The draft's what-if session; null when it could not be read. */
+  const [whatIfs, setWhatIfs] = useState<WhatIf[] | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [gone, setGone] = useState(false);
@@ -88,11 +92,12 @@ export default function DraftDetailPage() {
       setGone(false);
       // The draft and its assignments are the page; the others only decorate
       // it, so they fall back rather than taking it down.
-      const [info, assignments, maps, freeze] = await Promise.all([
+      const [info, assignments, maps, freeze, session] = await Promise.all([
         fetchDraft(draftId),
         fetchDraftAssignments(draftId),
         fetchNameMaps().catch(() => EMPTY_NAMES),
         fetchFreezeLine().catch(() => ""),
+        fetchDraftWhatIfs(draftId).catch(() => null),
       ]);
       // Needs the draft's range, so it waits for the draft.
       const cal = await fetchCalendar(info.dateFrom, info.dateTo).catch(() => null);
@@ -101,6 +106,7 @@ export default function DraftDetailPage() {
       setNames(maps);
       setFreezeLine(freeze);
       setCalendar(cal);
+      setWhatIfs(session);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("404")) setGone(true);
@@ -330,6 +336,35 @@ export default function DraftDetailPage() {
                 ))}
               </tbody>
             </table>
+          </>
+        )}
+      </div>
+
+      <div className="detail-section">
+        <h3>What-ifs{whatIfs ? ` (${whatIfs.length})` : ""}</h3>
+        {/* The grid above is the draft as saved. A what-if is a hypothesis
+            layered on it in a CLI session; its schedule is not stored, so this
+            lists the hypotheses and does not draw them. ADR 0013. */}
+        {whatIfs === null ? (
+          <p className="text-muted">Could not read this draft's what-if session.</p>
+        ) : whatIfs.length === 0 ? (
+          <p className="text-muted">
+            No what-ifs on this draft. Add them with <code>what-if</code> in the
+            terminal; they belong to the draft, whoever types them.
+          </p>
+        ) : (
+          <>
+            <p className="text-muted">
+              Hypotheses on this draft, in order. The grid above does not include
+              them: a what-if changes what the scheduler is told, not what the
+              draft holds, until <code>what-if apply</code> in the terminal.
+              Discarding the draft discards these too.
+            </p>
+            <ol className="what-if-list" data-testid="what-ifs">
+              {whatIfs.map((w, i) => (
+                <li key={i}>{w.text}</li>
+              ))}
+            </ol>
           </>
         )}
       </div>

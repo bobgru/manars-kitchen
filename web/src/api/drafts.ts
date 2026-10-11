@@ -85,6 +85,27 @@ export async function fetchDraft(id: number): Promise<DraftInfo> {
   return resp.json();
 }
 
+/**
+ * One what-if in a draft's session. `text` is the CLI's wording for it, so the
+ * page need not know how to name a station or a skill; `whatIf` is the raw
+ * hint, kept for a future UI that acts on it.
+ */
+export interface WhatIf {
+  whatIf: unknown;
+  text: string;
+}
+
+/**
+ * The draft's what-if session, in order. A what-if session belongs to the
+ * draft, not to whoever typed it (ADR 0013), so there is no session id to know.
+ * Empty when there is none.
+ */
+export async function fetchDraftWhatIfs(id: number): Promise<WhatIf[]> {
+  const resp = await apiFetch(`/api/drafts/${id}/what-ifs`);
+  if (!resp.ok) throw new Error(`Failed to fetch draft ${id} what-ifs: ${resp.status}`);
+  return resp.json();
+}
+
 /** A pure read: reports violations without pruning them. */
 export async function fetchDraftAssignments(id: number): Promise<DraftAssignments> {
   const resp = await apiFetch(`/api/drafts/${id}/assignments`);

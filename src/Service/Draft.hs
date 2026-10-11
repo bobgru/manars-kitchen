@@ -294,7 +294,7 @@ commitDraft repo draftId note force = do
                     Cal.commitToCalendar repo (diDateFrom draft) (diDateTo draft)
                         note (Just draftId) sched
                     repoDeleteDraft repo draftId
-                    repoDeleteDraftHintSessions repo draftId
+                    repoDeleteHintSession repo draftId
                     freezeLine <- Freeze.computeFreezeLine
                     let frozen = Freeze.frozenDatesInRange freezeLine
                                     (diDateFrom draft) (diDateTo draft)
@@ -308,8 +308,7 @@ overlappingSiblings repo draft =
     filter ((/= diId draft) . diId)
         <$> repoDraftsOverlapping repo (diDateFrom draft) (diDateTo draft)
 
--- | Discard a draft: delete it, its assignments, and every what-if session
--- saved against it.
+-- | Discard a draft: delete it, its assignments, and its what-if session.
 discardDraft :: Repository -> Int -> IO (Either String ())
 discardDraft repo draftId = do
     mDraft <- repoGetDraft repo draftId
@@ -317,7 +316,7 @@ discardDraft repo draftId = do
         Nothing -> return (Left "Draft not found.")
         Just _ -> do
             repoDeleteDraft repo draftId
-            repoDeleteDraftHintSessions repo draftId
+            repoDeleteHintSession repo draftId
             return (Right ())
 
 -- | List all active drafts.

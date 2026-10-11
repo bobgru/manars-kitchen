@@ -84,6 +84,7 @@ listDraftsC      :: ClientM [DraftInfo]
 createDraftC     :: CreateDraftReq -> ClientM DraftCreatedResp
 getDraftC        :: Int -> ClientM DraftInfo
 getDraftAssignmentsC :: Int -> ClientM DraftAssignmentsResp
+getDraftWhatIfsC :: Int -> ClientM [WhatIfResp]
 revalidateDraftC :: Int -> ClientM RevalidateDraftResp
 generateDraftC   :: Int -> GenerateDraftReq -> ClientM ScheduleResult
 commitDraftC     :: Int -> CommitDraftReq -> ClientM NoContent
@@ -190,9 +191,9 @@ _forceDeleteWorkerC :: Text -> ClientM NoContent
 
 -- Hint sessions
 _listHintsC :: Maybe Int -> Maybe Int -> ClientM [Hint]
-_addHintC :: AddHintReq -> ClientM [Hint]
+addHintC :: AddHintReq -> ClientM [Hint]
 _revertHintC :: HintSessionRef -> ClientM [Hint]
-_applyHintsC :: HintSessionRef -> ClientM NoContent
+applyHintsC :: HintSessionRef -> ClientM NoContent
 _rebaseHintsC :: HintSessionRef -> ClientM RebaseResultResp
 getProblemsC :: Maybe Day -> Maybe Day -> ClientM [ProblemResp]
 getHorizonsC :: ClientM [HorizonResp]
@@ -204,6 +205,7 @@ logoutC
     :<|> createDraftC
     :<|> getDraftC
     :<|> getDraftAssignmentsC
+    :<|> getDraftWhatIfsC
     :<|> revalidateDraftC
     :<|> generateDraftC
     :<|> commitDraftC
@@ -284,9 +286,9 @@ logoutC
     :<|> _forceDeleteWorkerC
     -- Hint sessions
     :<|> _listHintsC
-    :<|> _addHintC
+    :<|> addHintC
     :<|> _revertHintC
-    :<|> _applyHintsC
+    :<|> applyHintsC
     :<|> _rebaseHintsC
     :<|> getProblemsC
     :<|> getHorizonsC
@@ -957,6 +959,57 @@ spec = do
 
     -- GET reports, POST revalidate prunes. Keeping those apart is the point of
     -- the step 3 split: a browser refresh must not delete a draft's assignments.
+    -- A what-if session belongs to the draft (ADR 0013): no session id to
+    -- know, read under the domain word, edited by admins.
+    describe "Draft what-ifs" $ do
+        it "reads as empty for a draft with no session, 404 for no draft" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                Right created <- runClientM (createDraftC (CreateDraftReq from to)) env
+                let did = dcrId created
+                Right none <- runClientM (getDraftWhatIfsC did) env
+                map wirWhatIf none `shouldBe` []
+                missing <- runClientM (getDraftWhatIfsC 999) env
+                missing `shouldFailWith` 404
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        it "a what-if added over /api/hints is read back in words, whatever session id was sent" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                Right created <- runClientM (createDraftC (CreateDraftReq from to)) env
+                let did = dcrId created
+                Right added <- runClientM (addHintC (AddHintReq 4242 did (WaiveOvertime (WorkerId 1)))) env
+                added `shouldBe` [WaiveOvertime (WorkerId 1)]
+                Right whatIfs <- runClientM (getDraftWhatIfsC did) env
+                map wirWhatIf whatIfs `shouldBe` [WaiveOvertime (WorkerId 1)]
+                -- The admin is user 1, and a worker's id is their user id.
+                map wirText whatIfs `shouldBe` ["Waive overtime: admin"]
+                -- Another "session" sees the same draft's session.
+                Right again <- runClientM (_listHintsC (Just 7) (Just did)) env
+                again `shouldBe` [WaiveOvertime (WorkerId 1)]
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
+        it "adding a what-if to a draft that does not exist is 404" $
+            withSeededApp $ \_ env -> do
+                r <- runClientM (addHintC (AddHintReq 0 999 (WaiveOvertime (WorkerId 1)))) env
+                r `shouldFailWith` 404
+
+        -- Applying used to answer 204 and delete the session, applying nothing.
+        it "apply over HTTP is 501, not a silent delete" $
+            withSeededApp $ \_ env -> do
+                (from, to) <- futureWeek
+                Right created <- runClientM (createDraftC (CreateDraftReq from to)) env
+                let did = dcrId created
+                Right _ <- runClientM (addHintC (AddHintReq 0 did (WaiveOvertime (WorkerId 1)))) env
+                r <- runClientM (applyHintsC (HintSessionRef 0 did)) env
+                r `shouldFailWith` 501
+                Right still <- runClientM (getDraftWhatIfsC did) env
+                length still `shouldBe` 1
+                _ <- runClientM (discardDraftC did) env
+                pure ()
+
     describe "Draft assignments and revalidate" $ do
         it "returns 404 for a draft that does not exist" $ withSeededApp $ \_ env -> do
             missing <- runClientM (getDraftAssignmentsC 999) env

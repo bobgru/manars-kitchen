@@ -13,7 +13,8 @@ import System.Process (createPipe)
 import Data.IORef (newIORef)
 
 import Auth.Types (User(..))
-import Repo.Types (Repository, SessionId(..))
+import Data.Maybe (fromMaybe)
+import Repo.Types (Repository(..), SessionId(..))
 import Service.PubSub (AppBus(..), newAppBus)
 import CLI.App (mkAppStateWithBus, handleCommand, registerAuditSubscriber)
 import CLI.Commands (Command(..), parseCommand)
@@ -60,7 +61,14 @@ executeCommandText env user input = do
                 Quit -> return "Use the browser logout button to end your session."
                 PasswordChange -> return "Password change is not supported in the web terminal."
                 _ -> captureStdout (eeLock env) $ do
-                    st <- mkAppStateWithBus (eeRepo env) user (SessionId 0) (eeBus env)
+                    -- The caller's own login session, so touch and close mean
+                    -- something. A user has one active session, which is the
+                    -- one their bearer token belongs to; the fallback is for
+                    -- a token that outlived its session, and matches what
+                    -- this used to pass unconditionally.
+                    mSid <- repoGetActiveSession (eeRepo env) (userId user)
+                    let sid = fromMaybe (SessionId 0) mSid
+                    st <- mkAppStateWithBus (eeRepo env) user sid (eeBus env)
                     handleCommand st cmd
 
 -- | Capture everything written to stdout during an IO action.

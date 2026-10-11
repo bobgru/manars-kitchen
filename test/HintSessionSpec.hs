@@ -18,46 +18,46 @@ import Service.PubSub (TopicBus, CommandEvent, Source(..), newTopicBus, publishC
 
 spec :: Spec
 spec = do
-    describe "hint session persistence" $ do
+    describe "what-if session persistence (one per draft, ADR 0013)" $ do
         it "save and load round-trips" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "alice"
-            (sid, _tok) <- repoCreateSession repo uid
+            _ <- repoCreateSession repo uid
             let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                         , CloseStation (StationId 1) testSlot
                         ]
-            repoSaveHintSession repo sid 1 hints 42
-            result <- repoLoadHintSession repo sid 1
+            repoSaveHintSession repo 1 hints 42
+            result <- repoLoadHintSession repo 1
             result `shouldBe` Just (HintSessionRecord hints 42)
 
-        it "returns Nothing for nonexistent session" $ withTestRepo $ \(repo, _bus) -> do
+        it "returns Nothing for a draft with no session" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "bob"
-            (sid, _tok) <- repoCreateSession repo uid
-            result <- repoLoadHintSession repo sid 99
+            _ <- repoCreateSession repo uid
+            result <- repoLoadHintSession repo 99
             result `shouldBe` Nothing
 
-        it "upsert overwrites existing session" $ withTestRepo $ \(repo, _bus) -> do
+        it "a second save replaces the draft's session" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "carol"
-            (sid, _tok) <- repoCreateSession repo uid
+            _ <- repoCreateSession repo uid
             let hints1 = [GrantSkill (WorkerId 1) (SkillId 1)]
                 hints2 = [WaiveOvertime (WorkerId 2)]
-            repoSaveHintSession repo sid 1 hints1 10
-            repoSaveHintSession repo sid 1 hints2 20
-            result <- repoLoadHintSession repo sid 1
+            repoSaveHintSession repo 1 hints1 10
+            repoSaveHintSession repo 1 hints2 20
+            result <- repoLoadHintSession repo 1
             result `shouldBe` Just (HintSessionRecord hints2 20)
 
         it "delete removes session" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "dave"
-            (sid, _tok) <- repoCreateSession repo uid
+            _ <- repoCreateSession repo uid
             let hints = [WaiveOvertime (WorkerId 1)]
-            repoSaveHintSession repo sid 1 hints 5
-            repoDeleteHintSession repo sid 1
-            result <- repoLoadHintSession repo sid 1
+            repoSaveHintSession repo 1 hints 5
+            repoDeleteHintSession repo 1
+            result <- repoLoadHintSession repo 1
             result `shouldBe` Nothing
 
         it "delete nonexistent is a no-op" $ withTestRepo $ \(repo, _bus) -> do
             uid <- createTestUser repo "eve"
-            (sid, _tok) <- repoCreateSession repo uid
-            repoDeleteHintSession repo sid 99  -- should not error
+            _ <- repoCreateSession repo uid
+            repoDeleteHintSession repo 99  -- should not error
 
     describe "audit-since query" $ do
         it "returns only mutations after checkpoint" $ withTestRepo $ \(repo, bus) -> do

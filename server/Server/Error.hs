@@ -7,7 +7,7 @@ module Server.Error
     ) where
 
 import Data.Aeson (ToJSON, object, (.=), encode, toJSON)
-import Servant (ServerError(..), err400, err401, err403, err404, err409, err500, Handler, throwError)
+import Servant (ServerError(..), err400, err401, err403, err404, err409, err500, err501, Handler, throwError)
 
 data ApiError
     = NotFound String
@@ -16,6 +16,9 @@ data ApiError
     | Forbidden String
     | Conflict String
     | InternalError String
+    | NotImplemented String
+      -- ^ A route that exists but does nothing yet. Said out loud rather than
+      -- answered with a success code for something that did not happen.
     deriving (Show)
 
 throwApiError :: ApiError -> Handler a
@@ -25,6 +28,7 @@ throwApiError (Unauthorized msg)  = throwError $ withJsonBody err401 msg
 throwApiError (Forbidden msg)     = throwError $ withJsonBody err403 msg
 throwApiError (Conflict msg)      = throwError $ withJsonBody err409 msg
 throwApiError (InternalError msg) = throwError $ withJsonBody err500 msg
+throwApiError (NotImplemented msg) = throwError $ withJsonBody err501 msg
 
 -- | Throw a 409 Conflict with an arbitrary JSON-encodable body.
 throwConflictWithBody :: ToJSON a => a -> Handler b

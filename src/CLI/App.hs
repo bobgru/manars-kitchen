@@ -12,7 +12,7 @@ module CLI.App
     ) where
 
 import Control.Monad (forM_)
-import System.IO (hFlush, stdout, hSetEcho, stdin)
+import System.IO (hFlush, stdout, hSetEcho, stdin, hIsTerminalDevice)
 import Control.Concurrent (threadDelay)
 import Data.Char (toLower)
 import Data.IORef
@@ -165,7 +165,7 @@ runRepl st = do
                             Just hs -> do
                                 cp <- getCurrentCheckpoint (asRepo st)
                                 let hs' = hs { hstCheckpoint = cp, hstIsStale = True }
-                                repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs)
+                                repoSaveHintSession (asRepo st) (hstDraftId hs)
                                     (sessHints (hstSess hs)) cp
                                 writeIORef (asHintSession st) (Just hs')
                                 putStrLn "Hint session is stale due to data change. Run 'what-if rebase' to reconcile, or continue adding hints (rebase will run automatically)."
@@ -346,14 +346,20 @@ handleCommand st cmd = case cmd of
                 putStrLn ("  Created at: " ++ T.unpack (diCreatedAt d))
                 putStrLn ("  Assignments: " ++ show (Set.size (unSchedule sched)))
                 -- Check for persisted hint session
-                mPersistedHs <- repoLoadHintSession (asRepo st) (asSessionId st) did
+                mPersistedHs <- repoLoadHintSession (asRepo st) did
                 case mPersistedHs of
                     Nothing -> return ()
                     Just (HintSessionRecord hints cp) -> do
                         let n = length hints
-                        putStr ("Found saved hint session (" ++ show n ++ " hints). Resume? [Y/n] ")
-                        hFlush stdout
-                        answer <- getLine
+                        -- The web terminal has no stdin to ask, so it resumes
+                        -- without asking; declining is a CLI-only courtesy.
+                        interactive <- hIsTerminalDevice stdin
+                        answer <- if interactive
+                            then do
+                                putStr ("Found saved what-if session (" ++ show n ++ " what-ifs). Resume? [Y/n] ")
+                                hFlush stdout
+                                getLine
+                            else return ""
                         if map toLower answer `elem` ["", "y", "yes"]
                             then do
                                 -- Rebuild session with persisted hints
@@ -374,8 +380,8 @@ handleCommand st cmd = case cmd of
                                                 return ()
                                             else putStrLn ("Resumed hint session with " ++ show n ++ " hints.")
                             else do
-                                repoDeleteHintSession (asRepo st) (asSessionId st) did
-                                putStrLn "Persisted hint session discarded."
+                                repoDeleteHintSession (asRepo st) did
+                                putStrLn "Saved what-if session discarded."
 
     DraftView mDidStr -> do
         resolved <- resolveDraftId (asRepo st) mDidStr
@@ -1667,7 +1673,7 @@ autoSaveHintSession :: AppState -> HintState -> IO ()
 autoSaveHintSession st hs = do
     cp <- getCurrentCheckpoint (asRepo st)
     let hs' = hs { hstCheckpoint = cp, hstIsStale = False }
-    repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs') (sessHints (hstSess hs')) cp
+    repoSaveHintSession (asRepo st) (hstDraftId hs') (sessHints (hstSess hs')) cp
     writeIORef (asHintSession st) (Just hs')
 
 -- | Get or lazily initialize the hint session. Handles stale sessions
@@ -1770,12 +1776,12 @@ handleLargeGap st hs hints = do
                 Right sess' -> do
                     cp <- getCurrentCheckpoint (asRepo st)
                     let hs' = HintState sess' (hstDraftId hs) cp False
-                    repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) hints cp
+                    repoSaveHintSession (asRepo st) (hstDraftId hs) hints cp
                     writeIORef (asHintSession st) (Just hs')
                     putStrLn "Force resumed. Session rebuilt from current context."
                     return (Right hs')
         _ -> do
-            repoDeleteHintSession (asRepo st) (asSessionId st) (hstDraftId hs)
+            repoDeleteHintSession (asRepo st) (hstDraftId hs)
             writeIORef (asHintSession st) Nothing
             putStrLn "Hint session discarded."
             return (Left "Hint session discarded.")
@@ -1797,7 +1803,7 @@ handleNormalRebase st hs entries hints = do
                 Right sess' -> do
                     cp <- getCurrentCheckpoint (asRepo st)
                     let hs' = HintState sess' (hstDraftId hs) cp False
-                    repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) hints cp
+                    repoSaveHintSession (asRepo st) (hstDraftId hs) hints cp
                     writeIORef (asHintSession st) (Just hs')
                     putStrLn ("Rebased over " ++ show n ++ " changes. All hints preserved.")
                     return (Right hs')
@@ -1821,7 +1827,7 @@ handleNormalRebase st hs entries hints = do
                         Right sess' -> do
                             cp <- getCurrentCheckpoint (asRepo st)
                             let hs' = HintState sess' (hstDraftId hs) cp False
-                            repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) safeHints cp
+                            repoSaveHintSession (asRepo st) (hstDraftId hs) safeHints cp
                             writeIORef (asHintSession st) (Just hs')
                             let dropped = length hints - length safeHints
                             putStrLn ("Dropped " ++ show dropped ++ " conflicting hint(s). " ++ show (length safeHints) ++ " remaining.")
@@ -1834,7 +1840,7 @@ handleNormalRebase st hs entries hints = do
                         Right sess' -> do
                             cp <- getCurrentCheckpoint (asRepo st)
                             let hs' = HintState sess' (hstDraftId hs) cp False
-                            repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) hints cp
+                            repoSaveHintSession (asRepo st) (hstDraftId hs) hints cp
                             writeIORef (asHintSession st) (Just hs')
                             putStrLn "Kept all hints. Session rebuilt from current context."
                             return (Right hs')
@@ -1843,7 +1849,7 @@ handleNormalRebase st hs entries hints = do
                     return (Right hs)
         SessionInvalid msg -> do
             putStrLn msg
-            repoDeleteHintSession (asRepo st) (asSessionId st) (hstDraftId hs)
+            repoDeleteHintSession (asRepo st) (hstDraftId hs)
             writeIORef (asHintSession st) Nothing
             return (Left "Hint session invalidated.")
 
@@ -1874,7 +1880,7 @@ rebuildSessionAfterApply st hs = do
         Right sess' -> do
             cp <- getCurrentCheckpoint (asRepo st)
             let hs' = HintState sess' (hstDraftId hs) cp False
-            repoSaveHintSession (asRepo st) (asSessionId st) (hstDraftId hs) remaining cp
+            repoSaveHintSession (asRepo st) (hstDraftId hs) remaining cp
             writeIORef (asHintSession st) (Just hs')
 
 showDayOfWeek :: DayOfWeek -> String

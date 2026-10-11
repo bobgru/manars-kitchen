@@ -709,6 +709,17 @@
   background: #1a2744;
 }
 
+/* A draft's what-if session: an ordered list, one hypothesis per line. */
+.what-if-list {
+  margin: 0.25rem 0 0 1.25rem;
+  padding: 0;
+  color: #e8e8e8;
+}
+
+.what-if-list li {
+  margin-bottom: 0.15rem;
+}
+
 /* The row gutter when rows are workers or stations rather than hours. */
 .calendar-row-name {
   color: #e8e8e8;

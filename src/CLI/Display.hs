@@ -20,6 +20,7 @@ module CLI.Display
     , displayConfig
     , displayHintDiff
     , displayHintList
+    , showHint
     , lookupWorker
     , lookupStation
     , padRight

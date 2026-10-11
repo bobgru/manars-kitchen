@@ -27,7 +27,8 @@ import Domain.Absence (AbsenceRequest(..), AbsenceType(..), AbsenceContext(..))
 import Domain.Hint (Hint)
 import Domain.Pin (PinnedAssignment(..))
 import Domain.PayPeriod (parsePayPeriodType, PayPeriodConfig(..))
-import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), SessionId(..), HintSessionRecord(..), WorkerSummary(..))
+import Repo.Types (Repository(..), DraftInfo, CalendarCommit, AuditEntry(..), HintSessionRecord(..), WorkerSummary(..))
+import CLI.Display (showHint)
 import qualified Service.Worker as SW
 import qualified Service.User as SU
 import qualified Service.Draft as SD
@@ -120,6 +121,7 @@ server execEnv cmdBus repo user =
     :<|> handleCreateDraft cmdBus repo user
     :<|> handleGetDraft repo
     :<|> handleGetDraftAssignments repo
+    :<|> handleGetDraftWhatIfs repo
     :<|> handleRevalidateDraft cmdBus repo user
     :<|> handleGenerateDraft cmdBus repo user
     :<|> handleCommitDraft cmdBus repo user False
@@ -1220,61 +1222,59 @@ toWorkerRefsResp r = WorkerReferencesResp
 -- -----------------------------------------------------------------
 
 handleListHints :: Repository -> User -> Maybe Int -> Maybe Int -> Handler [Hint]
-handleListHints repo user mSid mDid =
-    case (mSid, mDid) of
-        (Just sid, Just did) -> do
-            requireSessionOwner repo user (SessionId sid)
-            mRec <- liftIO $ repoLoadHintSession repo (SessionId sid) did
-            case mRec of
-                Nothing  -> pure []
-                Just rec -> pure (hsHints rec)
-        _ -> throwApiError (BadRequest "Both sessionId and draftId query params are required")
+handleListHints repo _user _mSid mDid =
+    -- sessionId is accepted and ignored: a what-if session is the draft's.
+    case mDid of
+        Just did -> do
+            mRec <- liftIO $ repoLoadHintSession repo did
+            pure (maybe [] hsHints mRec)
+        Nothing -> throwApiError (BadRequest "draftId query param is required")
 
 handleAddHint :: Repository -> User -> AddHintReq -> Handler [Hint]
 handleAddHint repo user req = do
-    requireSessionOwner repo user (SessionId (ahrSessionId req))
-    let sid = SessionId (ahrSessionId req)
-        did = ahrDraftId req
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    requireAdmin user
+    let did = ahrDraftId req
+    requireDraftExists repo did
+    mRec <- liftIO $ repoLoadHintSession repo did
     let currentHints = maybe [] hsHints mRec
         checkpoint   = maybe 0 hsCheckpoint mRec
         newHints     = currentHints ++ [ahrHint req]
-    liftIO $ repoSaveHintSession repo sid did newHints checkpoint
+    liftIO $ repoSaveHintSession repo did newHints checkpoint
     pure newHints
 
 handleRevertHint :: Repository -> User -> HintSessionRef -> Handler [Hint]
 handleRevertHint repo user ref = do
-    requireSessionOwner repo user (SessionId (hsrSessionId ref))
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    requireAdmin user
+    let did = hsrDraftId ref
+    mRec <- liftIO $ repoLoadHintSession repo did
     case mRec of
-        Nothing  -> throwApiError (NotFound "No hint session found")
+        Nothing  -> throwApiError (NotFound "No what-if session for this draft")
         Just rec -> do
             let hints = hsHints rec
             if null hints
-                then throwApiError (BadRequest "No hints to revert")
+                then throwApiError (BadRequest "No what-ifs to revert")
                 else do
                     let reverted = init hints
-                    liftIO $ repoSaveHintSession repo sid did reverted (hsCheckpoint rec)
+                    liftIO $ repoSaveHintSession repo did reverted (hsCheckpoint rec)
                     pure reverted
 
+-- | Applying a what-if writes its effect to the underlying data — a skill
+-- granted, a pin added — and only the CLI knows how (`what-if apply` in
+-- "CLI.App"). This used to answer 204 and delete the session, which applied
+-- nothing; it now says so. ADR 0013.
 handleApplyHints :: Repository -> User -> HintSessionRef -> Handler NoContent
-handleApplyHints repo user ref = do
-    requireSessionOwner repo user (SessionId (hsrSessionId ref))
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    liftIO $ repoDeleteHintSession repo sid did
-    pure NoContent
+handleApplyHints _repo user _ref = do
+    requireAdmin user
+    throwApiError (NotImplemented
+        "Applying a what-if over HTTP is not implemented; use `what-if apply` in the CLI")
 
 handleRebaseHints :: Repository -> User -> HintSessionRef -> Handler RebaseResultResp
 handleRebaseHints repo user ref = do
-    requireSessionOwner repo user (SessionId (hsrSessionId ref))
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    requireAdmin user
+    let did = hsrDraftId ref
+    mRec <- liftIO $ repoLoadHintSession repo did
     case mRec of
-        Nothing -> throwApiError (NotFound "No hint session found")
+        Nothing -> throwApiError (NotFound "No what-if session for this draft")
         Just rec -> do
             entries <- liftIO $ repoAuditSince repo (hsCheckpoint rec)
             let result = SHR.rebaseSession did entries (hsHints rec)
@@ -1284,7 +1284,7 @@ handleRebaseHints repo user ref = do
                 SHR.AutoRebase n -> do
                     let newCheckpoint = if null entries then hsCheckpoint rec
                                         else aeId (last entries)
-                    liftIO $ repoSaveHintSession repo sid did (hsHints rec) newCheckpoint
+                    liftIO $ repoSaveHintSession repo did (hsHints rec) newCheckpoint
                     pure (RebaseResultResp "auto-rebase"
                         ("Auto-rebased over " ++ show n ++ " compatible changes"))
                 SHR.HasConflicts _ ->
@@ -1293,17 +1293,35 @@ handleRebaseHints repo user ref = do
                 SHR.SessionInvalid msg ->
                     pure (RebaseResultResp "session-invalid" msg)
 
--- -----------------------------------------------------------------
--- Session ownership check
--- -----------------------------------------------------------------
+-- | A draft's what-if session, each entry in the words the CLI prints for it.
+-- Empty for a draft with no session; 404 for a draft that does not exist, so a
+-- stale page and an empty session read differently.
+handleGetDraftWhatIfs :: Repository -> Int -> Handler [WhatIfResp]
+handleGetDraftWhatIfs repo did = do
+    requireDraftExists repo did
+    mRec <- liftIO $ repoLoadHintSession repo did
+    (wNames, sNames, skNames) <- liftIO $ nameMaps repo
+    pure [ WhatIfResp h (showHint wNames sNames skNames h)
+         | h <- maybe [] hsHints mRec ]
 
--- | Ensure the authenticated user owns the given session (or is admin).
-requireSessionOwner :: Repository -> User -> SessionId -> Handler ()
-requireSessionOwner repo user sid = do
-    case userRole user of
-        Admin -> return ()
-        Normal -> do
-            mOwner <- liftIO $ repoGetSessionOwner repo sid
-            case mOwner of
-                Just owner | owner == userId user -> return ()
-                _ -> throwApiError (Forbidden "Forbidden")
+requireDraftExists :: Repository -> Int -> Handler ()
+requireDraftExists repo did = do
+    mDraft <- liftIO $ repoGetDraft repo did
+    case mDraft of
+        Nothing -> throwApiError (NotFound ("Draft " ++ show did ++ " not found"))
+        Just _  -> pure ()
+
+-- | Id-to-name maps for the three things a what-if can name. The same three
+-- the CLI loads for its own display.
+nameMaps :: Repository
+         -> IO (Map.Map WorkerId String, Map.Map StationId String, Map.Map SkillId String)
+nameMaps repo = do
+    users <- repoListUsers repo
+    stations <- SW.listStations repo
+    skills <- SW.listSkills repo
+    pure ( Map.fromList [ (userIdToWorkerId (userId u), T.unpack uname)
+                        | u <- users, let Username uname = userName u ]
+         , Map.fromList [ (sid, T.unpack (stationName st)) | (sid, st) <- stations ]
+         , Map.fromList [ (sid, T.unpack (skillName sk)) | (sid, sk) <- skills ] )
+
+-- -----------------------------------------------------------------

@@ -123,7 +123,6 @@ mkSQLiteRepo path = do
         , repoSaveHintSession   = sqlSaveHintSession conn
         , repoLoadHintSession   = sqlLoadHintSession conn
         , repoDeleteHintSession = sqlDeleteHintSession conn
-        , repoDeleteDraftHintSessions = sqlDeleteDraftHintSessions conn
         , repoAuditSince        = sqlAuditSince conn
         })
 
@@ -1282,25 +1281,28 @@ generateToken = do
 -- Hint sessions
 -- =====================================================================
 
-sqlSaveHintSession :: Connection -> SessionId -> Int -> [Hint] -> Int -> IO ()
-sqlSaveHintSession conn (SessionId sid) draftId hints checkpoint =
+-- A draft has one what-if session, whoever typed it (ADR 0013). The table
+-- keeps the domain word; the repository functions keep their grandfathered
+-- names (ADR 0002).
+
+sqlSaveHintSession :: Connection -> Int -> [Hint] -> Int -> IO ()
+sqlSaveHintSession conn draftId hints checkpoint =
     execute conn
-        "INSERT INTO hint_sessions (session_id, draft_id, hints_json, checkpoint, updated_at) \
-        \VALUES (?, ?, ?, ?, datetime('now')) \
-        \ON CONFLICT (session_id, draft_id) DO UPDATE SET \
+        "INSERT INTO what_if_sessions (draft_id, hints_json, checkpoint, updated_at) \
+        \VALUES (?, ?, ?, datetime('now')) \
+        \ON CONFLICT (draft_id) DO UPDATE SET \
         \  hints_json = excluded.hints_json, \
         \  checkpoint = excluded.checkpoint, \
         \  updated_at = datetime('now')"
-        (sid, draftId, hintsText, checkpoint)
+        (draftId, hintsText, checkpoint)
   where
     hintsText = T.unpack (decodeUtf8 (BL.toStrict (encodeHints hints)))
 
-sqlLoadHintSession :: Connection -> SessionId -> Int -> IO (Maybe HintSessionRecord)
-sqlLoadHintSession conn (SessionId sid) draftId = do
+sqlLoadHintSession :: Connection -> Int -> IO (Maybe HintSessionRecord)
+sqlLoadHintSession conn draftId = do
     rows <- query conn
-        "SELECT hints_json, checkpoint FROM hint_sessions \
-        \WHERE session_id = ? AND draft_id = ?"
-        (sid, draftId)
+        "SELECT hints_json, checkpoint FROM what_if_sessions WHERE draft_id = ?"
+        (Only draftId)
         :: IO [(String, Int)]
     case rows of
         [(json, cp)] -> case decodeHints (BL.fromStrict (encodeUtf8 (T.pack json))) of
@@ -1308,17 +1310,9 @@ sqlLoadHintSession conn (SessionId sid) draftId = do
             Nothing    -> return Nothing  -- deserialization failure
         _ -> return Nothing
 
-sqlDeleteHintSession :: Connection -> SessionId -> Int -> IO ()
-sqlDeleteHintSession conn (SessionId sid) draftId =
-    execute conn
-        "DELETE FROM hint_sessions WHERE session_id = ? AND draft_id = ?"
-        (sid, draftId)
-
-sqlDeleteDraftHintSessions :: Connection -> Int -> IO ()
-sqlDeleteDraftHintSessions conn draftId =
-    execute conn
-        "DELETE FROM hint_sessions WHERE draft_id = ?"
-        (Only draftId)
+sqlDeleteHintSession :: Connection -> Int -> IO ()
+sqlDeleteHintSession conn draftId =
+    execute conn "DELETE FROM what_if_sessions WHERE draft_id = ?" (Only draftId)
 
 -- =====================================================================
 -- Audit log (extended queries)

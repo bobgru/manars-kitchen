@@ -444,11 +444,13 @@ rpcServer execEnv repo user =
     :<|> adminOnly user (rpcListUsers repo)
     :<|> adminOnly user (rpcDeleteUser cmdBus repo)
     -- Hints (only the owner of the hint session, or an admin)
-    :<|> sessionOwned repo user ahrSessionId (rpcAddHint repo)
-    :<|> sessionOwned repo user hsrSessionId (rpcRevertHint repo)
-    :<|> sessionOwned repo user hsrSessionId (rpcListHints repo)
-    :<|> sessionOwned repo user hsrSessionId (rpcApplyHints repo)
-    :<|> sessionOwned repo user hsrSessionId (rpcRebaseHints repo)
+    -- A what-if session is the draft's (ADR 0013): the session id in each
+    -- body is ignored, and editing one is an admin action, as in the CLI.
+    :<|> adminOnly user (rpcAddHint repo)
+    :<|> adminOnly user (rpcRevertHint repo)
+    :<|> rpcListHints repo
+    :<|> adminOnly user rpcApplyHints
+    :<|> adminOnly user (rpcRebaseHints repo)
     -- Sessions (a Normal user may only open/resume their own session)
     :<|> selfOrAdmin user rscUserId (rpcCreateSession repo)
     :<|> selfOrAdmin user rscUserId (rpcResumeSession repo)
@@ -473,25 +475,6 @@ adminOnly2 u h a b = requireAdmin u >> h a b
 -- request body; admins bypass the check.
 selfOrAdmin :: User -> (a -> Int) -> (a -> Handler b) -> a -> Handler b
 selfOrAdmin u widOf h a = requireSelfOrAdmin u (widOf a) >> h a
-
--- | Guard an RPC handler so a 'Normal' user may only touch hint
--- sessions they own. The projection extracts the session ID from the
--- request body; admins bypass the check.
-sessionOwned :: Repository -> User -> (a -> Int) -> (a -> Handler b) -> a -> Handler b
-sessionOwned repo u sidOf h a = do
-    requireSessionOwner repo u (SessionId (sidOf a))
-    h a
-
--- | Ensure the authenticated user owns the given session (or is admin).
--- Mirrors the REST check in "Server.Handlers".
-requireSessionOwner :: Repository -> User -> SessionId -> Handler ()
-requireSessionOwner repo u sid = case userRole u of
-    Admin  -> pure ()
-    Normal -> do
-        mOwner <- liftIO $ repoGetSessionOwner repo sid
-        case mOwner of
-            Just owner | owner == userId u -> pure ()
-            _ -> throwApiError (Forbidden "Forbidden")
 
 -- -----------------------------------------------------------------
 -- Audit logging helper
@@ -991,52 +974,51 @@ rpcDeleteUser cmdBus repo req = do
 
 rpcAddHint :: Repository -> AddHintReq -> Handler [Hint]
 rpcAddHint repo req = do
-    let sid = SessionId (ahrSessionId req)
-        did = ahrDraftId req
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    let did = ahrDraftId req
+    mDraft <- liftIO $ repoGetDraft repo did
+    case mDraft of
+        Nothing -> throwApiError (NotFound ("Draft " ++ show did ++ " not found"))
+        Just _  -> pure ()
+    mRec <- liftIO $ repoLoadHintSession repo did
     let currentHints = maybe [] hsHints mRec
         checkpoint   = maybe 0 hsCheckpoint mRec
         newHints     = currentHints ++ [ahrHint req]
-    liftIO $ repoSaveHintSession repo sid did newHints checkpoint
+    liftIO $ repoSaveHintSession repo did newHints checkpoint
     pure newHints
 
 rpcRevertHint :: Repository -> HintSessionRef -> Handler [Hint]
 rpcRevertHint repo ref = do
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    let did = hsrDraftId ref
+    mRec <- liftIO $ repoLoadHintSession repo did
     case mRec of
-        Nothing -> throwApiError (NotFound "No hint session found")
+        Nothing -> throwApiError (NotFound "No what-if session for this draft")
         Just rec -> do
             let hints = hsHints rec
             if null hints
-                then throwApiError (BadRequest "No hints to revert")
+                then throwApiError (BadRequest "No what-ifs to revert")
                 else do
                     let reverted = init hints
-                    liftIO $ repoSaveHintSession repo sid did reverted (hsCheckpoint rec)
+                    liftIO $ repoSaveHintSession repo did reverted (hsCheckpoint rec)
                     pure reverted
 
 rpcListHints :: Repository -> HintSessionRef -> Handler [Hint]
 rpcListHints repo ref = do
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    mRec <- liftIO $ repoLoadHintSession repo (hsrDraftId ref)
     pure $ maybe [] hsHints mRec
 
-rpcApplyHints :: Repository -> HintSessionRef -> Handler RpcOk
-rpcApplyHints repo ref = do
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    liftIO $ repoDeleteHintSession repo sid did
-    pure RpcOk
+-- | See 'Server.Handlers.handleApplyHints': the apply logic lives in the CLI
+-- only, and answering 204 here applied nothing. ADR 0013.
+rpcApplyHints :: HintSessionRef -> Handler RpcOk
+rpcApplyHints _ref =
+    throwApiError (NotImplemented
+        "Applying a what-if over RPC is not implemented; use `what-if apply` in the CLI")
 
 rpcRebaseHints :: Repository -> HintSessionRef -> Handler RebaseResultResp
 rpcRebaseHints repo ref = do
-    let sid = SessionId (hsrSessionId ref)
-        did = hsrDraftId ref
-    mRec <- liftIO $ repoLoadHintSession repo sid did
+    let did = hsrDraftId ref
+    mRec <- liftIO $ repoLoadHintSession repo did
     case mRec of
-        Nothing -> throwApiError (NotFound "No hint session found")
+        Nothing -> throwApiError (NotFound "No what-if session for this draft")
         Just rec -> do
             entries <- liftIO $ repoAuditSince repo (hsCheckpoint rec)
             let result = SHR.rebaseSession did entries (hsHints rec)
@@ -1045,7 +1027,7 @@ rpcRebaseHints repo ref = do
                     pure (RebaseResultResp "up-to-date" "No changes since last checkpoint")
                 SHR.AutoRebase n -> do
                     let newCp = if null entries then hsCheckpoint rec else aeId (last entries)
-                    liftIO $ repoSaveHintSession repo sid did (hsHints rec) newCp
+                    liftIO $ repoSaveHintSession repo did (hsHints rec) newCp
                     pure (RebaseResultResp "auto-rebase"
                         ("Auto-rebased over " ++ show n ++ " compatible changes"))
                 SHR.HasConflicts _ ->

@@ -282,15 +282,15 @@ statements =
       \  is_active INTEGER NOT NULL DEFAULT 1\
       \)"
 
-      -- Hint sessions (persistent what-if sessions)
-    , "CREATE TABLE IF NOT EXISTS hint_sessions (\
-      \  session_id INTEGER NOT NULL,\
-      \  draft_id INTEGER NOT NULL,\
+      -- What-if sessions: one per draft, whoever typed it (ADR 0013). This
+      -- replaced hint_sessions, which was keyed by login session as well;
+      -- the migration below carries the most recent row per draft across.
+    , "CREATE TABLE IF NOT EXISTS what_if_sessions (\
+      \  draft_id INTEGER PRIMARY KEY,\
       \  hints_json TEXT NOT NULL,\
       \  checkpoint INTEGER NOT NULL,\
       \  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-      \  updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
-      \  PRIMARY KEY (session_id, draft_id)\
+      \  updated_at TEXT NOT NULL DEFAULT (datetime('now'))\
       \)"
     ]
 
@@ -311,6 +311,16 @@ migrations =
     -- The station's zone label, for the problem view's station panel. Same
     -- idempotency story as the column above.
     , "ALTER TABLE stations ADD COLUMN zone TEXT"
+    -- What-if sessions belong to the draft (ADR 0013). Carry the most recently
+    -- updated of each draft's per-login rows across, then drop the old table.
+    -- INSERT OR IGNORE keeps the first row it meets per draft_id, and the
+    -- SELECT hands them over newest first. Both statements fail harmlessly on
+    -- a database that never had hint_sessions.
+    , "INSERT OR IGNORE INTO what_if_sessions \
+      \  (draft_id, hints_json, checkpoint, created_at, updated_at) \
+      \SELECT draft_id, hints_json, checkpoint, created_at, updated_at \
+      \FROM hint_sessions ORDER BY updated_at DESC, session_id DESC"
+    , "DROP TABLE hint_sessions"
     ]
 
 -- | Try to execute a statement, silently ignoring errors (for idempotent migrations).

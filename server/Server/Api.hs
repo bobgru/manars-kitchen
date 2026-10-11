@@ -56,6 +56,10 @@ type RawAPI =
     -- the mutating counterpart.
     :<|> "api" :> "drafts" :> Capture "id" Int :> "assignments"
          :> Get '[JSON] DraftAssignmentsResp
+    -- The draft's what-if session, in words. Under the domain name (ADR 0002);
+    -- the /api/hints routes below are the grandfathered mutators.
+    :<|> "api" :> "drafts" :> Capture "id" Int :> "what-ifs"
+         :> Get '[JSON] [WhatIfResp]
     :<|> "api" :> "drafts" :> Capture "id" Int :> "revalidate"
          :> Post '[JSON] RevalidateDraftResp
     :<|> "api" :> "drafts" :> Capture "id" Int :> "generate"

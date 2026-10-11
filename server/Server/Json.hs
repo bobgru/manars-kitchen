@@ -67,6 +67,7 @@ module Server.Json
       -- * Hint sessions
     , AddHintReq(..)
     , HintSessionRef(..)
+    , WhatIfResp(..)
     , RebaseResultResp(..)
       -- * Skill references (for 409 response)
     , SkillReferencesResp(..)
@@ -1292,7 +1293,23 @@ instance FromJSON WorkerSummaryResp where
 -- Hint session types
 -- -----------------------------------------------------------------
 
--- | Reference to a hint session (sessionId + draftId).
+-- | One what-if of a draft's session, with the prose the CLI would print for
+-- it, so the browser does not have to know how to name a station or a skill.
+data WhatIfResp = WhatIfResp
+    { wirWhatIf :: !Hint
+    , wirText   :: !String
+    } deriving (Show)
+
+instance ToJSON WhatIfResp where
+    toJSON r = object ["whatIf" .= wirWhatIf r, "text" .= wirText r]
+
+instance FromJSON WhatIfResp where
+    parseJSON = withObject "WhatIfResp" $ \v ->
+        WhatIfResp <$> v .: "whatIf" <*> v .: "text"
+
+-- | Reference to a hint session. @sessionId@ is accepted and ignored since
+-- ADR 0013 — a what-if session belongs to the draft — and stays in the shape
+-- only so existing clients keep working. Recorded as debt in docs/STATUS.md.
 data HintSessionRef = HintSessionRef
     { hsrSessionId :: !Int
     , hsrDraftId   :: !Int

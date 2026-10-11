@@ -35,18 +35,14 @@ spec = do
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 -- Save hint session
-                repoSaveHintSession repo sid1 did hints cp
+                repoSaveHintSession repo did hints cp
                 -- Close session 1
                 repoCloseSession repo sid1
 
-                -- Session 2: new session, load persisted hints
+                -- Session 2: a new login finds the draft's what-ifs, because
+                -- they are the draft's, not the login's (ADR 0013).
                 (_sid2, _tok2) <- repoCreateSession repo uid
-                -- Hint sessions are keyed by (session_id, draft_id).
-                -- A different session_id won't find session 1's data directly.
-                -- The real CLI uses the same session_id on resume because
-                -- the DB-persisted session record stores session_id. Let's
-                -- verify that loading with the *original* session_id works.
-                result2 <- repoLoadHintSession repo sid1 did
+                result2 <- repoLoadHintSession repo did
                 result2 `shouldBe` Just (HintSessionRecord hints cp)
                 -- Verify the hints are exactly what we saved
                 let HintSessionRecord loadedHints loadedCp = case result2 of
@@ -59,7 +55,7 @@ spec = do
         it "hints preserved after compatible mutation" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "bob"
-                (sid, _tok) <- repoCreateSession repo uid
+                _ <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
                 -- Establish checkpoint
@@ -67,7 +63,7 @@ spec = do
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
                 -- Save hint session
-                repoSaveHintSession repo sid did hints cp
+                repoSaveHintSession repo did hints cp
                 -- Make a compatible mutation (different station, doesn't touch worker 3 or skill 2)
                 publishCommand bus CLI "bob" "station create 5 dishwash"
                 -- Get entries since checkpoint
@@ -82,16 +78,16 @@ spec = do
                 -- After auto-rebase, update checkpoint and re-save
                 allEntries <- repoGetAuditLog repo
                 let newCp = aeId (last allEntries)
-                repoSaveHintSession repo sid did hints newCp
+                repoSaveHintSession repo did hints newCp
                 -- Verify hints are still intact
-                loaded <- repoLoadHintSession repo sid did
+                loaded <- repoLoadHintSession repo did
                 loaded `shouldBe` Just (HintSessionRecord hints newCp)
 
     describe "E2E: rebase with conflicting change" $ do
         it "conflict detected and resolvable by dropping conflicting hints" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "carol"
-                (sid, _tok) <- repoCreateSession repo uid
+                _ <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , WaiveOvertime (WorkerId 5)
@@ -100,7 +96,7 @@ spec = do
                 publishCommand bus CLI "carol" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
-                repoSaveHintSession repo sid did hints cp
+                repoSaveHintSession repo did hints cp
                 -- Make a conflicting mutation: revoke the exact skill we're granting
                 publishCommand bus CLI "carol" "worker revoke-skill 3 2"
                 -- Get entries since checkpoint
@@ -129,8 +125,8 @@ spec = do
                         -- Save the safe hints
                         allEntries <- repoGetAuditLog repo
                         let newCp = aeId (last allEntries)
-                        repoSaveHintSession repo sid did safeHints newCp
-                        loaded <- repoLoadHintSession repo sid did
+                        repoSaveHintSession repo did safeHints newCp
+                        loaded <- repoLoadHintSession repo did
                         loaded `shouldBe` Just (HintSessionRecord safeHints newCp)
                     other -> expectationFailure
                         ("Expected HasConflicts, got: " ++ show other)
@@ -138,13 +134,13 @@ spec = do
         it "structural change (draft commit) invalidates session" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "dave"
-                (sid, _tok) <- repoCreateSession repo uid
+                _ <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [GrantSkill (WorkerId 3) (SkillId 2)]
                 publishCommand bus CLI "dave" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
-                repoSaveHintSession repo sid did hints cp
+                repoSaveHintSession repo did hints cp
                 -- Simulate draft commit appearing in audit log
                 publishCommand bus CLI "dave" ("draft commit " ++ show did)
                 since <- repoAuditSince repo cp
@@ -158,25 +154,25 @@ spec = do
         it "commit deletes the hint session" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "eve"
-                (sid, _tok) <- repoCreateSession repo uid
+                _ <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [WaiveOvertime (WorkerId 1)]
                 publishCommand bus CLI "eve" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
-                repoSaveHintSession repo sid did hints cp
+                repoSaveHintSession repo did hints cp
                 -- Verify session exists
-                loaded <- repoLoadHintSession repo sid did
+                loaded <- repoLoadHintSession repo did
                 loaded `shouldBe` Just (HintSessionRecord hints cp)
                 -- The service layer does the cleanup; no caller help needed.
                 _ <- Draft.commitDraft repo did "test commit" False
-                afterCommit <- repoLoadHintSession repo sid did
+                afterCommit <- repoLoadHintSession repo did
                 afterCommit `shouldBe` Nothing
 
         it "discard deletes the hint session" $
             withTestRepo $ \(repo, bus) -> do
                 uid <- createTestUser repo "frank"
-                (sid, _tok) <- repoCreateSession repo uid
+                _ <- repoCreateSession repo uid
                 did <- createTestDraft repo
                 let hints = [ GrantSkill (WorkerId 3) (SkillId 2)
                             , CloseStation (StationId 1) testSlot
@@ -184,33 +180,32 @@ spec = do
                 publishCommand bus CLI "frank" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
-                repoSaveHintSession repo sid did hints cp
+                repoSaveHintSession repo did hints cp
                 _ <- Draft.discardDraft repo did
-                afterDiscard <- repoLoadHintSession repo sid did
+                afterDiscard <- repoLoadHintSession repo did
                 afterDiscard `shouldBe` Nothing
                 -- Verify draft is also gone
                 drafts <- Draft.listDrafts repo
                 length drafts `shouldBe` 0
 
-        -- The draft is gone for everyone, so every session's hints against it
-        -- are stale — not just those of the session that committed.
-        it "commit deletes every session's hints for the draft" $
+        -- One session per draft: whoever saves last is what the draft holds,
+        -- and a commit clears it for everyone (ADR 0013).
+        it "the draft holds one session, and commit clears it" $
             withTestRepo $ \(repo, bus) -> do
                 uidA <- createTestUser repo "grace"
-                uidB <- createTestUser repo "heidi"
-                (sidA, _tokA) <- repoCreateSession repo uidA
-                (sidB, _tokB) <- repoCreateSession repo uidB
+                _ <- createTestUser repo "heidi"
+                _ <- repoCreateSession repo uidA
                 did <- createTestDraft repo
                 publishCommand bus CLI "grace" "station create 1 grill"
                 entries <- repoGetAuditLog repo
                 let cp = aeId (last entries)
-                repoSaveHintSession repo sidA did [WaiveOvertime (WorkerId 1)] cp
-                repoSaveHintSession repo sidB did [WaiveOvertime (WorkerId 2)] cp
+                repoSaveHintSession repo did [WaiveOvertime (WorkerId 1)] cp
+                repoSaveHintSession repo did [WaiveOvertime (WorkerId 2)] cp
+                held <- repoLoadHintSession repo did
+                held `shouldBe` Just (HintSessionRecord [WaiveOvertime (WorkerId 2)] cp)
                 _ <- Draft.commitDraft repo did "test commit" False
-                afterA <- repoLoadHintSession repo sidA did
-                afterB <- repoLoadHintSession repo sidB did
-                afterA `shouldBe` Nothing
-                afterB `shouldBe` Nothing
+                afterCommit <- repoLoadHintSession repo did
+                afterCommit `shouldBe` Nothing
 
 -- | Helper: a test Slot
 testSlot :: Slot

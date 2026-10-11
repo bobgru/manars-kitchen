@@ -1,8 +1,8 @@
 /**
  * Drives /drafts/:id in headless Chromium: the empty draft, the populated grid,
- * flagged violations, the commit diff against the calendar, the replaced-calendar
- * warning, committing from the page itself, and the terminal state for a draft
- * that does not exist.
+ * flagged violations, the commit diff against the calendar, the draft's what-if
+ * session, the replaced-calendar warning, committing from the page itself, and
+ * the terminal state for a draft that does not exist.
  *
  * This exists because `tsc` cannot tell you a page works, and because the older
  * `drafts-page.mjs` runs against an empty database — every grid it has ever
@@ -228,6 +228,39 @@ await shotOf(sectionFor(/^Violations \(/), "d03b-violations-table");
 // yellow on the blue-yellow axis -- so it survives being read in greyscale.
 await shotOf(page.locator(".calendar-chip-flagged").first(), "d03c-flagged-chip");
 
+// --- The draft's what-if session --------------------------------------------
+// Empty to start. Then a what-if added over REST under an arbitrary session id
+// shows up on the page, because the session is the draft's (ADR 0013). The
+// draft is not a draft or calendar event, so reload rather than wait for SSE.
+await page.getByRole("heading", { name: "What-ifs (0)" }).waitFor();
+const added = await api("/api/hints", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    sessionId: 4242,
+    draftId: Number(idA),
+    hint: { tag: "WaiveOvertime", workerId },
+  }),
+});
+if (added.status !== 200) fail(`adding a what-if returned ${added.status}`);
+await page.reload({ waitUntil: "domcontentloaded" });
+await page.getByRole("heading", { name: "What-ifs (1)" }).waitFor();
+const items = page.getByTestId("what-ifs").getByRole("listitem");
+if ((await items.count()) !== 1) fail("expected one what-if listed");
+const whatIfText = await items.first().textContent();
+if (whatIfText !== `Waive overtime: ${victim.name}`) {
+  fail(`what-if text should name the worker, got "${whatIfText}"`);
+}
+console.log(`what-if listed: "${whatIfText}"`);
+await shotOf(sectionFor(/^What-ifs/), "d03d-what-ifs");
+// Applying over HTTP is not implemented and says so, instead of deleting.
+const applied = await api("/api/hints/apply", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ sessionId: 0, draftId: Number(idA) }),
+});
+if (applied.status !== 501) fail(`apply should be 501, got ${applied.status}`);
+
 // --- Move the baseline underneath it ---------------------------------------
 // A sibling draft over the same dates, committed, is exactly ADR 0003's trap.
 await page.getByRole("link", { name: "Drafts", exact: true }).click();
@@ -337,7 +370,10 @@ await step("d07-gone");
 // resource load; so is the 404 behind the terminal state above. Both are handled
 // in the UI. Anything else here is not expected.
 const unexpected = errors.filter(
-  (e) => !/409 \(Conflict\)/.test(e) && !/404 \(Not Found\)/.test(e)
+  (e) =>
+    !/409 \(Conflict\)/.test(e) &&
+    !/404 \(Not Found\)/.test(e) &&
+    !/501 \(Not Implemented\)/.test(e)
 );
 console.log(
   unexpected.length

@@ -282,13 +282,14 @@ data Repository = Repository
       -- ---------------------------------------------------------------
       -- Hint sessions (persistent what-if)
       -- ---------------------------------------------------------------
-    , repoSaveHintSession   :: SessionId -> Int -> [Hint] -> Int -> IO ()
+    , repoSaveHintSession   :: Int -> [Hint] -> Int -> IO ()
+      -- ^ The draft's what-if session: hints and the audit checkpoint they
+      -- were last rebased to. One per draft (ADR 0013).
       -- ^ session_id, draft_id, hints, checkpoint — upsert
-    , repoLoadHintSession   :: SessionId -> Int -> IO (Maybe HintSessionRecord)
+    , repoLoadHintSession   :: Int -> IO (Maybe HintSessionRecord)
       -- ^ session_id, draft_id -> Maybe (hints, checkpoint)
-    , repoDeleteHintSession :: SessionId -> Int -> IO ()
+    , repoDeleteHintSession :: Int -> IO ()
       -- ^ session_id, draft_id — delete (no-op if absent)
-    , repoDeleteDraftHintSessions :: Int -> IO ()
       -- ^ draft_id — delete every session's hints for a draft. Used when the
       -- draft goes away, which invalidates other sessions' saved hints too.
 
