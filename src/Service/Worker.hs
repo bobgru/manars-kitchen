@@ -398,7 +398,8 @@ setShiftPreferences repo wid prefs = do
     let ctx' = ctx { wcShiftPrefs = Map.insert wid prefs (wcShiftPrefs ctx) }
     repoSaveWorkerCtx repo ctx'
 
--- | Set whether a worker is weekend-only (exempt from alternating weekends off).
+-- | Set whether a worker is weekend-only: scheduled on weekends only, and exempt
+-- from the alternating-weekends-off rule.
 setWeekendOnly :: Repository -> WorkerId -> Bool -> IO ()
 setWeekendOnly repo wid val = do
     ctx <- repoLoadWorkerCtx repo

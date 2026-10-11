@@ -57,6 +57,11 @@ data SchedulerConfig = SchedulerConfig
       -- ^ Max consecutive hours before mandatory break.
     , cfgMinRestHours         :: !Double
       -- ^ Min rest hours between end of one day and start of next.
+    , cfgAlternatingWeekends  :: !Double
+      -- ^ 1.0 = nobody who worked the previous weekend may work this one,
+      -- unless weekend-only (default); 0.0 = the rule is off, in generation
+      -- and in validation alike. Weekend-only workers stay off weekdays
+      -- either way.
       -- Optimization parameters
     , cfgOptEnabled           :: !Double
       -- ^ 1.0 = optimization enabled, 0.0 = greedy only (default).
@@ -92,6 +97,7 @@ defaultConfig = SchedulerConfig
     , cfgMaxDailyTotalHours   = 16.0
     , cfgMaxConsecutiveHours  = 4.0
     , cfgMinRestHours         = 8.0
+    , cfgAlternatingWeekends  = 1.0
     , cfgOptEnabled           = 0.0
     , cfgOptTimeLimitSecs     = 30.0
     , cfgOptRandomness        = 0.3
@@ -141,6 +147,7 @@ configKeys =
     , ("max-daily-total-hours",   cfgMaxDailyTotalHours,   \v c -> c { cfgMaxDailyTotalHours = v })
     , ("max-consecutive-hours",   cfgMaxConsecutiveHours,   \v c -> c { cfgMaxConsecutiveHours = v })
     , ("min-rest-hours",          cfgMinRestHours,          \v c -> c { cfgMinRestHours = v })
+    , ("alternating-weekends",    cfgAlternatingWeekends,   \v c -> c { cfgAlternatingWeekends = v })
     , ("opt-enabled",             cfgOptEnabled,            \v c -> c { cfgOptEnabled = v })
     , ("opt-time-limit-secs",    cfgOptTimeLimitSecs,      \v c -> c { cfgOptTimeLimitSecs = v })
     , ("opt-randomness",          cfgOptRandomness,          \v c -> c { cfgOptRandomness = v })
@@ -209,8 +216,8 @@ spec = do
                 Nothing -> expectationFailure "preset not found"
 
     describe "configKeys completeness" $ do
-        it "covers all 22 parameters" $ do
-            length configKeys `shouldBe` 22
+        it "covers all 23 parameters" $ do
+            length configKeys `shouldBe` 23
 
         it "all keys are unique" $ do
             let keys = [k | (k, _, _) <- configKeys]

@@ -18,6 +18,7 @@ module Domain.Scheduler
     , canAssignSlot
       -- * Constraint checks (for validation)
     , blockedByAlternateWeekend
+    , blockedByWeekendOnly
       -- * Calendar hours helpers
     , filterExemptCalendarHours
       -- * Tests
@@ -40,7 +41,7 @@ import Domain.Skill (SkillContext(..), qualified, couldQualifyViaCrossTraining,
                      stationStaffCount, isMultiStationSlot)
 import Domain.Worker hiding (spec)
 import Domain.SchedulerConfig (SchedulerConfig(..), defaultConfig)
-import Domain.Shift (ShiftDef(..), ShiftBlock(..), defaultShifts, groupSlotsByShift)
+import Domain.Shift (ShiftDef(..), ShiftBlock(..), defaultShifts, groupSlotsByShift, isWeekend)
 import Domain.Absence (AbsenceType(..), AbsenceContext(..), emptyAbsenceContext,
                        isWorkerAvailable, requestAbsence, approveAbsence)
 
@@ -419,6 +420,7 @@ canAssignSlot ctx allowOT w st slot sched =
     && not (wouldExceedConsecutive cfg w slot sched)
     && not (violatesRestPeriod cfg w slot sched)
     && not (blockedByAlternateWeekend ctx w slot sched)
+    && not (blockedByWeekendOnly ctx w slot)
     && not avoidBlocked
     && weeklyOk && dailyOk
   where
@@ -470,7 +472,10 @@ hasMentorAtSlot ctx w slot sched =
 
 -- | Check the alternating-weekends-off rule.
 -- A worker who worked the weekend one week before this slot may not work
--- this weekend unless they are weekend-only.
+-- this weekend unless they are weekend-only. The rule is a policy the
+-- restaurant may not have: @alternating-weekends@ in the scheduler config
+-- turns it off (0.0), for generation and validation alike, since both ask
+-- here.
 --
 -- The previous weekend is read from the schedule, like every other rule
 -- that looks across days. The schedule under judgement or construction
@@ -481,6 +486,7 @@ hasMentorAtSlot ctx w slot sched =
 -- workers, which this replaced, could only ever describe the first weekend.
 blockedByAlternateWeekend :: SchedulerContext -> WorkerId -> Slot -> Schedule -> Bool
 blockedByAlternateWeekend ctx w slot sched =
+    cfgAlternatingWeekends (schConfig ctx) /= 0 &&
     let d = slotDate slot
         wctx = schWorkerCtx ctx
         isWeekendOnlyWorker = Set.member w (wcWeekendOnly wctx)
@@ -494,6 +500,15 @@ blockedByAlternateWeekend ctx w slot sched =
     in case prevWeekend of
         Nothing -> False
         Just wk -> not isWeekendOnlyWorker && workedPrevWeekend wk
+
+-- | A weekend-only worker works weekends only: a weekday slot is not theirs.
+-- The flag used to be read solely as an exemption from the alternating-weekends
+-- rule, so a "weekend-only" worker could hold a Tuesday; the scheduler and the
+-- validator now both ask this, so the word means what it says.
+blockedByWeekendOnly :: SchedulerContext -> WorkerId -> Slot -> Bool
+blockedByWeekendOnly ctx w slot =
+    Set.member w (wcWeekendOnly (schWorkerCtx ctx))
+    && not (isWeekend (slotDate slot))
 
 -- ---------------------------------------------------------------------
 -- Phase 2: Retry unfilled with overtime (slot-level)
@@ -1147,6 +1162,39 @@ spec = do
                         [schMondaySlot] (Set.fromList [schw_bob, schw_carol])
                 sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
             Set.size (byWorkerSlot schw_bob schMondaySlot sched) `shouldSatisfy` (>= 1)
+
+        -- The rule is a policy, and a restaurant without it switches it off.
+        it "is off when alternating-weekends is 0" $ do
+            let ctx = (schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [satSlot] (Set.fromList [schw_bob]))
+                        { schConfig = defaultConfig { cfgAlternatingWeekends = 0 } }
+                sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
+            Set.size (byWorkerSlot schw_bob satSlot sched) `shouldSatisfy` (>= 1)
+
+    describe "Weekend-only workers" $ do
+        let weekendOnlyCtx = schRelaxedWorkerCtx
+                { wcWeekendOnly = Set.singleton schw_bob }
+            satSlot = schMkSlot (fromGregorian 2026 5 9) 9
+
+        it "are not scheduled on a weekday" $ do
+            let ctx = schMkCtx schBasicSkillCtx weekendOnlyCtx emptyAbsenceContext
+                        [schMondaySlot] (Set.fromList [schw_bob])
+                sched = srSchedule (buildSchedule ctx)
+            Set.size (byWorkerSlot schw_bob schMondaySlot sched) `shouldBe` 0
+
+        it "are scheduled on a weekend" $ do
+            let ctx = schMkCtx schBasicSkillCtx weekendOnlyCtx emptyAbsenceContext
+                        [satSlot] (Set.fromList [schw_bob])
+                sched = srSchedule (buildSchedule ctx)
+            Set.size (byWorkerSlot schw_bob satSlot sched) `shouldSatisfy` (>= 1)
+
+        -- Switching the alternating-weekends rule off does not put them on weekdays.
+        it "stay off weekdays with the alternating-weekends rule off" $ do
+            let ctx = (schMkCtx schBasicSkillCtx weekendOnlyCtx emptyAbsenceContext
+                        [schMondaySlot] (Set.fromList [schw_bob]))
+                        { schConfig = defaultConfig { cfgAlternatingWeekends = 0 } }
+                sched = srSchedule (buildSchedule ctx)
+            Set.size (byWorkerSlot schw_bob schMondaySlot sched) `shouldBe` 0
 
     describe "Employment status: Phase 2 does not auto-assign overtime to manual-only workers" $ do
         it "OTManualOnly worker is skipped for auto-overtime" $ do

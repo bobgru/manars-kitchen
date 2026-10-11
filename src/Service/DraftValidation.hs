@@ -22,7 +22,7 @@ import Domain.Types
     ( Slot(..), Assignment(..), Schedule(..)
     )
 import Domain.Schedule (bySlot)
-import Domain.Scheduler (SchedulerContext(..), blockedByAlternateWeekend)
+import Domain.Scheduler (SchedulerContext(..), blockedByAlternateWeekend, blockedByWeekendOnly)
 import Service.Context (loadValidationContextExcluding, payPeriodChunks)
 import Domain.Skill (qualified)
 import Domain.Worker
@@ -52,6 +52,8 @@ validateAssignment ctx a sched
     | blockedByAlternateWeekend ctx w slot sched =
         Just (DraftViolation a "alternating weekends"
             "worked the previous weekend")
+    | blockedByWeekendOnly ctx w slot =
+        Just (DraftViolation a "weekend-only" "weekend-only worker on a weekday")
     -- Both hour rules use the *permissive* envelope, the one the scheduler
     -- applies when overtime is allowed. Using the strict rules here reported
     -- every legitimately-authorised overtime assignment as breaking a hard

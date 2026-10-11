@@ -90,8 +90,8 @@ data WorkerContext = WorkerContext
       -- ^ Preferred shift names per worker, e.g. ["morning"], ["afternoon", "weekend"].
       -- "weekend" is a special preference for Saturday/Sunday.
     , wcWeekendOnly  :: !(Set WorkerId)
-      -- ^ Workers who work only on weekends. These workers are exempt
-      -- from the alternating-weekends-off rule.
+      -- ^ Workers who work only on weekends: never scheduled on a weekday,
+      -- and exempt from the alternating-weekends-off rule.
     , wcSeniority    :: !(Map WorkerId Int)
       -- ^ Per-worker seniority level (default 1). Higher level allows
       -- more concurrent station assignments during multi-station hours.

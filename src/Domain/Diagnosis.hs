@@ -41,7 +41,8 @@ data UnfilledReason
       -- ^ Qualified and unassigned workers exist but would exceed
       -- their hour limits. Lists the overtime-blocked workers.
     | AllQualifiedAbsent !StationId !Slot ![WorkerId]
-      -- ^ Qualified workers exist but are on approved absence.
+      -- ^ Qualified workers exist but none works this day: on approved
+      -- absence, or weekend-only on a weekday.
     deriving (Eq, Ord, Show)
 
 -- | A suggested action to resolve unfilled positions.
@@ -92,8 +93,10 @@ diagnoseOne ctx sched (Unfilled st t _kind) =
             let required = Map.findWithDefault Set.empty st (scStationRequires sctx)
             in NoQualifiedWorkers st t required
         qs ->
-            let absent  = filter (\w -> not (isWorkerAvailable w (slotDate t) actx)) qs
-                present = filter (\w -> isWorkerAvailable w (slotDate t) actx) qs
+            let offToday w = not (isWorkerAvailable w (slotDate t) actx)
+                             || blockedByWeekendOnly ctx w t
+                absent  = filter offToday qs
+                present = filter (not . offToday) qs
                 busy    = filter (\w -> not (Set.null (byWorkerSlot w t sched))) present
                 free    = filter (\w -> Set.null (byWorkerSlot w t sched)) present
                 bounds = schPeriodBounds ctx

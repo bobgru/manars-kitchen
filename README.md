@@ -448,6 +448,7 @@ candidate workers. Higher total score = more preferred assignment.
 | `max-daily-total-hours` | 16.0 | Maximum total hours per day including overtime |
 | `max-consecutive-hours` | 4.0 | Maximum consecutive hours before a mandatory break |
 | `min-rest-hours` | 8.0 | Minimum rest between end of one day and start of next |
+| `alternating-weekends` | 1.0 | 1.0 enforces the alternating-weekends rule in generation and validation; 0.0 switches it off |
 
 ### Optimization parameters
 
@@ -496,7 +497,11 @@ An assignment is blocked if **any** of the following conditions hold:
    limit, unless overtime is allowed in the current phase and the worker
    has opted in.
 10. **Alternating weekends** -- Worker worked the previous weekend and
-    is not a weekend-only worker.
+    is not a weekend-only worker. A policy, not a constant: `config set
+    alternating-weekends 0` switches it off (ADR 0012).
+11. **Weekend-only** -- The slot is on a weekday and the worker is
+    weekend-only. Weekend-only workers are never scheduled on weekdays,
+    whatever the alternating-weekends setting.
 
 ### Soft constraints
 
