@@ -1,7 +1,8 @@
 /**
  * Drives /drafts/:id in headless Chromium: the empty draft, the populated grid,
- * flagged violations, the replaced-calendar warning, committing from the page
- * itself, and the terminal state for a draft that does not exist.
+ * flagged violations, the commit diff against the calendar, the replaced-calendar
+ * warning, committing from the page itself, and the terminal state for a draft
+ * that does not exist.
  *
  * This exists because `tsc` cannot tell you a page works, and because the older
  * `drafts-page.mjs` runs against an empty database — every grid it has ever
@@ -156,6 +157,28 @@ const violationCount = async () =>
 await violationsHeading().waitFor();
 const before = await violationCount();
 console.log(`violations straight after generate: ${before}`);
+
+// The commit diff. This week is a month out and the demo's calendar is April
+// 2026, so the calendar holds nothing here: everything the draft has is an add,
+// the summary says so, and every chip carries the "+".
+const diffText = async () => page.getByTestId("commit-diff").textContent();
+const diffCounts = async () => {
+  const m = (await diffText()).match(/Adds (\d+), keeps (\d+), drops (\d+)\./);
+  if (!m) fail(`commit diff summary not parseable: ${await diffText()}`);
+  return m ? { added: Number(m[1]), kept: Number(m[2]), dropped: Number(m[3]) } : null;
+};
+const fresh = await diffCounts();
+if (fresh) {
+  if (fresh.added !== chips || fresh.kept !== 0 || fresh.dropped !== 0) {
+    fail(`fresh week should be all adds (${chips}); got ${JSON.stringify(fresh)}`);
+  }
+  if (!/holds nothing over these dates/.test(await diffText())) {
+    fail("fresh week's summary should say the calendar holds nothing");
+  }
+  const plus = await page.locator(".calendar-chip-added").count();
+  if (plus !== chips) fail(`expected ${chips} added chips, saw ${plus}`);
+}
+console.log(`commit diff on a fresh week: ${await diffText()}`);
 await step("d02-generated-grid");
 
 // --- Manufacture a violation ------------------------------------------------
@@ -239,7 +262,41 @@ await page.getByRole("link", { name: `#${idA}`, exact: true }).click();
 await page.getByRole("heading", { name: `Draft #${idA}` }).waitFor();
 await page.getByText(/the calendar under these dates was replaced by/).waitFor();
 await page.getByRole("link", { name: /See what the calendar holds now/ }).waitFor();
+
+// The calendar now holds B. B was generated after the victim's hours were
+// capped, so it staffs their hours with somebody else: A keeps the victim's
+// assignments, which B lacks (adds), and lacks B's replacements (drops). The
+// counts have to reconcile with what the grid draws and with the draft's size.
+const moved = await diffCounts();
+if (moved) {
+  const total = Number(
+    await sectionFor("Draft")
+      .locator(".form-row")
+      .filter({ hasText: "Assignments:" })
+      .locator("span")
+      .textContent()
+  );
+  if (moved.added + moved.kept !== total) {
+    fail(`added + kept should equal ${total}; got ${JSON.stringify(moved)}`);
+  }
+  if (moved.dropped === 0) fail("expected the sibling's replacements to show as drops");
+  if (moved.kept === 0) fail("expected the siblings to agree on most of the week");
+  const ghosts = await page.locator(".calendar-chip-dropped").count();
+  if (ghosts !== moved.dropped) {
+    fail(`summary says ${moved.dropped} drops but the grid shows ${ghosts} struck-through chips`);
+  }
+  const plus = await page.locator(".calendar-chip-added").count();
+  if (plus !== moved.added) fail(`summary says ${moved.added} adds but the grid shows ${plus}`);
+}
+console.log(`commit diff after the sibling commit: ${await diffText()}`);
 await step("d05-replaced-warning");
+await shotOf(page.locator(".calendar-chip-dropped").first(), "d05b-dropped-chip");
+// The dialog repeats the summary, because that is the moment it matters.
+await page.getByRole("button", { name: "Commit" }).click();
+await page.getByRole("heading", { name: new RegExp(`Commit draft #${idA}`) }).waitFor();
+await page.locator(".modal").getByText(/Adds \d+, keeps \d+, drops \d+\./).waitFor();
+await shotOf(page.locator(".modal"), "d05c-commit-dialog-diff");
+await page.getByRole("button", { name: "Cancel" }).click();
 
 // --- Commit from the detail page -------------------------------------------
 // The draft is deleted by this, so the page has to navigate and hand its

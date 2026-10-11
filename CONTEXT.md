@@ -42,6 +42,17 @@ from the calendar; that is refused unless forced (`draft commit --force`,
 `POST /api/drafts/:id/commit/force`), and recoverable from the history snapshot
 either way. Overlapping siblings are never auto-discarded.
 
+**Commit diff**:
+What a **Commit** would do to the **Calendar** over the draft's own range, assignment
+by assignment: *added* (in the draft, not on the calendar), *unchanged* (in both), or
+*dropped* (on the calendar, not in the draft — gone once the range is replaced). Shown
+on a draft's page as a sentence, as a glyph per chip in the grid (`+`, `−` struck
+through), and again in the commit dialog. Computed against the calendar as it is now,
+not against whatever the draft was seeded from, because now is what the commit
+replaces. An assignment's identity is the full (date, hour, worker, station) tuple.
+_Avoid_: reading "dropped" as a violation. A drop is legal and often intended; it is
+only a surprise when the admin did not know the calendar held it.
+
 **Named schedule**:
 The removed artefact — a set of assignments stored under a text name, with no
 date-range identity and no relationship to the calendar. Deleted outright; there

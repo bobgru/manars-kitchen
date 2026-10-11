@@ -5,9 +5,16 @@ import {
   type DraftInfo,
   type OverlappingDrafts,
 } from "../api/drafts";
+import { describeCommitDiff, type CommitDiff } from "../lib/grid";
 
 interface Props {
   draft: DraftInfo;
+  /**
+   * What this commit does to the calendar, when the caller knows. The detail
+   * page does; the list page does not, and the dialog says nothing rather than
+   * guessing.
+   */
+  diff?: CommitDiff;
   onClose: () => void;
   /**
    * Called once the commit lands. The draft no longer exists at this point, so a
@@ -28,7 +35,7 @@ interface Props {
  * Errors render inside the dialog rather than being handed back to the page, so
  * that a failed commit leaves the note typed and the dialog open to retry.
  */
-export default function CommitDraftDialog({ draft, onClose, onCommitted }: Props) {
+export default function CommitDraftDialog({ draft, diff, onClose, onCommitted }: Props) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -114,6 +121,11 @@ export default function CommitDraftDialog({ draft, onClose, onCommitted }: Props
           not skipped. What is there now is snapshotted into calendar history
           first.
         </p>
+        {diff && (
+          <p className={diff.dropped.length > 0 ? "msg-warn" : undefined}>
+            {describeCommitDiff(diff)}
+          </p>
+        )}
         <label>
           Note{" "}
           <input

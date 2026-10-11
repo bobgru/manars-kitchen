@@ -690,6 +690,25 @@
   font-weight: 700;
 }
 
+/*
+ * The commit diff. An added chip is brighter than its neighbours -- a white left
+ * border and white text -- and carries a literal "+". A dropped chip is the
+ * calendar's, not the draft's: struck through, a dashed border, text kept light
+ * enough to read on the dark fill, and a literal "−". Neither relies on hue.
+ */
+.calendar-chip-added {
+  border-left-color: #ffffff;
+  color: #ffffff;
+}
+
+.calendar-chip-dropped {
+  text-decoration: line-through;
+  border-left-style: dashed;
+  border-left-color: #aab4c8;
+  color: #aab4c8;
+  background: #1a2744;
+}
+
 /* Weekend day columns, and dates at or behind the freeze line. */
 .calendar-col-weekend {
   background: #191926;

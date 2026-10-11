@@ -167,14 +167,16 @@ await step(
 
 await step(
   page,
-  "A draft's page: the schedule as a grid, and every assignment that breaks a rule.",
+  "A draft's page: the schedule as a grid, what committing it would change, and every " +
+    "assignment that breaks a rule.",
   async () => {
     await page.locator('a[href^="/drafts/"]').first().click();
     await page.getByRole("heading", { name: /^Draft #\d+/ }).waitFor();
     await reveal(page.getByRole("heading", { name: /^Violations/ }));
   },
-  "Violations are reported here, never silently pruned; the admin decides what to do " +
-    "about them."
+  "'On commit' counts what the calendar gains, keeps and loses over these dates — a " +
+    "commit claims its whole range. Violations are reported here, never silently pruned; " +
+    "the admin decides what to do about them."
 );
 
 await step(

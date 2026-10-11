@@ -11,13 +11,20 @@ import {
 import {
   fetchNameMaps,
   fetchFreezeLine,
+  fetchCalendar,
   type Assignment,
   type NameMaps,
 } from "../api/calendar";
 import { useEntityEvents } from "../hooks/useSSE";
 import ScheduleGrid from "./ScheduleGrid";
 import CommitDraftDialog from "./CommitDraftDialog";
-import { assignmentKey, slotHour, pad2 } from "../lib/grid";
+import {
+  assignmentKey,
+  slotHour,
+  pad2,
+  diffAgainstCalendar,
+  describeCommitDiff,
+} from "../lib/grid";
 
 const EMPTY_NAMES: NameMaps = { workers: new Map(), stations: new Map() };
 
@@ -45,6 +52,12 @@ export default function DraftDetailPage() {
   const [detail, setDetail] = useState<DraftAssignments | null>(null);
   const [names, setNames] = useState<NameMaps>(EMPTY_NAMES);
   const [freezeLine, setFreezeLine] = useState("");
+  /**
+   * The calendar over the draft's own range, for the commit diff. Null when it
+   * could not be read: the page then shows the draft without comparing it,
+   * rather than comparing it with an empty calendar and calling everything new.
+   */
+  const [calendar, setCalendar] = useState<Assignment[] | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [gone, setGone] = useState(false);
@@ -62,7 +75,7 @@ export default function DraftDetailPage() {
     try {
       setError("");
       setGone(false);
-      // The draft and its assignments are the page; the other two only decorate
+      // The draft and its assignments are the page; the others only decorate
       // it, so they fall back rather than taking it down.
       const [info, assignments, maps, freeze] = await Promise.all([
         fetchDraft(draftId),
@@ -70,10 +83,13 @@ export default function DraftDetailPage() {
         fetchNameMaps().catch(() => EMPTY_NAMES),
         fetchFreezeLine().catch(() => ""),
       ]);
+      // Needs the draft's range, so it waits for the draft.
+      const cal = await fetchCalendar(info.dateFrom, info.dateTo).catch(() => null);
       setDraft(info);
       setDetail(assignments);
       setNames(maps);
       setFreezeLine(freeze);
+      setCalendar(cal);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("404")) setGone(true);
@@ -114,6 +130,17 @@ export default function DraftDetailPage() {
   const markFor = useCallback(
     (a: Assignment) => marks.get(assignmentKey(a)),
     [marks]
+  );
+
+  /**
+   * What Commit would do to the calendar: the question this page exists to
+   * answer, and the trap ADR 0003 makes common -- a commit claims its whole
+   * range, so whatever the calendar holds there and the draft does not is
+   * dropped, not kept.
+   */
+  const diff = useMemo(
+    () => (detail && calendar ? diffAgainstCalendar(detail.assignments, calendar) : null),
+    [detail, calendar]
   );
 
   function workerName(id: number): string {
@@ -205,6 +232,18 @@ export default function DraftDetailPage() {
           <label>Assignments:</label>
           <span>{detail.assignments.length}</span>
         </div>
+        <div className="form-row">
+          <label>On commit:</label>
+          {/* Dropping something is the surprise; say it louder than the rest. */}
+          <span
+            className={diff && diff.dropped.length > 0 ? "msg-warn" : undefined}
+            data-testid="commit-diff"
+          >
+            {diff
+              ? describeCommitDiff(diff)
+              : "Could not read the calendar over these dates to compare."}
+          </span>
+        </div>
         <div className="action-bar">
           <button className="btn" disabled={busy} onClick={handleGenerate}>
             {busy ? "Generating..." : "Generate"}
@@ -234,6 +273,7 @@ export default function DraftDetailPage() {
             names={names}
             freezeLine={freezeLine}
             markFor={markFor}
+            baseline={calendar ?? undefined}
           />
         )}
       </div>
@@ -283,6 +323,7 @@ export default function DraftDetailPage() {
       {committing && (
         <CommitDraftDialog
           draft={draft}
+          diff={diff ?? undefined}
           onClose={() => setCommitting(false)}
           onCommitted={(message) => {
             // The commit deleted this draft, so there is nothing left to show

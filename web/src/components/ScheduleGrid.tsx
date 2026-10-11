@@ -7,6 +7,7 @@ import {
   assignmentKey,
   pad2,
   rangeProblem,
+  diffAgainstCalendar,
   type GridLayout,
 } from "../lib/grid";
 
@@ -25,6 +26,22 @@ interface Props {
    * violations; the calendar has nothing to flag and omits it.
    */
   markFor?: (a: Assignment) => string | undefined;
+  /**
+   * The calendar's assignments over the same range. When given, every chip is
+   * classified against it -- added by this commit, or already there -- and the
+   * calendar assignments the draft lacks are drawn too, struck through, because
+   * committing drops them. A draft wants this; the calendar, compared with
+   * itself, does not.
+   */
+  baseline?: Assignment[];
+}
+
+type ChipState = "added" | "unchanged" | "dropped";
+
+interface Chip {
+  a: Assignment;
+  /** Undefined when there is no baseline to compare with. */
+  state?: ChipState;
 }
 
 /**
@@ -42,31 +59,47 @@ export default function ScheduleGrid({
   names,
   freezeLine,
   markFor,
+  baseline,
 }: Props) {
   const columns = useMemo(
     () => buildColumns(from, to, freezeLine),
     [from, to, freezeLine]
   );
 
-  // Index once per fetch: a month grid asks ~360 questions of this map.
+  const diff = useMemo(
+    () => (baseline ? diffAgainstCalendar(assignments, baseline) : null),
+    [assignments, baseline]
+  );
+
+  // Index once per fetch: a month grid asks ~360 questions of this map. The
+  // chips are the draft's assignments plus, with a baseline, the calendar's
+  // that the draft lacks.
   const byCell = useMemo(() => {
-    const index = new Map<string, Assignment[]>();
-    for (const a of assignments) {
-      const key = cellKey(a.slot.date, slotHour(a));
+    const index = new Map<string, Chip[]>();
+    const put = (chip: Chip) => {
+      const key = cellKey(chip.a.slot.date, slotHour(chip.a));
       const bucket = index.get(key);
-      if (bucket) bucket.push(a);
-      else index.set(key, [a]);
+      if (bucket) bucket.push(chip);
+      else index.set(key, [chip]);
+    };
+    for (const a of assignments) {
+      put({
+        a,
+        state: diff ? (diff.added.has(assignmentKey(a)) ? "added" : "unchanged") : undefined,
+      });
     }
+    for (const a of diff?.dropped ?? []) put({ a, state: "dropped" });
     return index;
-  }, [assignments]);
+  }, [assignments, diff]);
 
   const hours = useMemo(() => {
     const set = new Set<number>();
     for (const c of columns) for (const h of c.open) set.add(h);
     // Station-specific hours can fall outside the defaults; never hide a slot.
     for (const a of assignments) set.add(slotHour(a));
+    for (const a of diff?.dropped ?? []) set.add(slotHour(a));
     return Array.from(set).sort((x, y) => x - y);
-  }, [columns, assignments]);
+  }, [columns, assignments, diff]);
 
   const problem = rangeProblem(from, to);
   if (problem) return <p className="msg-error">{problem}</p>;
@@ -127,20 +160,32 @@ export default function ScheduleGrid({
                       className={classes.join(" ")}
                       title={closed && !chips ? "Closed" : undefined}
                     >
-                      {chips?.map((a) => {
-                        const mark = markFor?.(a);
+                      {chips?.map(({ a, state }) => {
+                        // A dropped chip is the calendar's, not the draft's, so
+                        // no draft violation can be about it.
+                        const mark = state === "dropped" ? undefined : markFor?.(a);
+                        const classes = ["calendar-chip"];
+                        if (mark) classes.push("calendar-chip-flagged");
+                        if (state === "added") classes.push("calendar-chip-added");
+                        if (state === "dropped") classes.push("calendar-chip-dropped");
+                        const title =
+                          state === "dropped"
+                            ? "On the calendar now; committing this draft drops it"
+                            : state === "added"
+                              ? mark
+                                ? `${mark} — not on the calendar; committing adds it`
+                                : "Not on the calendar; committing adds it"
+                              : mark;
                         return (
                           <span
-                            className={
-                              mark
-                                ? "calendar-chip calendar-chip-flagged"
-                                : "calendar-chip"
-                            }
-                            key={assignmentKey(a)}
-                            title={mark}
+                            className={classes.join(" ")}
+                            key={`${state ?? ""}|${assignmentKey(a)}`}
+                            title={title}
                           >
-                            {/* The "!" carries the meaning, not the colour. */}
+                            {/* The glyphs carry the meaning, not the colour: "!"
+                                for a violation, "+" for added, "−" for dropped. */}
                             {mark ? "! " : ""}
+                            {state === "added" ? "+ " : state === "dropped" ? "− " : ""}
                             {workerName(a.worker)}{" "}
                             <span className="calendar-chip-station">
                               {stationName(a.station)}
@@ -165,6 +210,14 @@ export default function ScheduleGrid({
           {freezeLine ? ` (at or before ${freezeLine})` : ""}
         </span>
         {anyMarked && <span>! violates a hard rule; listed below</span>}
+        {diff && (
+          <>
+            <span>+ not on the calendar; committing adds it</span>
+            <span>
+              <s>− struck through</s>: on the calendar now; committing drops it
+            </span>
+          </>
+        )}
       </div>
     </>
   );

@@ -1,6 +1,14 @@
 # Project status and next steps
 
-**Last updated:** 2026-10-10 · **Alternating weekends is a switch, and weekend-only means
+**Last updated:** 2026-10-10 (later) · **The commit diff** shipped on the draft detail page:
+"On commit: adds A, keeps U, drops D" against the calendar as it is now, a `+` on every
+chip the calendar lacks, the calendar's own chips the draft lacks drawn struck through
+with a `−`, and the sentence repeated in the commit dialog. `npm run e2e:draft-detail`
+asserts the counts reconcile with the grid and with the draft's size, on a fresh week and
+after a sibling commit. Item 1 has two pieces left: the grid layouts and pivot control,
+and whose what-if session a browser means. The paragraph below is the morning's state.
+
+**2026-10-10** · **Alternating weekends is a switch, and weekend-only means
 weekend-only** (ADR 0012). The alternating-weekends rule is `alternating-weekends` in the
 scheduler config, on by default and off at 0, read by the one function the scheduler and
 the validator share. A weekend-only worker is now kept off weekdays by both, as the
@@ -250,17 +258,14 @@ One standing gotcha when you verify:
 
 ## Next steps
 
-### 1. Draft-page follow-ons — decided 2026-09-06, not started
+### 1. Draft-page follow-ons — decided 2026-09-06, in progress
 
 The `/drafts/:id` detail page shipped, which completed the drafts surface. Three pieces
 were deliberately deferred out of it, each independently shippable. The reasoning for all
-three is in **ADR 0005**.
+three is in **ADR 0005**. The commit diff shipped on 2026-10-10 — the "On commit" line,
+the `+` and struck-through `−` chips, and the same sentence in the commit dialog; the
+glossary's **Commit diff** entry says what it means. Two remain:
 
-- **The commit diff.** Per cell, *added* / *unchanged* / *about to be dropped*, comparing
-  the draft against the calendar over the draft's own range. This is the question an admin
-  actually has before pressing Commit, and it is the trap ADR 0003 makes common. It needs a
-  second data source (`fetchCalendar(draft.dateFrom, draft.dateTo)`, which already exists),
-  a three-state cell vocabulary, and a legend. Deferred only to keep the first page small.
 - **The remaining grid layouts and the pivot control.** `ScheduleGrid` takes a `layout`
   prop whose type is `GridLayout`, today a single `"hours-days"`. The agreed direction is
   *named presets*, not a generic `(rowAxis, colAxis)` pair — empty-cell meaning is

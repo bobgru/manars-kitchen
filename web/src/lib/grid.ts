@@ -127,3 +127,49 @@ export function cellKey(day: string, hour: number): string {
 export function assignmentKey(a: Assignment): string {
   return `${a.slot.date}|${a.slot.start}|${a.worker}|${a.station}`;
 }
+
+/**
+ * What committing a draft would do to the calendar over the draft's own range,
+ * assignment by assignment. A commit replaces the whole range, so a calendar
+ * assignment the draft lacks is not left alone -- it is dropped (ADR 0003).
+ */
+export interface CommitDiff {
+  /** Keys of draft assignments the calendar does not hold. */
+  added: Set<string>;
+  /** Draft assignments the calendar already holds, identically. */
+  unchanged: number;
+  /** Calendar assignments the draft lacks; gone once the draft is committed. */
+  dropped: Assignment[];
+  /** Whether the calendar holds anything at all over the range. */
+  baselineEmpty: boolean;
+}
+
+/**
+ * Compare a draft with the calendar over the same range. Identity is the full
+ * (date, hour, worker, station) tuple: the same worker moved to another station
+ * in the same hour is one drop and one add, which is what the calendar sees.
+ */
+export function diffAgainstCalendar(draft: Assignment[], calendar: Assignment[]): CommitDiff {
+  const inCalendar = new Set(calendar.map(assignmentKey));
+  const inDraft = new Set(draft.map(assignmentKey));
+  const added = new Set<string>();
+  let unchanged = 0;
+  for (const a of draft) {
+    const k = assignmentKey(a);
+    if (inCalendar.has(k)) unchanged++;
+    else added.add(k);
+  }
+  const dropped = calendar.filter((a) => !inDraft.has(assignmentKey(a)));
+  return { added, unchanged, dropped, baselineEmpty: calendar.length === 0 };
+}
+
+/** One sentence an admin can read before pressing Commit. */
+export function describeCommitDiff(d: CommitDiff): string {
+  const counts =
+    `Adds ${d.added.size}, keeps ${d.unchanged}, drops ${d.dropped.length}.`;
+  if (d.baselineEmpty) return `${counts} The calendar holds nothing over these dates.`;
+  if (d.added.size === 0 && d.dropped.length === 0) {
+    return `${counts} The draft matches the calendar; committing changes nothing.`;
+  }
+  return counts;
+}
