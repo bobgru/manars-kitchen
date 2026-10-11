@@ -213,7 +213,7 @@ stack test --pedantic manars-kitchen:test:manars-kitchen-unit-test
 stack test --pedantic manars-kitchen:test:manars-kitchen-integration-test
 ```
 
-As of 2026-10-10: 421 unit examples, 0 failures, 1 pending (a known optimizer
+As of 2026-10-11: 425 unit examples, 0 failures, 1 pending (a known optimizer
 divergence, `docs/STATUS.md` item 6); 292 integration examples, 0 failures. The
 only warnings in a clean build are three `ld: warning: -U option is redundant`
 lines from the macOS linker.

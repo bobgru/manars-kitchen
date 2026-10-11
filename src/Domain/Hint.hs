@@ -5,6 +5,7 @@ module Domain.Hint
     , Session(..)
       -- * Session operations
     , newSession
+    , newSessionOver
     , addHint
     , revertHint
     , revertTo
@@ -173,8 +174,13 @@ decodeHints = Aeson.decode
 -- The original context is preserved; hints are accumulated and
 -- can be reverted. Each step recomputes the schedule from scratch.
 data Session = Session
-    { sessOrigCtx :: !SchedulerContext
-      -- ^ The original, unmodified context.
+    { sessOrigCtxs :: ![SchedulerContext]
+      -- ^ The original, unmodified contexts: one per pay period the range
+      -- touches, in order, as 'Service.Context.BuildPlan' hands them over.
+    , sessSeed    :: !Schedule
+      -- ^ The look-back: committed calendar before the range, joined to every
+      -- build so cross-day rules see across the start, and stripped from
+      -- 'sessResult'.
     , sessHints   :: ![Hint]
       -- ^ Applied hints, most recent last.
     , sessResult  :: !ScheduleResult
@@ -185,15 +191,21 @@ data Session = Session
 -- Session operations
 -- ---------------------------------------------------------------------
 
--- | Start a new session. Runs the scheduler with no hints.
+-- | Start a new session over one context, with nothing before it. Runs the
+-- scheduler with no hints.
 newSession :: SchedulerContext -> Session
-newSession ctx = Session ctx [] (buildSchedule ctx)
+newSession ctx = newSessionOver [ctx] emptySchedule
+
+-- | Start a new session over a range: one context per pay period, in order,
+-- and the look-back to seed each build with. Runs the scheduler with no hints.
+newSessionOver :: [SchedulerContext] -> Schedule -> Session
+newSessionOver ctxs seed = recompute ctxs seed []
 
 -- | Add a hint and recompute the schedule.
 addHint :: Hint -> Session -> Session
 addHint h sess =
     let hints' = sessHints sess ++ [h]
-    in recompute (sessOrigCtx sess) hints'
+    in recompute (sessOrigCtxs sess) (sessSeed sess) hints'
 
 -- | Remove the most recent hint and recompute.
 -- Returns the session unchanged if there are no hints.
@@ -201,25 +213,35 @@ revertHint :: Session -> Session
 revertHint sess =
     case sessHints sess of
         [] -> sess
-        hs -> recompute (sessOrigCtx sess) (init hs)
+        hs -> recompute (sessOrigCtxs sess) (sessSeed sess) (init hs)
 
 -- | Revert to a given step number (0 = no hints, 1 = first hint, etc.).
 -- Clamps to valid range.
 revertTo :: Int -> Session -> Session
 revertTo n sess =
     let n' = max 0 (min n (length (sessHints sess)))
-    in recompute (sessOrigCtx sess) (take n' (sessHints sess))
+    in recompute (sessOrigCtxs sess) (sessSeed sess) (take n' (sessHints sess))
 
 -- | Current step number (number of applied hints).
 sessionStep :: Session -> Int
 sessionStep = length . sessHints
 
--- | Recompute a session from context and hints.
-recompute :: SchedulerContext -> [Hint] -> Session
-recompute ctx hints =
-    let (ctx', seed) = applyHints hints ctx
-        result = buildScheduleFrom seed ctx'
-    in Session ctx hints result
+-- | Recompute a session from its contexts, look-back and hints. The hints
+-- apply to every period's context; the pins they seed are the same whichever
+-- context they came from, so the first's are taken. The look-back is stripped
+-- from the result: it is context, not something the session proposes.
+recompute :: [SchedulerContext] -> Schedule -> [Hint] -> Session
+recompute ctxs lookBack hints =
+    let applied = map (applyHints hints) ctxs
+        pins = case applied of
+            ((_, s):_) -> s
+            []         -> emptySchedule
+        seed = Schedule (Set.union (unSchedule lookBack) (unSchedule pins))
+        built = buildScheduleFromPeriods seed (map fst applied)
+        result = built
+            { srSchedule = Schedule (Set.difference (unSchedule (srSchedule built))
+                                                    (unSchedule lookBack)) }
+    in Session ctxs lookBack hints result
 
 -- ---------------------------------------------------------------------
 -- Hint application
@@ -367,6 +389,25 @@ spec = do
             let sess = newSession hBaseCtx
             srSchedule (sessResult sess) `shouldBe` srSchedule (buildSchedule hBaseCtx)
             sessionStep sess `shouldBe` 0
+
+    describe "newSessionOver" $ do
+        -- The look-back is seen by the rules and absent from the result: bob
+        -- worked the Saturday before, so he may not work this Saturday, and
+        -- that Saturday is not in what the session proposes.
+        it "seeds the build with the look-back and strips it from the result" $ do
+            let lastSat = hMkSlot (fromGregorian 2026 5 2) 9
+                thisSat = hMkSlot (fromGregorian 2026 5 9) 9
+                lookBack = assign (Assignment hw_bob hst_grill lastSat) emptySchedule
+                ctx = hBaseCtx { schSlots = [thisSat], schWorkers = Set.fromList [hw_bob] }
+                sess = newSessionOver [ctx] lookBack
+                sched = srSchedule (sessResult sess)
+            Set.size (byWorkerSlot hw_bob thisSat sched) `shouldBe` 0
+            Set.size (byWorkerSlot hw_bob lastSat sched) `shouldBe` 0
+            sessSeed sess `shouldBe` lookBack
+
+        it "over one context with no look-back is newSession" $ do
+            srSchedule (sessResult (newSessionOver [hBaseCtx] emptySchedule))
+                `shouldBe` srSchedule (sessResult (newSession hBaseCtx))
 
     describe "addHint / revertHint" $ do
         it "adding a hint changes the result" $ do

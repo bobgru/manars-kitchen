@@ -91,7 +91,10 @@ a draft's assignments by hand; there is no direct assign/unassign on a draft.
 
 **What-if session**:
 The accumulated, persisted what-ifs for one draft, replayable and rebasable
-against later changes to the underlying data. It belongs to the draft — one per
+against later changes to the underlying data. Its schedule is rebuilt from the
+same plan **Generate** builds from — one context per **Pay period**, the
+**Look-back** seeding every build — so a what-if is judged under the rules and
+hours the real build would see. It belongs to the draft — one per
 draft, whoever typed it, from the CLI or the browser — and goes when the draft is
 committed or discarded. Read over REST as `GET /api/drafts/:id/what-ifs`, each
 entry in the words the CLI prints; shown on the draft's page as a list, not drawn

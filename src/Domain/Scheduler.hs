@@ -11,6 +11,7 @@ module Domain.Scheduler
       -- * Scheduling
     , buildSchedule
     , buildScheduleFrom
+    , buildScheduleFromPeriods
     , buildScheduleFromPerturbed
       -- * Scoring (for optimizer)
     , scoreShiftWorker
@@ -407,6 +408,23 @@ assignWorkerToShift ctx allowOT w st slots sched =
         then assign (Assignment w st slot) sc
         else sc
     ) sched slots
+
+-- | Build a range one pay period at a time, in order, each period seeded with
+-- everything built so far — so the rules that look across days see the previous
+-- period, and each period's hours are measured against its own bounds. A
+-- 'SchedulerContext' holds one period; a range that spans two, built in one go,
+-- judged the second against the first's totals (ADR 0011). Unfilled lists
+-- concatenate; overtime maps add, since each is one period's.
+buildScheduleFromPeriods :: Schedule -> [SchedulerContext] -> ScheduleResult
+buildScheduleFromPeriods seed = foldl step (ScheduleResult seed [] Map.empty)
+  where
+    step acc ctx =
+        let r = buildScheduleFrom (srSchedule acc) ctx
+        in ScheduleResult
+            { srSchedule = srSchedule r
+            , srUnfilled = srUnfilled acc ++ srUnfilled r
+            , srOvertime = Map.unionWith (+) (srOvertime acc) (srOvertime r)
+            }
 
 -- | Can a worker be assigned to a specific slot at a station?
 canAssignSlot :: SchedulerContext -> Bool -> WorkerId -> StationId
@@ -1170,6 +1188,27 @@ spec = do
                         { schConfig = defaultConfig { cfgAlternatingWeekends = 0 } }
                 sched = srSchedule (buildScheduleFrom bobWorkedMay2 ctx)
             Set.size (byWorkerSlot schw_bob satSlot sched) `shouldSatisfy` (>= 1)
+
+    describe "buildScheduleFromPeriods" $ do
+        -- Two one-slot periods: the second is built on top of the first, and
+        -- both land in one result.
+        it "builds each period seeded with the last and concatenates" $ do
+            let slotA = schMkSlot (fromGregorian 2026 5 4) 9
+                slotB = schMkSlot (fromGregorian 2026 5 11) 9
+                ctxA = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [slotA] (Set.fromList [schw_bob])
+                ctxB = (schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [slotB] (Set.fromList [schw_bob]))
+                        { schPeriodBounds = (fromGregorian 2026 5 11, fromGregorian 2026 5 18) }
+                sched = srSchedule (buildScheduleFromPeriods emptySchedule [ctxA, ctxB])
+            Set.size (byWorkerSlot schw_bob slotA sched) `shouldSatisfy` (>= 1)
+            Set.size (byWorkerSlot schw_bob slotB sched) `shouldSatisfy` (>= 1)
+
+        it "with one period is buildScheduleFrom" $ do
+            let ctx = schMkCtx schBasicSkillCtx schRelaxedWorkerCtx emptyAbsenceContext
+                        [schMondaySlot] schAllWorkers
+            srSchedule (buildScheduleFromPeriods emptySchedule [ctx])
+                `shouldBe` srSchedule (buildScheduleFrom emptySchedule ctx)
 
     describe "Weekend-only workers" $ do
         let weekendOnlyCtx = schRelaxedWorkerCtx

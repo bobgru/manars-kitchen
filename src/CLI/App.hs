@@ -28,14 +28,14 @@ import Data.Time.Clock (getCurrentTime, utctDay)
 
 import Domain.Types
 import Domain.Shift (ShiftDef(..))
-import Domain.Skill (Skill(..), SkillContext(..), stationClosedSlots)
+import Domain.Skill (Skill(..), SkillContext(..))
 import qualified Domain.Scheduler as Scheduler
 import qualified Domain.Diagnosis as Diagnosis
 import qualified Domain.Calendar as Calendar
 import Domain.Worker (WorkerContext(..), OvertimeModel(..), PayPeriodTracking(..))
 import Domain.PayPeriod (PayPeriodConfig(..), parsePayPeriodType, showPayPeriodType,
                          payPeriodBounds, defaultPayPeriodConfig)
-import Domain.Hint (Hint(..), Session(..), newSession, addHint, revertHint, revertTo, sessionStep)
+import Domain.Hint (Hint(..), Session(..), newSessionOver, addHint, revertHint, revertTo, sessionStep)
 import Domain.SchedulerConfig (presetNames, configToMap)
 import Domain.Pin (PinnedAssignment(..), PinSpec(..))
 import Domain.Absence
@@ -52,6 +52,7 @@ import qualified Service.Absence as SA
 import qualified Service.Config as SC
 import qualified Service.Calendar as Cal
 import qualified Service.Draft as Draft
+import Service.Context (BuildPlan(..), loadBuildPlan, stripLookBack)
 import Service.DraftValidation
     ( DraftViolation(..), pruneDraftViolations, calendarReplacedUnder )
 import qualified Service.FreezeLine as Freeze
@@ -530,49 +531,23 @@ handleCommand st cmd = case cmd of
         case resolved of
             Left err -> putStrLn err
             Right did -> do
+                mDraft <- Draft.loadDraft (asRepo st) did
                 sched <- repoLoadDraftAssignments (asRepo st) did
-                if Set.null (unSchedule sched)
-                    then putStrLn "No assignments in this draft."
-                    else do
-                        users <- repoListUsers (asRepo st)
-                        stations <- SW.listStations (asRepo st)
-                        skills <- SW.listSkills (asRepo st)
-                        skillCtx   <- repoLoadSkillCtx (asRepo st)
-                        workerCtx  <- repoLoadWorkerCtx (asRepo st)
-                        absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-                        shifts     <- repoLoadShifts (asRepo st)
-                        cfg        <- repoLoadSchedulerConfig (asRepo st)
-                        let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                            slots = Set.toList $ Set.map assignSlot (unSchedule sched)
-                            closed = stationClosedSlots skillCtx slots
-                            slotDates = map slotDate slots
-                            periodBounds = case slotDates of
-                                [] -> (toEnum 0, toEnum 0)
-                                ds -> (minimum ds, addDays 1 (maximum ds))
-                            ctx = Scheduler.SchedulerContext
-                                { Scheduler.schSkillCtx    = skillCtx
-                                , Scheduler.schWorkerCtx   = workerCtx
-                                , Scheduler.schAbsenceCtx  = absenceCtx
-                                , Scheduler.schSlots       = slots
-                                , Scheduler.schWorkers     = workers
-                                , Scheduler.schClosedSlots = closed
-                                , Scheduler.schShifts      = shifts
-                                , Scheduler.schConfig      = cfg
-                                , Scheduler.schPeriodBounds = periodBounds
-                                , Scheduler.schCalendarHours = Map.empty
-                                }
-                            result = Scheduler.buildScheduleFrom sched ctx
-                            diags = Diagnosis.diagnose result ctx
-                            workerNames = Map.fromList
-                                [ (userIdToWorkerId (userId u), T.unpack uname)
-                                | u <- users, let Username uname = userName u ]
-                            stationNames = Map.fromList
-                                [ (StationId sid, T.unpack (stationName station))
-                                | (StationId sid, station) <- stations ]
-                            skillNames = Map.fromList
-                                [ (sid, T.unpack (skillName sk))
-                                | (sid, sk) <- skills ]
-                        putStr (displayDiagnosis workerNames stationNames skillNames result diags)
+                case mDraft of
+                    Nothing -> putStrLn "Draft not found."
+                    Just draft
+                        | Set.null (unSchedule sched) -> putStrLn "No assignments in this draft."
+                        | otherwise -> do
+                            -- Built the way `draft generate` builds: over every
+                            -- open slot of the draft's range, with the calendar
+                            -- before it and the period's committed hours in view.
+                            -- Diagnosing over only the slots the draft already
+                            -- fills, under no hours, found nothing to explain.
+                            workers <- Draft.activeWorkerIds (asRepo st)
+                            (result, diags) <- diagnoseRange st workers
+                                (diDateFrom draft, diDateTo draft) sched
+                            (workerNames, stationNames, skillNames) <- loadNameMaps st
+                            putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
     -- Calendar
     CalendarView startStr endStr ->
@@ -645,44 +620,9 @@ handleCommand st cmd = case cmd of
             if Set.null (unSchedule sched)
                 then putStrLn "No calendar assignments in this range."
                 else do
-                    users <- repoListUsers (asRepo st)
-                    stations <- SW.listStations (asRepo st)
-                    skills <- SW.listSkills (asRepo st)
-                    skillCtx   <- repoLoadSkillCtx (asRepo st)
-                    workerCtx  <- repoLoadWorkerCtx (asRepo st)
-                    absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-                    shifts     <- repoLoadShifts (asRepo st)
-                    cfg        <- repoLoadSchedulerConfig (asRepo st)
-                    let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-                        slots = Set.toList $ Set.map assignSlot (unSchedule sched)
-                        closed = stationClosedSlots skillCtx slots
-                        slotDates = map slotDate slots
-                        periodBounds = case slotDates of
-                            [] -> (toEnum 0, toEnum 0)
-                            ds -> (minimum ds, addDays 1 (maximum ds))
-                        ctx = Scheduler.SchedulerContext
-                            { Scheduler.schSkillCtx    = skillCtx
-                            , Scheduler.schWorkerCtx   = workerCtx
-                            , Scheduler.schAbsenceCtx  = absenceCtx
-                            , Scheduler.schSlots       = slots
-                            , Scheduler.schWorkers     = workers
-                            , Scheduler.schClosedSlots = closed
-                            , Scheduler.schShifts      = shifts
-                            , Scheduler.schConfig      = cfg
-                            , Scheduler.schPeriodBounds = periodBounds
-                            , Scheduler.schCalendarHours = Map.empty
-                            }
-                        result = Scheduler.buildScheduleFrom sched ctx
-                        diags = Diagnosis.diagnose result ctx
-                        workerNames = Map.fromList
-                            [ (userIdToWorkerId (userId u), T.unpack uname)
-                            | u <- users, let Username uname = userName u ]
-                        stationNames = Map.fromList
-                            [ (StationId sid, T.unpack (stationName station))
-                            | (StationId sid, station) <- stations ]
-                        skillNames = Map.fromList
-                            [ (sid, T.unpack (skillName sk))
-                            | (sid, sk) <- skills ]
+                    workers <- Draft.activeWorkerIds (asRepo st)
+                    (result, diags) <- diagnoseRange st workers (s, e) sched
+                    (workerNames, stationNames, skillNames) <- loadNameMaps st
                     putStr (displayDiagnosis workerNames stationNames skillNames result diags)
 
     CalendarHistory -> do
@@ -1720,37 +1660,29 @@ buildSessionForDraft st did hints = do
     case mDraft of
         Nothing -> return (Left "Draft not found.")
         Just draft -> do
-            let dateFrom = diDateFrom draft
-                dateTo   = diDateTo draft
-            users <- repoListUsers (asRepo st)
-            let workers = Set.fromList [userIdToWorkerId (userId u) | u <- users]
-            let slots = Calendar.generateDateRangeSlots Calendar.defaultHours dateFrom dateTo Set.empty
-            skillCtx   <- repoLoadSkillCtx (asRepo st)
-            workerCtx  <- repoLoadWorkerCtx (asRepo st)
-            absenceCtx <- repoLoadAbsenceCtx (asRepo st)
-            cfg        <- repoLoadSchedulerConfig (asRepo st)
-            shifts     <- repoLoadShifts (asRepo st)
-            mPpc       <- SC.loadPayPeriodConfig (asRepo st)
-            let ppc = maybe defaultPayPeriodConfig id mPpc
-                periodBounds = payPeriodBounds ppc dateFrom
-            calHrs <- Draft.computeCalendarHours (asRepo st) workerCtx
-                          (fst periodBounds) (snd periodBounds)
-            let closed = stationClosedSlots skillCtx slots
-                ctx = Scheduler.SchedulerContext
-                    { Scheduler.schSkillCtx    = skillCtx
-                    , Scheduler.schWorkerCtx   = workerCtx
-                    , Scheduler.schAbsenceCtx  = absenceCtx
-                    , Scheduler.schSlots       = slots
-                    , Scheduler.schWorkers     = workers
-                    , Scheduler.schClosedSlots = closed
-                    , Scheduler.schShifts      = shifts
-                    , Scheduler.schConfig      = cfg
-                    , Scheduler.schPeriodBounds = periodBounds
-                    , Scheduler.schCalendarHours = calHrs
-                    }
-                baseSess = newSession ctx
+            -- The same plan `draft generate` builds from: one context per pay
+            -- period, the period's committed hours, and the calendar before
+            -- the draft seeding every build. A session used to build under the
+            -- draft's own dates as the period with the whole period's calendar
+            -- counted, so a what-if judged hours over the wrong window and could
+            -- not see last weekend.
+            workers <- Draft.activeWorkerIds (asRepo st)
+            plan <- loadBuildPlan (asRepo st) workers (diDateFrom draft, diDateTo draft)
+            let baseSess = newSessionOver (bpContexts plan) (bpLookBack plan)
                 sess = foldl (flip addHint) baseSess hints
             return (Right sess)
+
+-- | Rebuild a range from an existing schedule the way `draft generate` would,
+-- and explain what still could not be filled. The schedule is the seed — a
+-- draft's assignments, or a calendar slice — joined to the look-back.
+diagnoseRange :: AppState -> Set.Set WorkerId -> (Day, Day) -> Schedule
+              -> IO (Scheduler.ScheduleResult, [Diagnosis.Diagnosis])
+diagnoseRange st workers range sched = do
+    plan <- loadBuildPlan (asRepo st) workers range
+    let seed = Schedule (Set.union (unSchedule (bpLookBack plan)) (unSchedule sched))
+        built = Scheduler.buildScheduleFromPeriods seed (bpContexts plan)
+        result = stripLookBack plan built
+    return (result, Diagnosis.diagnoseOver (bpContexts plan) result)
 
 -- | Run the rebase flow for a stale hint session.
 runRebase :: AppState -> HintState -> IO (Either String HintState)

@@ -4,6 +4,7 @@ module Domain.Diagnosis
     , UnfilledReason(..)
       -- * Diagnosis
     , diagnose
+    , diagnoseOver
     , diagnoseUnfilled
       -- * Tests
     , spec
@@ -76,6 +77,17 @@ diagnose result ctx =
             ++ suggestHires ctx unfilled
             ++ suggestTrainings ctx sched unfilled
     in rankDiagnoses (nub suggestions)
+
+-- | 'diagnose' over a result built through several pay periods: each
+-- unfilled position is explained under the context whose period holds its
+-- day, since the hour rules the explanation consults are that period's.
+diagnoseOver :: [SchedulerContext] -> ScheduleResult -> [Diagnosis]
+diagnoseOver ctxs result = nub (concatMap perPeriod ctxs)
+  where
+    perPeriod ctx =
+        let days = Set.fromList (map slotDate (schSlots ctx))
+            inPeriod (Unfilled _ t _) = Set.member (slotDate t) days
+        in diagnose result { srUnfilled = filter inPeriod (srUnfilled result) } ctx
 
 -- | Diagnose why a single station/slot is unfilled.
 diagnoseUnfilled :: SchedulerContext -> Schedule -> Unfilled -> UnfilledReason

@@ -14,6 +14,10 @@ module Service.Context
     , loadValidationContextExcluding
     , calendarHoursOutside
     , payPeriodChunks
+      -- * Building over a range
+    , BuildPlan(..)
+    , loadBuildPlan
+    , stripLookBack
     ) where
 
 import Data.Map.Strict (Map)
@@ -24,8 +28,10 @@ import Data.Time (Day, DiffTime, addDays)
 import Domain.Types
     ( WorkerId, Slot(..), Assignment(..), Schedule(..)
     )
-import Domain.Scheduler (SchedulerContext(..), filterExemptCalendarHours)
+import Domain.Scheduler (SchedulerContext(..), ScheduleResult(..), filterExemptCalendarHours)
 import Domain.Worker (WorkerContext)
+import Domain.Calendar (generateDateRangeSlots, defaultHours)
+import Domain.Skill (stationClosedSlots)
 import Domain.PayPeriod (defaultPayPeriodConfig, payPeriodBounds)
 import Repo.Types (Repository(..))
 import qualified Service.Calendar as Cal
@@ -110,6 +116,57 @@ payPeriodChunks repo (from, to) = do
                      chunkTo = min to (addDays (-1) endExcl)
                  in (d, chunkTo) : go (addDays 1 chunkTo)
     return (go from)
+
+-- | Everything a build over an inclusive date range starts from.
+--
+-- Four callers build or re-build a schedule over a range — generating a draft,
+-- diagnosing a draft, diagnosing a calendar slice, and a what-if session — and
+-- three of them used to assemble this by hand with the range as the pay period,
+-- no committed hours and no look-back, so `draft diagnose` filled the gaps it
+-- was asked to explain and called the draft fully staffed. One plan, built here.
+data BuildPlan = BuildPlan
+    { bpFrom         :: !Day
+      -- ^ The range's first day; everything before it in a result is look-back.
+    , bpLookBackFrom :: !Day
+      -- ^ Seven days before 'bpFrom'.
+    , bpLookBack     :: !Schedule
+      -- ^ The committed calendar over those seven days. Joins every seed so the
+      -- rules that look across days see across the range's start; stripped from
+      -- results with 'stripLookBack'.
+    , bpContexts     :: ![SchedulerContext]
+      -- ^ One per pay period the range touches, in order, each with its slots,
+      -- closed station-slots and workers filled in, and with the look-back and
+      -- every earlier period excluded from its calendar hours because the seed
+      -- already holds them.
+    }
+
+-- | The plan for building over a range with the given workers. See 'BuildPlan'.
+loadBuildPlan :: Repository -> Set.Set WorkerId -> (Day, Day) -> IO BuildPlan
+loadBuildPlan repo workers (from, to) = do
+    let lookBackFrom = addDays (-7) from
+    lookBack <- Cal.loadCalendarSlice repo lookBackFrom (addDays (-1) from)
+    chunks <- payPeriodChunks repo (from, to)
+    ctxs <- mapM (contextFor lookBackFrom) chunks
+    return BuildPlan
+        { bpFrom = from, bpLookBackFrom = lookBackFrom
+        , bpLookBack = lookBack, bpContexts = ctxs }
+  where
+    contextFor lookBackFrom chunk@(cFrom, cTo) = do
+        let slots = generateDateRangeSlots defaultHours cFrom cTo Set.empty
+        base <- loadValidationContextExcluding repo chunk (lookBackFrom, cTo)
+        return base
+            { schSlots       = slots
+            , schWorkers     = workers
+            , schClosedSlots = stationClosedSlots (schSkillCtx base) slots
+            }
+
+-- | Drop the look-back from a result built over a plan: it was context, not
+-- material, and nothing downstream should save, show or count it.
+stripLookBack :: BuildPlan -> ScheduleResult -> ScheduleResult
+stripLookBack plan r =
+    r { srSchedule = Schedule (Set.filter inRange (unSchedule (srSchedule r))) }
+  where
+    inRange a = slotDate (assignSlot a) >= bpFrom plan
 
 -- | Committed calendar hours per worker inside a pay period but outside a given
 -- range, with exempt workers filtered out.

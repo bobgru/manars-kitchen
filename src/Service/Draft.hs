@@ -18,34 +18,28 @@ module Service.Draft
     , seedDraft
     , mergePinCalendar
       -- * Calendar hours
-    , computeCalendarHours
     ) where
 
 import Control.Monad (foldM)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
-import Data.Time (Day, DiffTime, addDays)
+import Data.Time (Day)
 
 import Domain.Types
     ( WorkerId, WorkerStatus(..), Slot(..), Assignment(..), Schedule(..)
     )
-import Domain.Scheduler
-    ( SchedulerContext(..), ScheduleResult(..)
-    , filterExemptCalendarHours
-    )
+import Domain.Scheduler (ScheduleResult(..))
 import Service.Optimize (optimizeSchedule)
 import Service.PubSub (TopicBus, ProgressEvent)
-import Domain.Worker
-    ( WorkerContext(..), wouldExceedConsecutive, violatesRestPeriod, wouldExceedDailyTotal )
+import Domain.Worker (wouldExceedConsecutive, violatesRestPeriod, wouldExceedDailyTotal)
 import Domain.SchedulerConfig (SchedulerConfig)
 import Domain.Shift (defaultShifts)
-import Domain.Skill (stationClosedSlots)
 import Domain.Pin (expandPins)
 import Domain.Schedule (assign)
 import Domain.Calendar (generateDateRangeSlots, defaultHours)
 import Repo.Types (Repository(..), DraftInfo(..))
-import Service.Context (loadValidationContextExcluding, payPeriodChunks)
+import Service.Context (BuildPlan(..), loadBuildPlan, stripLookBack)
 import qualified Service.Calendar as Cal
 import qualified Service.FreezeLine as Freeze
 
@@ -180,22 +174,6 @@ mergePinCalendar cfg (Schedule calAssigns) (Schedule pinAssigns) =
         let s = assignSlot a
         in (assignWorker a, slotDate s, slotStart s)
 
--- | Pre-compute calendar hours per worker for a date range.
--- Loads calendar assignments and sums unique slot durations per worker,
--- filtering out exempt (per-diem) workers.
-computeCalendarHours :: Repository -> WorkerContext -> Day -> Day
-                     -> IO (Map.Map WorkerId DiffTime)
-computeCalendarHours repo wctx periodStart periodEnd = do
-    calSched <- Cal.loadCalendarSlice repo periodStart periodEnd
-    let assignments = Set.toList (unSchedule calSched)
-        -- Group by (worker, slot) to avoid counting multi-station duplicates
-        uniqueSlots = Set.fromList [(assignWorker a, assignSlot a) | a <- assignments]
-        -- Sum durations per worker
-        raw = Set.foldl' (\acc (w, s) ->
-            Map.insertWith (+) w (slotDuration s) acc)
-            Map.empty uniqueSlots
-    return (filterExemptCalendarHours wctx raw)
-
 -- | Run the scheduler within a draft: load draft assignments as seed,
 -- build slot list for date range, optimize, save result.
 --
@@ -218,42 +196,23 @@ generateDraft repo draftId mWorkers progressBus = do
                 dateTo   = diDateTo draft
             workers <- maybe (activeWorkerIds repo) return mWorkers
             seed <- repoLoadDraftAssignments repo draftId
-            -- The seven days of calendar before the draft join the seed, as
-            -- they join the schedule the validator judges: a draft starting
-            -- Monday must see Sunday's closing shift for the rest rule, and
-            -- last weekend for the alternating-weekends rule. They are in the
-            -- seed so the optimizer preserves them, and are stripped before
-            -- the draft is saved.
-            let lookBackFrom = addDays (-7) dateFrom
-            lookBack <- Cal.loadCalendarSlice repo lookBackFrom (addDays (-1) dateFrom)
-            let seeded = Schedule (Set.union (unSchedule lookBack) (unSchedule seed))
-            -- One build per pay period the range touches, in order. The
-            -- context holds one period and every hour rule measures against
-            -- it, so a two-week draft built in one go judged week two against
-            -- week one's total. Each period's build is seeded with everything
-            -- built so far, so cross-boundary rules see the previous period
-            -- and the optimizer leaves it alone.
-            chunks <- payPeriodChunks repo (dateFrom, dateTo)
-            built <- foldM (generatePeriod workers lookBackFrom)
-                           (ScheduleResult seeded [] Map.empty) chunks
-            let inDraft a = slotDate (assignSlot a) >= dateFrom
-                result = built
-                    { srSchedule = Schedule (Set.filter inDraft (unSchedule (srSchedule built))) }
+            -- The plan: the seven days of calendar before the draft, which
+            -- join the seed as they join the schedule the validator judges —
+            -- a draft starting Monday must see Sunday's closing shift for the
+            -- rest rule, and last weekend for the alternating-weekends rule —
+            -- and one context per pay period the range touches, since the
+            -- context holds one period and a two-week draft built in one go
+            -- judged week two against week one's total. Each period's build is
+            -- seeded with everything built so far, so cross-boundary rules see
+            -- the previous period and the optimizer leaves it alone.
+            plan <- loadBuildPlan repo workers (dateFrom, dateTo)
+            let seeded = Schedule (Set.union (unSchedule (bpLookBack plan)) (unSchedule seed))
+            built <- foldM generatePeriod (ScheduleResult seeded [] Map.empty) (bpContexts plan)
+            let result = stripLookBack plan built
             repoSaveDraftAssignments repo draftId (srSchedule result)
             return (Right result)
   where
-    generatePeriod workers lookBackFrom acc chunk@(cFrom, cTo) = do
-        let slots = generateDateRangeSlots defaultHours cFrom cTo Set.empty
-        -- The shared loader decides the pay-period bounds and the calendar
-        -- hours; this caller supplies only what is genuinely its own. The
-        -- look-back and every earlier period are in the seed, so their hours
-        -- must not be counted again through the calendar hours map.
-        base <- loadValidationContextExcluding repo chunk (lookBackFrom, cTo)
-        let ctx = base
-                { schSlots       = slots
-                , schWorkers     = workers
-                , schClosedSlots = stationClosedSlots (schSkillCtx base) slots
-                }
+    generatePeriod acc ctx = do
         r <- optimizeSchedule ctx (srSchedule acc) progressBus
         -- Overtime is per period, so the maps add rather than overwrite.
         return ScheduleResult

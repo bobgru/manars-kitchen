@@ -1,6 +1,20 @@
 # Project status and next steps
 
-**Last updated:** 2026-10-10 (night) · **A what-if session belongs to the draft** (ADR 0013),
+**Last updated:** 2026-10-11 · **One way to build over a range.** The three CLI sites that
+assembled a `SchedulerContext` by hand — `draft diagnose`, `calendar diagnose` and the
+what-if session — now start from `Service.Context.loadBuildPlan`, the same plan
+`draft generate` builds from: one context per pay period with that period's committed
+hours, the seven-day look-back joined to the seed and stripped from the result, every open
+slot of the range rather than only the slots already filled, and the active workers.
+`buildScheduleFromPeriods` and `diagnoseOver` carry the per-period discipline of ADR 0011
+into pure code, and a `Session` holds one context per period and its look-back. Generation
+numbers are unchanged. `draft diagnose 1` in the tour still says the draft is fully
+staffed, and now that is true of what it did: a second scheduler pass over a generated
+draft genuinely fills most of what the first left, which is a new finding in item 7, not a
+context bug. This closes the context family of ADR 0005, 0006, 0010 and 0011 as far as it
+is known. The paragraph below is the previous state.
+
+**2026-10-10 (night)** · **A what-if session belongs to the draft** (ADR 0013),
 which closes item 1. The `what_if_sessions` table is keyed by draft alone, migrated from the
 per-login `hint_sessions`; `GET /api/drafts/:id/what-ifs` returns the session in the CLI's
 words and the draft page lists it under the grid; editing is admin-only over HTTP and the
@@ -625,6 +639,17 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   8080, Vite on 5173, which drivers want a fresh database and which want a
   demo-seeded one, and the Playwright and zsh traps that cost time here. Verified
   on macOS only; the browser driver has never been run in the Linux container.
+- **A second `draft generate` pass fills slots the first left, and `draft diagnose`
+  reports the rerun, not the draft.** Over the tour's first week, generating the same
+  draft three times goes 405 / 8 → 409 / 1 → 412 / 1: the greedy fill, re-seeded with its
+  own output, places workers it could not place in one pass. `draft diagnose` rebuilds
+  from the draft's assignments the way `draft generate` would and explains what *that*
+  leaves unfilled — so on a once-generated draft with 10 holes it reports none, which is
+  accurate about the rerun and useless about the draft. Found 2026-10-11 while putting
+  diagnose on the shared build plan. Two honest shapes, not chosen: generate iterates to a
+  fixed point, so a draft's unfilled count means what it says; or diagnose explains the
+  draft's holes as they stand and says separately how many a further pass would fill.
+  Wants a short grill.
 - **The tour never staffs a Sunday afternoon.** Sunday Apr 12 holds grill 10–12,
   beverage 7–11 and register 7–11 and nothing after noon, with the original fixture and
   with the weekend crew alike (ADR 0012 measured both), although the stations are open
@@ -642,15 +667,6 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   but is untested. Finally, the draft page lists what-ifs but cannot draw the schedule
   they produce, because that schedule is rebuilt in a CLI session and never stored;
   drawing it needs a service that builds the session server-side.
-- **The what-if and hint sessions build their own `SchedulerContext`.** Three sites in
-  `src/CLI/App.hs` (around lines 546, 658 and 1735) use the draft's range as the pay
-  period, an empty committed-hours map, and no look-back — so a what-if judges hours over
-  the wrong window and cannot see the calendar before the draft. Next instance of the
-  family in ADR 0005, 0006, 0010 and 0011. The fix is to seed them from
-  `Service.Context.loadValidationContextExcluding` the way `generateDraft` now does.
-  A visible symptom: `draft diagnose 1` in the tour says "No unfilled positions — schedule
-  is fully staffed" about a draft that generated with 10 unfilled, because it rebuilds
-  the schedule under its own context with nobody's hours counted and fills them itself.
 - **`dailyOk` in `canAssignSlot` ignores the overtime model.** Fixed next to it on
   2026-09-07, but not fixed *by* it. When overtime is allowed, the daily ceiling is
   `wouldExceedDailyTotal` (16h) for **everyone** — an `OTManualOnly` worker gets a
