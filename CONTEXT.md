@@ -99,8 +99,9 @@ _Avoid_: using "problem" loosely for a bug in the software.
 
 **Violation**:
 The kind of **Problem** where an existing assignment breaks a hard rule — skill
-qualification, absence, alternating weekends, period or daily hours, rest period,
-consecutive hours, avoid-pairing. Something is scheduled that should not be.
+qualification, absence, alternating weekends, weekend-only, period or daily hours,
+rest period, consecutive hours, avoid-pairing. Something is scheduled that should
+not be.
 _Avoid_: treating overtime as one. Overtime past a worker's regular hours is a
 violation only when it is not **Authorised overtime**, and the daily rule's hard
 ceiling is the maximum hours in a day, not the non-overtime threshold below it.
@@ -192,6 +193,16 @@ _Avoid_: a rule that consults a fact about "before the range" through any channe
 but the schedule. Such a fact describes the first day only, and is wrong for every
 later day of a range that is longer than the fact's horizon.
 
+**Alternating weekends**:
+The rule that nobody who worked either day of one weekend works the next, read from
+the schedule under judgement or construction (see **Look-back**). A policy the
+restaurant may or may not have, so it is a switch in the scheduler config —
+`alternating-weekends`, on by default — and the scheduler and the validator both ask
+the same function, so turning it off turns it off everywhere. **Weekend-only
+workers** are exempt. See ADR 0012.
+_Avoid_: calling it a constraint of the scheduler. It is a rule of the restaurant
+that the scheduler enforces when told to.
+
 **Relative date**:
 A date argument written against today rather than as a calendar date — `today`,
 `today+N`, `today-N`. Accepted anywhere a date is, and the reason a **Scenario**
@@ -216,6 +227,14 @@ An authenticated account. Every user has a role; only some users are workers.
 **Worker**:
 A user who can be assigned to stations. A worker's identity *is* their user
 identity — `WorkerId` and `UserId` denote the same person.
+
+**Weekend-only worker**:
+A **Worker** who works weekends only: never scheduled on a weekday, and exempt from
+**Alternating weekends**, so they can carry every weekend while the rest of the staff
+alternate around them. Set with `worker set-weekend-only`. Before ADR 0012 the flag
+was only the exemption, and a "weekend-only" worker could hold a Tuesday.
+_Avoid_: using it for a worker who merely *prefers* weekends — that is the `weekend`
+shift preference, a scoring bonus, not a rule.
 
 **Station**:
 A place in the kitchen that needs staffing, requiring particular skills. May carry

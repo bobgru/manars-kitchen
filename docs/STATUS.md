@@ -1,14 +1,22 @@
 # Project status and next steps
 
-**Last updated:** 2026-10-08 · **The scheduler sees what the validator sees** (ADR 0011).
+**Last updated:** 2026-10-10 · **Alternating weekends is a switch, and weekend-only means
+weekend-only** (ADR 0012). The alternating-weekends rule is `alternating-weekends` in the
+scheduler config, on by default and off at 0, read by the one function the scheduler and
+the validator share. A weekend-only worker is now kept off weekdays by both, as the
+documentation always claimed. The fixture gained a four-person weekend-only crew, so the
+tour's two weeks after a committed week land at 399 / 13 and 399 / 11 instead of 340 / 63
+and 342 / 55, and Apr 18–19 is staffed. Item 1, the draft-page follow-ons, is the next
+piece of work, starting with the commit diff. The paragraphs below are the previous state.
+
+**2026-10-08** · **The scheduler sees what the validator sees** (ADR 0011).
 A draft is generated one pay period at a time, the seven-day calendar look-back joins the
 generation seed, and the alternating-weekends rule reads the previous weekend from the
 schedule instead of a set computed once — which also turns the rule on in generation,
 reversing the 2026-09-07 decision. Both of the tour's committed fortnights now report no
 violations (Apr 20 – May 3 had 69). The cost is visible: the tour's week after a committed
 week drops from 408 / 8 to 340 / 63, and its weekend holds nobody, because the fixture has
-no weekend-only workers and the rule has no switch. That is the open question now at the
-top of item 7. Item 1, the draft-page follow-ons, is the next piece of work. The two
+no weekend-only workers and the rule has no switch. (Settled 2026-10-10, ADR 0012.) The two
 paragraphs below are the previous state.
 
 **2026-09-25 (evening)** · **item 2, the problem view, is complete: piece 5,
@@ -178,6 +186,16 @@ a rename command: the reference is an ID in some grammars and a name in others.
 `cmOldName`/`cmNewName` are event-transport only — not persisted in `audit_log`,
 not reproduced by `render`. Publishers that know a name the command string cannot
 carry attach it with `Audit.CommandMeta.withRenameNames`.
+
+**Verification baseline at ADR 0012 (2026-10-10)** — everything above, plus the
+`alternating-weekends` switch, the weekend-only weekday rule in scheduler, validator and
+diagnosis, and the fixture's weekend crew:
+
+- `stack clean && stack build --pedantic` — clean, no warnings.
+- 288 integration + 421 unit examples, 0 failures, 1 pending (the weekend divergence in
+  item 6), run sequentially.
+- Both fixtures replay to `Replay complete.`; all three browser demos complete every step
+  headless.
 
 **Verification baseline at ADR 0011 (2026-10-08)** — everything above, plus per-period
 generation, the generation look-back and the schedule-based alternating-weekends rule:
@@ -430,9 +448,9 @@ distributed unevenly, so two ~45-hour weeks breach an 80-hour fortnight, and re-
 draft after its sibling commits then deletes nearly the whole week. Every draft in the
 replay landed between 395 and 410 assignments with 0–11 unfilled, and the cross-draft
 revalidation demo still removes 70 assignments, so its teaching point survives. (Since
-ADR 0011 the two drafts that follow a committed week land near 340 / 60 instead — the
-alternating-weekends rule, now applied in generation, keeps everyone who worked the
-committed weekend off the next one. See item 7.)
+ADR 0011 the alternating-weekends rule applies in generation, and since ADR 0012 the
+fixture has a weekend-only crew to carry the weekends: the two drafts that follow a
+committed week land at 399 / 13 and 399 / 11, and the revalidation demo removes 24.)
 
 The cost: **the demo no longer exercises a non-weekly `PayPeriodType`.** Demonstrating
 `biweekly` needs somewhere to show the violations it causes, and nothing in the CLI reports
@@ -601,22 +619,21 @@ turn an OOM into a slow response — worth having regardless of the root cause, 
   8080, Vite on 5173, which drivers want a fresh database and which want a
   demo-seeded one, and the Playwright and zsh traps that cost time here. Verified
   on macOS only; the browser driver has never been run in the Linux container.
-- **The alternating-weekends rule has no switch, and it empties the tour's second
-  weekend.** Since ADR 0011 the scheduler applies the rule, as the validator always did:
-  nobody who worked either day of the previous weekend may work this one, unless they
-  are weekend-only. `demo/restaurant.txt` sets no worker weekend-only and every worker
-  works the first weekend, so Apr 18–19 holds no assignments and the problem view reports
-  both days unscheduled; the same happens to the draft after the third commit. Before,
-  the scheduler staffed those weekends and the validator flagged every hour of them (the
-  69 violations noted on 2026-09-25). Decide: a `SchedulerConfig` switch for the rule, a
-  per-worker opt-out, or a second weekend crew in the fixture. Wants a grill; it changes
-  what the restaurant's rule means, not how it is enforced.
+- **The tour never staffs a Sunday afternoon.** Sunday Apr 12 holds grill 10–12,
+  beverage 7–11 and register 7–11 and nothing after noon, with the original fixture and
+  with the weekend crew alike (ADR 0012 measured both), although the stations are open
+  to 17:00 and workers with hours left exist. The hours staffed are not a shift block
+  either. Found 2026-10-10; not diagnosed. Start from how the Sunday closings of pizza,
+  sandwich and busboy interact with the shift-block fill in `Domain.Scheduler`.
 - **The what-if and hint sessions build their own `SchedulerContext`.** Three sites in
   `src/CLI/App.hs` (around lines 546, 658 and 1735) use the draft's range as the pay
   period, an empty committed-hours map, and no look-back — so a what-if judges hours over
   the wrong window and cannot see the calendar before the draft. Next instance of the
   family in ADR 0005, 0006, 0010 and 0011. The fix is to seed them from
   `Service.Context.loadValidationContextExcluding` the way `generateDraft` now does.
+  A visible symptom: `draft diagnose 1` in the tour says "No unfilled positions — schedule
+  is fully staffed" about a draft that generated with 10 unfilled, because it rebuilds
+  the schedule under its own context with nobody's hours counted and fills them itself.
 - **`dailyOk` in `canAssignSlot` ignores the overtime model.** Fixed next to it on
   2026-09-07, but not fixed *by* it. When overtime is allowed, the daily ceiling is
   `wouldExceedDailyTotal` (16h) for **everyone** — an `OTManualOnly` worker gets a

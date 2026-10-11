@@ -15,7 +15,7 @@ or when the behaviour under test depends on distinct millisecond timestamps.
 
 | file | what it is |
 |---|---|
-| `restaurant.txt` | The restaurant itself — shifts, skills, stations, workers, their skills, hour caps, statuses, preferences, seniority. No dates and no schedule. Included by the scenarios rather than copied into each. |
+| `restaurant.txt` | The restaurant itself — shifts, skills, stations, workers, their skills, hour caps, statuses, preferences, seniority. Eleven weekday workers and a four-person weekend-only crew, so the alternating-weekends rule has somebody to alternate with (ADR 0012). No dates and no schedule. Included by the scenarios rather than copied into each. |
 | `restaurant-setup.txt` | The feature tour: every CLI surface in order, against a **fixed historical week** (April 2026). The default for `--demo` with no file. |
 | `current-period.txt` | A restaurant whose calendar covers **today**. This is the fixture to use when looking at the web UI. |
 

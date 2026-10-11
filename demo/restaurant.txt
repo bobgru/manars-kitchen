@@ -102,7 +102,7 @@ station close-day pizza sunday
 station close-day sandwich sunday
 station close-day busboy sunday
 
-# === Workers (11 + admin) ===
+# === Workers (11 weekday + admin; the weekend crew is at the end) ===
 user create marco changeme normal
 user create lucia changeme normal
 user create tony changeme normal
@@ -249,3 +249,48 @@ worker set-shift-pref alex midday afternoon
 # Marco and Alex are experienced: seniority level 2
 worker set-seniority marco 2
 worker set-seniority alex 2
+
+# === Weekend crew ===
+# Four weekend-only workers. The alternating-weekends rule keeps anyone who
+# worked a weekend off the next one, and with only the eleven above every one of
+# them works the first weekend and nobody may work the second (ADR 0011). A
+# weekend-only worker is never scheduled on a weekday and is exempt from the
+# rule, so these four carry every weekend and the weekday staff alternate around
+# them to fill what four people cannot cover. Sixteen hours a period is two
+# eight-hour days. The rule itself is `config set alternating-weekends 0` to
+# switch off; see ADR 0012.
+user create dana changeme normal
+user create omar changeme normal
+user create priya changeme normal
+user create leo changeme normal
+
+# Between them: grill, pizza, sandwich and beverage, which imply busboy and
+# register — every station that opens on a weekend.
+worker grant-skill dana grill
+worker grant-skill dana sandwich
+worker grant-skill omar pizza
+worker grant-skill omar beverage
+worker grant-skill priya sandwich
+worker grant-skill priya beverage
+worker grant-skill leo grill
+worker grant-skill leo pizza
+
+worker set-hours dana 16
+worker set-hours omar 16
+worker set-hours priya 16
+worker set-hours leo 16
+
+worker set-weekend-only dana on
+worker set-weekend-only omar on
+worker set-weekend-only priya on
+worker set-weekend-only leo on
+
+worker set-prefs dana grill sandwich
+worker set-prefs omar pizza beverage
+worker set-prefs priya sandwich beverage
+worker set-prefs leo grill pizza
+
+worker set-shift-pref dana weekend
+worker set-shift-pref omar weekend
+worker set-shift-pref priya weekend
+worker set-shift-pref leo weekend
